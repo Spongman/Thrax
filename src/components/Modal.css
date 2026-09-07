@@ -16,6 +16,8 @@
 	min-width: 320px;
 	max-width: min(720px, calc(100vw - 32px));
 	max-height: calc(100vh - 64px);
+	/* Nothing it holds is drawn outside its border, however narrow it is taken. */
+	overflow: hidden;
 	background: var(--surface-raised);
 	border: 1px solid var(--border-strong);
 	border-radius: var(--radius);
@@ -27,6 +29,8 @@
 /* A moved dialog is positioned itself, so the backdrop must not stretch it. */
 .modal-movable {
 	align-self: flex-start;
+	/* The same floor the resize gesture keeps, so the corner follows the pointer. */
+	min-height: 160px;
 }
 
 .modal-grip {

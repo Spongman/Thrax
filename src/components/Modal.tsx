@@ -28,7 +28,7 @@ export interface ModalFrame {
 	height: number
 }
 
-const MIN_WIDTH = 280
+const MIN_WIDTH = 320
 const MIN_HEIGHT = 160
 /** Enough of the header must stay on screen to grab it again. */
 const KEEP_ON_SCREEN = 48

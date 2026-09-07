@@ -63,7 +63,7 @@ describe('moving and resizing a dialog', () => {
 	it('grows and shrinks, but not below a usable size', () => {
 		const frame = { left: 0, top: 0, width: 400, height: 300 }
 		expect(resizeFrame(frame, 100, 50)).toMatchObject({ width: 500, height: 350 })
-		expect(resizeFrame(frame, -1000, -1000)).toMatchObject({ width: 280, height: 160 })
+		expect(resizeFrame(frame, -1000, -1000)).toMatchObject({ width: 320, height: 160 })
 	})
 })
 
@@ -88,6 +88,6 @@ describe('reopening a dialog where it was left', () => {
 			.toEqual({ left: 8, top: 8, width: 984, height: 784 })
 		// Never below what the dialog needs, even on a tiny window.
 		expect(fitOnScreen({ left: 0, top: 0, width: 400, height: 300 }, { width: 120, height: 100 }))
-			.toMatchObject({ width: 280, height: 160 })
+			.toMatchObject({ width: 320, height: 160 })
 	})
 })
