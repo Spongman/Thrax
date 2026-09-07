@@ -2,7 +2,7 @@ import React from 'react'
 import './HistoryView.css'
 import { disassemble } from '../core/disassembler'
 import { formatWord } from '../core/format'
-import { KIND_CALL, KIND_CONSOLE, KIND_CONSOLE_RESET, KIND_CP0, KIND_DISPLAY, KIND_EXIT_CODE, KIND_FLAG, KIND_FP, KIND_HALTED, KIND_HEAP_POINTER, KIND_HI_LO, KIND_INPUT, KIND_MEMORY, KIND_QUEUED_INPUT, KIND_REGISTER, KIND_SLEEP } from '../core/effectKind'
+import { KIND_CALL, KIND_CONSOLE, KIND_CONSOLE_RESET, KIND_CP0, KIND_DISPLAY, KIND_EXIT_CODE, KIND_FLAG, KIND_FP, KIND_HALTED, KIND_HEAP_POINTER, KIND_HI_LO, KIND_INPUT, KIND_MEMORY, KIND_QUEUED_INPUT, KIND_REGISTER, KIND_SERVICE, KIND_SLEEP } from '../core/effectKind'
 import type { EffectStore } from '../core/effectStore'
 import type { HistoryLog } from '../core/historyLog'
 import type { Effect, HistoryEntry } from '../core/types'
@@ -85,6 +85,9 @@ export function describeEffect(effect: Effect, applied: boolean): DescribedEffec
 		case KIND_EXIT_CODE: return at({ subject: 'exit code' })
 		case KIND_SLEEP: return at({ subject: 'sleep' })
 		case KIND_INPUT: return at({ subject: 'read', detail: JSON.stringify(effect.value) })
+		// Only the service knows what its slots mean, so the chip names the
+		// service and leaves it at that.
+		case KIND_SERVICE: return at({ subject: effect.name })
 	}
 }
 
