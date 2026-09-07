@@ -27,24 +27,19 @@
  * way around this without a wall-clock or a cycle-accurate timing model, and
  * neither exists in THRAX.
  *
- * H2b (onRewind) HONESTY NOTE. T1's counters invert by decrementing - order
- * does not matter to a plain count. MarsBot's track is order-sensitive twice
- * over: position is a running vector sum (heading at each tick, not just a
- * count, determines where a later step lands), and the track array's write
- * index advances only on leave-track edges, so "undo the last N ticks" is not
- * a closed-form inverse the way a counter's is. But the whole accumulator's
- * state is a handful of numbers plus a short segment list - small enough that
- * the practical answer isn't event-inversion at all, it's checkpointing: keep
- * one full snapshot of {heading, moving, leavingTrack, x, y, trackIndex,
- * track} per instruction (or per state-changing write), tagged with the
- * instruction count, bounded the same way the machine's own history already
- * is by backstepLimit; `onRewind(toInstructionCount)` finds the last
- * checkpoint at or before that count and restores it wholesale, discarding
- * later ones. Harder than a counter (nothing to simply subtract), easier than
- * a cache's LRU order (nothing to replay - just copy the struct back).
+ * ROLLING BACK. The bot's position is a running vector sum and its track array
+ * advances only on leave-track edges, so there is no closed-form inverse of
+ * "undo the last N ticks" the way there is for a counter.  What there is
+ * instead is the machine's own log: as an instruction moves the bot, it says
+ * what the bot held before, and the machine hands that back when the run moves
+ * over that instruction either way (see `core/service`).  So the bot rolls back
+ * exactly, at the cost of a few columns per tick and nothing at all while it is
+ * standing still.
  */
 
 import type { Decoded } from '../core/decoder'
+import type { MachineConfig } from '../core/observer'
+import type { MachineService, ServiceRecorder, ServiceState } from '../core/service'
 import type { ExecutionObserver } from '../core/observer'
 
 const ADDR_HEADING = 0xffff8010
@@ -73,7 +68,19 @@ export interface MarsBotSnapshot {
 	segments: TrackSegment[]
 }
 
-export class MarsBot implements ExecutionObserver {
+/** What the bot calls the parts of itself, in the records it keeps. */
+const SLOT_X = 0
+const SLOT_Y = 1
+const SLOT_POINT = 2
+const SLOT_HEADING = 3
+const SLOT_MOVING = 4
+const SLOT_LEAVING = 5
+const SLOT_INDEX = 6
+
+export class MarsBot implements ExecutionObserver, MachineService {
+	readonly name = 'Mars Bot'
+	/** Where changes are filed, once the machine has offered somewhere. */
+	private recorder: ServiceRecorder | null = null
 	private heading = 0
 	private leavingTrack = false
 	private moving = false
@@ -82,6 +89,57 @@ export class MarsBot implements ExecutionObserver {
 	/** arrayOfTrack/trackIndex, grown as needed rather than fixed at 256. */
 	private track: Point[] = []
 	private trackIndex = 0
+
+	onConfigure(machine: MachineConfig) {
+		this.recorder = machine.services?.register(this) ?? null
+	}
+
+	/**
+	 * Puts one part of the bot back to what it was, and hands over what it held
+	 * instead, so the same record serves going back and going forward.
+	 */
+	exchange(slot: number, value: number, payload: unknown): ServiceState {
+		switch (slot) {
+			case SLOT_X: {
+				const held = this.x
+				this.x = payload as number
+				return { value, payload: held }
+			}
+			case SLOT_Y: {
+				const held = this.y
+				this.y = payload as number
+				return { value, payload: held }
+			}
+			// The point the tick overwrote, which is empty until a tick lands on it.
+			case SLOT_POINT: {
+				const held = this.track[value]
+				if (payload === undefined) delete this.track[value]
+				else this.track[value] = payload as Point
+				return { value, payload: held }
+			}
+			case SLOT_HEADING: {
+				const held = this.heading
+				this.heading = value
+				return { value: held }
+			}
+			case SLOT_MOVING: {
+				const held = this.moving
+				this.moving = value !== 0
+				return { value: held ? 1 : 0 }
+			}
+			case SLOT_LEAVING: {
+				const held = this.leavingTrack
+				this.leavingTrack = value !== 0
+				return { value: held ? 1 : 0 }
+			}
+			case SLOT_INDEX: {
+				const held = this.trackIndex
+				this.trackIndex = value
+				return { value: held }
+			}
+		}
+		return { value }
+	}
 
 	reset() {
 		this.heading = 0
@@ -105,12 +163,14 @@ export class MarsBot implements ExecutionObserver {
 	onMemoryWrite(address: number, _size: number, value: number) {
 		switch (address >>> 0) {
 			case ADDR_HEADING:
+				this.recorder?.keep(SLOT_HEADING, this.heading)
 				this.heading = value
 				break
 			case ADDR_LEAVE_TRACK:
 				this.setLeavingTrack(value !== 0)
 				break
 			case ADDR_MOVE:
+				this.recorder?.keep(SLOT_MOVING, this.moving ? 1 : 0)
 				this.moving = value !== 0
 				break
 			// ADDR_WHERE_X/Y and anything else in the bot's range: ignored,
@@ -131,6 +191,9 @@ export class MarsBot implements ExecutionObserver {
 
 	/**: one unit step in the current heading's direction. */
 	private advance() {
+		this.recorder?.keep(SLOT_X, 0, this.x)
+		this.recorder?.keep(SLOT_Y, 0, this.y)
+		this.recorder?.keep(SLOT_POINT, this.trackIndex, this.track[this.trackIndex])
 		const mathAngle = ((360 - this.heading) + 90) % 360
 		const radians = (mathAngle * Math.PI) / 180
 		this.x += Math.cos(radians)
@@ -145,6 +208,9 @@ export class MarsBot implements ExecutionObserver {
 	/** four-way branch, collapsed to the two edges that act. */
 	private setLeavingTrack(want: boolean) {
 		if (want === this.leavingTrack) return
+		this.recorder?.keep(SLOT_LEAVING, this.leavingTrack ? 1 : 0)
+		this.recorder?.keep(SLOT_POINT, this.trackIndex, this.track[this.trackIndex])
+		this.recorder?.keep(SLOT_INDEX, this.trackIndex)
 		this.leavingTrack = want
 		this.track[this.trackIndex] = { x: this.x, y: this.y }
 		this.trackIndex += 1

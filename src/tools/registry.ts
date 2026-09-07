@@ -101,11 +101,19 @@ function watch(entry: ToolEntry): ToolState {
 			tool[name]!(...args)
 		}
 	}
+	// A tool holding state of its own is rolled back by the machine rather than
+	// by anything it is told, so its reading moves on a seek whether or not it
+	// listens for one.  Without this its panel would go on showing what it read
+	// before the step back.
+	if (typeof tool.exchange === 'function' && observer.onSeek === undefined) {
+		observer.onSeek = () => { state.version += 1 }
+	}
 	return state
 }
 
 export class ToolRegistry<E extends Entries> {
-	private readonly states: ToolState[]
+	/** Grows and shrinks: a tool may join a run in progress and leave again. */
+	private states: ToolState[]
 	/** The run the wanted tools watch, and the machine it is on. */
 	private simulator: { observers: ExecutionObserver[] } | null = null
 	private machine: MachineConfig | null = null
