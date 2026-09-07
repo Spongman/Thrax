@@ -8,7 +8,8 @@
  * tool is one entry below rather than an edit in every one of those places.
  */
 
-import type { ExecutionObserver, MachineConfig } from '../core/observer'
+import type { ExecutionObserver, InstructionHistory, MachineConfig } from '../core/observer'
+import type { ServiceHost } from '../core/service'
 import { readStoredSetting, writeStoredSetting } from '../hooks/useStoredState'
 import { BranchHistoryTable, DEFAULT_BHT_SETTINGS } from './branchHistory'
 import { CacheSimulator, DEFAULT_CACHE_SETTINGS } from './cache'
@@ -47,6 +48,13 @@ export interface ToolEntry<Key extends string = string, Settings = unknown, Snap
 }
 
 type Entries = readonly ToolEntry[]
+
+/** What a run has to offer for the tools to be attached to it. */
+interface ToolSource {
+	observers: ExecutionObserver[]
+	executionHistory?: InstructionHistory
+	register?: ServiceHost['register']
+}
 
 /** Every tool's snapshot, keyed by tool. */
 export type ToolViews<E extends Entries> = {
@@ -118,9 +126,16 @@ export class ToolRegistry<E extends Entries> {
 	 * count every address, a great deal more: the whole set attached made a run
 	 * twenty-five times slower whether or not a single panel was open.
 	 */
-	attach(simulator: { observers: ExecutionObserver[] }, machine: MachineConfig) {
+	attach(simulator: ToolSource, machine: MachineConfig) {
 		this.simulator = simulator
-		this.machine = machine
+		// A tool that rebuilds itself by replaying the run reads the machine's own
+		// log, and one that holds state of its own signs up to roll back with it,
+		// so both are handed over here rather than left to each caller to pass.
+		this.machine = {
+			...machine,
+			history: machine.history ?? simulator.executionHistory,
+			services: machine.services ?? (simulator.register ? simulator as ServiceHost : undefined),
+		}
 		this.resetAll()
 		for (const state of this.states) {
 			state.attached = false

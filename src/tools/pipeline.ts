@@ -18,7 +18,8 @@
 import type { Decoded } from '../core/decoder'
 import { Op, OP_NAMES } from '../core/ops'
 import type { ExecutionObserver, MachineConfig } from '../core/observer'
-import { RewindLog, type RewindableState } from './rewindLog'
+import { Replay, type Replayable } from './replay'
+import { StepLog } from './stepLog'
 
 export const STAGES = ['IF', 'ID', 'EX', 'MEM', 'WB'] as const
 export type Stage = (typeof STAGES)[number]
@@ -76,6 +77,8 @@ export interface PipelineRow {
 	cause: StallCause
 	/** Register number this instruction waited on, for the tooltip. */
 	blockedOn: number | null
+	/** Index of the instruction whose result it waited for, or null. */
+	blockedBy: number | null
 	/** Cycles the front end lost because the instruction before it redirected. */
 	flushed: number
 	/** What the predictor said about this branch, or null when it is not one. */
@@ -194,6 +197,8 @@ export function registerEffects(decoded: Decoded): RegisterEffects {
 }
 
 interface InFlight {
+	/** Index of the instruction, so a row can name what it waited for. */
+	index: number
 	writes: number
 	isLoad: boolean
 	ex: number
@@ -201,24 +206,7 @@ interface InFlight {
 	wb: number
 }
 
-interface PipelineState {
-	rows: PipelineRow[]
-	recent: InFlight[]
-	index: number
-	previous: [number, number, number, number, number] | null
-	lastCycle: number
-	firstCycle: number
-	dataStalls: number
-	loadUseStalls: number
-	controlFlushes: number
-	pendingFlush: number
-	predictions: number
-	mispredictions: number
-	predictor: Map<number, number>
-	addresses: Map<number, PipelineAddressStats>
-}
-
-export class PipelineModel implements ExecutionObserver {
+export class PipelineModel implements ExecutionObserver, Replayable {
 	private settings: PipelineSettings
 	private rows: PipelineRow[] = []
 	private recent: InFlight[] = []
@@ -247,46 +235,26 @@ export class PipelineModel implements ExecutionObserver {
 	 * describes the machine, not the run.
 	 */
 	delaySlots = false
-	private readonly history = new RewindLog<PipelineState>()
-	private readonly state: RewindableState<PipelineState> = {
-		capture: () => ({
-			rows: this.rows.slice(),
-			recent: this.recent.slice(),
-			index: this.index,
-			previous: this.previous === null ? null : [...this.previous],
-			lastCycle: this.lastCycle,
-			firstCycle: this.firstCycle,
-			dataStalls: this.dataStalls,
-			loadUseStalls: this.loadUseStalls,
-			controlFlushes: this.controlFlushes,
-			pendingFlush: this.pendingFlush,
-			predictions: this.predictions,
-			mispredictions: this.mispredictions,
-			predictor: new Map(this.predictor),
-			addresses: new Map([...this.addresses].map(([key, stats]) => [key, { ...stats }])),
-		}),
-		restore: (state) => {
-			this.rows = state.rows
-			this.recent = state.recent
-			this.index = state.index
-			this.previous = state.previous
-			this.lastCycle = state.lastCycle
-			this.firstCycle = state.firstCycle
-			this.dataStalls = state.dataStalls
-			this.loadUseStalls = state.loadUseStalls
-			this.controlFlushes = state.controlFlushes
-			this.pendingFlush = state.pendingFlush
-			this.predictions = state.predictions
-			this.mispredictions = state.mispredictions
-			this.predictor = state.predictor
-			this.addresses = state.addresses
-			// Whatever branch reported last belongs to a run that is being redone.
-			this.lastStats = null
-		},
-	}
+	/**
+	 * Which way each conditional branch went.  The one thing a replay cannot
+	 * work out for itself: the machine's log holds what ran, not what was
+	 * decided, and the instruction after a branch is the handler's when an
+	 * interrupt lands in between.  Recorded only while the tool is watching.
+	 */
+	private readonly branches = new StepLog<boolean>()
+	private readonly replay = new Replay(this)
 
 	onSeek(to: number) {
-		this.history.seek(to, this.state)
+		this.replay.seek(to)
+	}
+
+	/** One instruction again, and the branch outcome noted against it. */
+	replayStep(address: number, decoded: Decoded, instructionCount: number) {
+		this.apply(address, decoded, instructionCount)
+		const index = this.branches.indexFrom(instructionCount)
+		if (this.branches.countAt(index) === instructionCount) {
+			this.resolveBranch(address, this.branches.valueAt(index)!)
+		}
 	}
 
 	constructor(settings: PipelineSettings = DEFAULT_PIPELINE_SETTINGS) {
@@ -304,14 +272,17 @@ export class PipelineModel implements ExecutionObserver {
 			|| next.prediction !== this.settings.prediction
 		this.settings = next
 		if (modelChanged) {
-			this.reset()
+			// The instructions that ran have not changed, only what the model makes
+			// of them, so the reading is worked out again rather than thrown away.
+			this.replay.rework()
 			return
 		}
 		while (this.rows.length > next.windowSize) this.rows.shift()
 		this.firstCycle = this.rows.length > 0 ? this.rows[0].cycles[0] : 1
 	}
 
-	reset() {
+	/** Everything worked out from the instructions, which a replay redoes. */
+	clear() {
 		this.rows = []
 		this.recent = []
 		this.index = 0
@@ -327,7 +298,13 @@ export class PipelineModel implements ExecutionObserver {
 		this.predictor.clear()
 		this.addresses.clear()
 		this.lastStats = null
-		this.history.clear()
+	}
+
+	/** A new run: what was worked out and what was watched both go. */
+	reset() {
+		this.clear()
+		this.branches.clear()
+		this.replay.reset()
 	}
 
 	onReset() {
@@ -336,6 +313,7 @@ export class PipelineModel implements ExecutionObserver {
 
 	onConfigure(machine: MachineConfig) {
 		this.delaySlots = machine.delayedBranching
+		this.replay.configure(machine)
 	}
 
 	private statsFor(address: number) {
@@ -349,7 +327,17 @@ export class PipelineModel implements ExecutionObserver {
 	}
 
 	onInstruction(address: number, decoded: Decoded, instructionCount = 0) {
-		this.history.record(instructionCount, this.state)
+		this.replay.watch(instructionCount)
+		// Running on from a step back leaves a future that did not happen, and
+		// the machine's history drops the oldest instructions as it fills.
+		this.branches.dropFrom(instructionCount)
+		const oldest = this.replay.oldest
+		if (oldest !== undefined) this.branches.dropBefore(oldest)
+		this.apply(address, decoded, instructionCount)
+	}
+
+	/** One instruction through the model, live or replayed. */
+	private apply(address: number, decoded: Decoded, instructionCount: number) {
 		const effects = registerEffects(decoded)
 		const flushed = this.pendingFlush
 		this.pendingFlush = 0
@@ -364,6 +352,7 @@ export class PipelineModel implements ExecutionObserver {
 		let exCycle = Math.max(idCycle + 1, priorMem)
 		let cause: StallCause = null
 		let blockedOn: number | null = null
+		let blockedBy: number | null = null
 
 		const forwarding = this.settings.dataHazards === 'forwarding'
 		for (const register of effects.reads) {
@@ -379,6 +368,7 @@ export class PipelineModel implements ExecutionObserver {
 				exCycle = ready
 				cause = forwarding && producer.isLoad ? 'load-use' : 'data'
 				blockedOn = register
+				blockedBy = producer.index
 			}
 		}
 
@@ -405,7 +395,7 @@ export class PipelineModel implements ExecutionObserver {
 		this.previous = [ifCycle, idCycle, exCycle, memCycle, wbCycle]
 		this.lastCycle = Math.max(this.lastCycle, wbCycle)
 
-		this.recent.push({ writes: effects.writes, isLoad: effects.isLoad, ex: exCycle, mem: memCycle, wb: wbCycle })
+		this.recent.push({ index: this.index, writes: effects.writes, isLoad: effects.isLoad, ex: exCycle, mem: memCycle, wb: wbCycle })
 		if (this.recent.length > 8) this.recent.shift()
 
 		this.rows.push({
@@ -416,6 +406,7 @@ export class PipelineModel implements ExecutionObserver {
 			stalls,
 			cause,
 			blockedOn,
+			blockedBy,
 			flushed,
 			predicted: null,
 			mispredicted: false,
@@ -432,6 +423,14 @@ export class PipelineModel implements ExecutionObserver {
 	 * exactly where a real pipeline pays it.
 	 */
 	onBranch(address: number, taken: boolean) {
+		// The branch just went through the model, so the outcome belongs to the
+		// instruction behind the count it now stands at.
+		this.branches.record(this.replay.at - 1, taken)
+		this.resolveBranch(address, taken)
+	}
+
+	/** One branch outcome through the model, live or replayed. */
+	private resolveBranch(address: number, taken: boolean) {
 		const penalty = RESOLUTION_PENALTY[this.settings.resolveBranchIn]
 		const row = this.rows[this.rows.length - 1]
 
@@ -498,6 +497,7 @@ export class PipelineModel implements ExecutionObserver {
 	}
 
 	snapshot(): PipelineSnapshot {
+		this.replay.settle()
 		const cycles = this.lastCycle
 		return {
 			settings: this.settings,

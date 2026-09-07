@@ -6,9 +6,9 @@
  */
 
 import type { Decoded } from '../core/decoder'
-import type { ExecutionObserver } from '../core/observer'
+import type { ExecutionObserver, MachineConfig } from '../core/observer'
 import { OP_NAMES } from '../core/ops'
-import { RewindLog, type RewindableState } from './rewindLog'
+import { Replay, type Replayable } from './replay'
 
 export type InstructionCategory = 'alu' | 'jump' | 'branch' | 'memory' | 'coprocessor' | 'trap' | 'other'
 
@@ -113,40 +113,37 @@ export function formatOf(word: number): InstructionFormat {
 	return 'I'
 }
 
-interface StatisticsState {
-	total: number
-	categories: Map<InstructionCategory, number>
-	mnemonics: Map<string, number>
-	formats: Map<InstructionFormat, number>
-}
-
-export class InstructionStatistics implements ExecutionObserver {
+export class InstructionStatistics implements ExecutionObserver, Replayable {
 	private total = 0
 	private categories = new Map<InstructionCategory, number>()
 	private mnemonics = new Map<string, number>()
 	private formats = new Map<InstructionFormat, number>()
-	private readonly history = new RewindLog<StatisticsState>()
-	private readonly state: RewindableState<StatisticsState> = {
-		capture: () => ({
-			total: this.total,
-			categories: new Map(this.categories),
-			mnemonics: new Map(this.mnemonics),
-			formats: new Map(this.formats),
-		}),
-		restore: (state) => {
-			this.total = state.total
-			this.categories = state.categories
-			this.mnemonics = state.mnemonics
-			this.formats = state.formats
-		},
-	}
+	/**
+	 * Every count here is a tally of the instructions that ran, and the machine
+	 * keeps those, so stepping back means counting them again rather than
+	 * keeping a copy of the tallies for every step.
+	 */
+	private readonly replay = new Replay(this)
 
 	onSeek(to: number) {
-		this.history.seek(to, this.state)
+		this.replay.seek(to)
 	}
 
-	onInstruction(_address: number, decoded: Decoded, instructionCount = 0) {
-		this.history.record(instructionCount, this.state)
+	onConfigure(machine: MachineConfig) {
+		this.replay.configure(machine)
+	}
+
+	replayStep(address: number, decoded: Decoded, instructionCount: number) {
+		this.count(address, decoded, instructionCount)
+	}
+
+	onInstruction(address: number, decoded: Decoded, instructionCount = 0) {
+		this.replay.watch(instructionCount)
+		this.count(address, decoded, instructionCount)
+	}
+
+	/** One instruction counted, live or replayed. */
+	private count(_address: number, decoded: Decoded, _instructionCount: number) {
 		this.total += 1
 		const category = categoryOf(decoded.op)
 		this.categories.set(category, (this.categories.get(category) ?? 0) + 1)
@@ -156,12 +153,17 @@ export class InstructionStatistics implements ExecutionObserver {
 		this.formats.set(encoding, (this.formats.get(encoding) ?? 0) + 1)
 	}
 
-	reset() {
+	/** Everything worked out from the instructions, which a replay redoes. */
+	clear() {
 		this.total = 0
 		this.categories.clear()
 		this.mnemonics.clear()
 		this.formats.clear()
-		this.history.clear()
+	}
+
+	reset() {
+		this.clear()
+		this.replay.reset()
 	}
 
 	onReset() {
@@ -169,6 +171,7 @@ export class InstructionStatistics implements ExecutionObserver {
 	}
 
 	snapshot(): StatisticsSnapshot {
+		this.replay.settle()
 		const byCategory = {} as Record<InstructionCategory, number>
 		for (const category of Object.keys(CATEGORY_LABELS) as InstructionCategory[]) {
 			byCategory[category] = this.categories.get(category) ?? 0

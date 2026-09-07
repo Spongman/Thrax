@@ -7,8 +7,9 @@
  * which is the top of that scale.
  */
 
-import type { ExecutionObserver } from '../core/observer'
-import { RewindLog, type RewindableState } from './rewindLog'
+import type { ExecutionObserver, MachineConfig } from '../core/observer'
+import { Replay, type Replayable } from './replay'
+import { StepLog } from './stepLog'
 
 export interface AddressProfile {
 	/** Times the instruction at this address ran. */
@@ -50,37 +51,32 @@ export function heatLevel(count: number, max: number) {
  * times.  Like the machine's own effects, this holds the values that are **not**
  * in the tool, so exchanging it serves both directions.
  */
-interface ProfileState {
-	address: number
-	/** The counts as they stood, or null where the address had none yet. */
-	entry: AddressProfile | null
-	total: number
-	max: number
-}
-
-export class ExecutionProfile implements ExecutionObserver {
+export class ExecutionProfile implements ExecutionObserver, Replayable {
 	private addresses = new Map<number, AddressProfile>()
 	private total = 0
 	private max = 0
-	private readonly history = new RewindLog<ProfileState>()
-	/** The address the instruction being recorded is about to touch. */
-	private touching = 0
-	private readonly state: RewindableState<ProfileState> = {
-		capture: (previous) => {
-			const address = previous ? previous.address : this.touching
-			const entry = this.addresses.get(address)
-			return { address, entry: entry ? { ...entry } : null, total: this.total, max: this.max }
-		},
-		restore: (state) => {
-			if (state.entry) this.addresses.set(state.address, state.entry)
-			else this.addresses.delete(state.address)
-			this.total = state.total
-			this.max = state.max
-		},
-	}
+	/**
+	 * Which way each branch went, which is the only thing here that the
+	 * instructions alone do not say.  Everything else is a tally of them, so a
+	 * step back counts them again rather than putting a copy back.
+	 */
+	private readonly branches = new StepLog<boolean>()
+	private readonly replay = new Replay(this)
 
 	onSeek(to: number) {
-		this.history.seek(to, this.state)
+		this.replay.seek(to)
+	}
+
+	onConfigure(machine: MachineConfig) {
+		this.replay.configure(machine)
+	}
+
+	replayStep(address: number, _decoded: unknown, instructionCount: number) {
+		this.count(address)
+		const index = this.branches.indexFrom(instructionCount)
+		if (this.branches.countAt(index) === instructionCount) {
+			this.resolve(address, this.branches.valueAt(index)!)
+		}
 	}
 
 	private entryFor(address: number) {
@@ -94,10 +90,17 @@ export class ExecutionProfile implements ExecutionObserver {
 	}
 
 	onInstruction(address: number, _decoded?: unknown, instructionCount = 0) {
-		// The branch that follows resolves at this same address, so one address
-		// covers everything the instruction can touch.
-		this.touching = address >>> 0
-		this.history.record(instructionCount, this.state)
+		this.replay.watch(instructionCount)
+		// Running on from a step back leaves a future that did not happen, and
+		// the machine's history drops the oldest instructions as it fills.
+		this.branches.dropFrom(instructionCount)
+		const oldest = this.replay.oldest
+		if (oldest !== undefined) this.branches.dropBefore(oldest)
+		this.count(address)
+	}
+
+	/** One instruction counted, live or replayed. */
+	private count(address: number) {
 		const entry = this.entryFor(address)
 		entry.count += 1
 		this.total += 1
@@ -105,16 +108,29 @@ export class ExecutionProfile implements ExecutionObserver {
 	}
 
 	onBranch(address: number, taken: boolean) {
+		// The branch resolves at the address of the instruction just counted.
+		this.branches.record(this.replay.at - 1, taken)
+		this.resolve(address, taken)
+	}
+
+	/** One branch outcome counted, live or replayed. */
+	private resolve(address: number, taken: boolean) {
 		const entry = this.entryFor(address)
 		if (taken) entry.taken += 1
 		else entry.notTaken += 1
 	}
 
-	reset() {
+	/** Everything worked out from the instructions, which a replay redoes. */
+	clear() {
 		this.addresses.clear()
 		this.total = 0
 		this.max = 0
-		this.history.clear()
+	}
+
+	reset() {
+		this.clear()
+		this.branches.clear()
+		this.replay.reset()
 	}
 
 	onReset() {
@@ -122,6 +138,7 @@ export class ExecutionProfile implements ExecutionObserver {
 	}
 
 	snapshot(): ProfileSnapshot {
+		this.replay.settle()
 		const byAddress = new Map<number, AddressProfile>()
 		for (const [address, entry] of this.addresses) byAddress.set(address, { ...entry })
 		return { byAddress, total: this.total, max: this.max }

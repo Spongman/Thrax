@@ -6,8 +6,9 @@
  * counted: only the data segment is observed.
  */
 
-import type { ExecutionObserver } from '../core/observer'
-import { RewindLog, type RewindableState } from './rewindLog'
+import type { ExecutionObserver, MachineConfig } from '../core/observer'
+import { Replay, type Replayable } from './replay'
+import { StepLog } from './stepLog'
 
 export type ReplacementPolicy = 'lru' | 'random' | 'fifo'
 
@@ -40,8 +41,6 @@ export function effectiveCacheSettings(settings: CacheSettings): CacheSettings {
 	return { ...settings, associativity: Math.max(1, Math.min(settings.associativity, settings.blockCount)) }
 }
 
-interface CacheState { blocks: CacheBlock[], accesses: number, hits: number, clock: number }
-
 interface CacheBlock {
 	tag: number
 	valid: boolean
@@ -59,32 +58,50 @@ export interface CacheSnapshot {
 	blocks: Array<{ valid: boolean; tag: number }>
 }
 
-export class CacheSimulator implements ExecutionObserver {
+export class CacheSimulator implements ExecutionObserver, Replayable {
 	private settings: CacheSettings
 	private blocks: CacheBlock[] = []
 	private accesses = 0
 	private hits = 0
 	private clock = 0
 	private setCount = 1
-	/** The instruction now running, which tags the checkpoints it takes. */
-	private at = 0
-	private readonly history = new RewindLog<CacheState>()
-	private readonly state: RewindableState<CacheState> = {
-		capture: () => ({ blocks: this.blocks.map((block) => ({ ...block })), accesses: this.accesses, hits: this.hits, clock: this.clock }),
-		restore: (state) => {
-			this.blocks = state.blocks
-			this.accesses = state.accesses
-			this.hits = state.hits
-			this.clock = state.clock
-		},
-	}
+	/**
+	 * The addresses reached, in order.  A load's address is worked out from
+	 * registers as it runs, so the machine's log of what ran does not say where
+	 * it went: this is the note that lets the run be played through the cache
+	 * again instead of a copy of every block being kept for every access.
+	 */
+	private readonly reached = new StepLog<number>()
+	private readonly replay = new Replay(this)
+	/**
+	 * Picks the way to evict under the random policy.  A generator of its own,
+	 * restarted whenever the blocks are, so a replayed run evicts what the run
+	 * evicted the first time; Math.random would put different data in the
+	 * blocks every time the machine stepped back.
+	 */
+	private seed = 1
 
 	onInstruction(_address: number, _decoded: unknown, instructionCount = 0) {
-		this.at = instructionCount
+		this.replay.watch(instructionCount)
+		// Running on from a step back leaves a future that did not happen, and
+		// the machine's history drops the oldest instructions as it fills.
+		this.reached.dropFrom(instructionCount)
+		const oldest = this.replay.oldest
+		if (oldest !== undefined) this.reached.dropBefore(oldest)
 	}
 
 	onSeek(to: number) {
-		this.history.seek(to, this.state)
+		this.replay.seek(to)
+	}
+
+	onConfigure(machine: MachineConfig) {
+		this.replay.configure(machine)
+	}
+
+	replayStep(_address: number, _decoded: unknown, instructionCount: number) {
+		for (let index = this.reached.indexFrom(instructionCount); this.reached.countAt(index) === instructionCount; index++) {
+			this.touch(this.reached.valueAt(index)!)
+		}
 	}
 
 	constructor(settings: CacheSettings = DEFAULT_CACHE_SETTINGS) {
@@ -95,15 +112,24 @@ export class CacheSimulator implements ExecutionObserver {
 	configure(settings: CacheSettings) {
 		this.settings = effectiveCacheSettings(settings)
 		this.setCount = Math.max(1, Math.floor(settings.blockCount / this.settings.associativity))
-		this.reset()
+		// A different cache over the same accesses, so it is filled again rather
+		// than emptied.
+		this.replay.rework()
 	}
 
-	reset() {
+	/** Everything worked out from the accesses, which a replay redoes. */
+	clear() {
 		this.blocks = Array.from({ length: this.setCount * this.settings.associativity }, () => ({ tag: 0, valid: false, order: 0 }))
 		this.accesses = 0
 		this.hits = 0
 		this.clock = 0
-		this.history.clear()
+		this.seed = 1
+	}
+
+	reset() {
+		this.clear()
+		this.reached.clear()
+		this.replay.reset()
 	}
 
 	onReset() {
@@ -120,7 +146,12 @@ export class CacheSimulator implements ExecutionObserver {
 
 	/** One access, counted as a hit or a miss and placed in its set. */
 	access(address: number) {
-		this.history.record(this.at, this.state)
+		this.reached.record(this.replay.at - 1, address)
+		this.touch(address)
+	}
+
+	/** One access through the cache, live or replayed. */
+	private touch(address: number) {
 		const { blockSizeBytes, associativity, replacement } = this.settings
 		const blockNumber = Math.floor((address >>> 0) / blockSizeBytes)
 		const setIndex = blockNumber % this.setCount
@@ -148,7 +179,14 @@ export class CacheSimulator implements ExecutionObserver {
 		for (let way = 0; way < associativity; way++) {
 			if (!this.blocks[first + way].valid) return way
 		}
-		if (replacement === 'random') return Math.floor(Math.random() * associativity)
+		if (replacement === 'random') {
+			// xorshift, so the same run picks the same ways however often it is
+			// played through.
+			this.seed ^= this.seed << 13
+			this.seed ^= this.seed >>> 17
+			this.seed ^= this.seed << 5
+			return (this.seed >>> 0) % associativity
+		}
 
 		let oldest = 0
 		for (let way = 1; way < associativity; way++) {
@@ -158,6 +196,7 @@ export class CacheSimulator implements ExecutionObserver {
 	}
 
 	snapshot(): CacheSnapshot {
+		this.replay.settle()
 		const misses = this.accesses - this.hits
 		return {
 			settings: this.settings,

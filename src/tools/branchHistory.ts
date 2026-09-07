@@ -7,8 +7,9 @@
  * a prediction through the last iteration of a loop.
  */
 
-import type { ExecutionObserver } from '../core/observer'
-import { RewindLog, type RewindableState } from './rewindLog'
+import type { ExecutionObserver, MachineConfig } from '../core/observer'
+import { Replay, type Replayable } from './replay'
+import { StepLog } from './stepLog'
 
 export interface BranchHistorySettings {
 	/** Entries in the table; the branch address indexes it modulo this. */
@@ -44,8 +45,6 @@ export interface BranchHistorySnapshot {
 	entries: BranchHistoryEntry[]
 }
 
-interface BranchHistoryState { counters: Counter[], predictions: number, correct: number }
-
 interface Counter {
 	state: number
 	predictions: number
@@ -53,33 +52,41 @@ interface Counter {
 	addresses: Set<number>
 }
 
-export class BranchHistoryTable implements ExecutionObserver {
+export class BranchHistoryTable implements ExecutionObserver, Replayable {
 	private settings: BranchHistorySettings
 	private counters: Counter[] = []
 	private predictions = 0
 	private correct = 0
-	/** The instruction now running, which tags the checkpoints it takes. */
-	private at = 0
-	private readonly history = new RewindLog<BranchHistoryState>()
-	private readonly state: RewindableState<BranchHistoryState> = {
-		capture: () => ({
-			counters: this.counters.map((counter) => ({ ...counter, addresses: new Set(counter.addresses) })),
-			predictions: this.predictions,
-			correct: this.correct,
-		}),
-		restore: (state) => {
-			this.counters = state.counters
-			this.predictions = state.predictions
-			this.correct = state.correct
-		},
-	}
+	/**
+	 * Which way each branch went.  The counters are a function of that sequence,
+	 * so stepping back runs the sequence again from the start of what was
+	 * watched rather than putting a copy of the table back.
+	 */
+	private readonly branches = new StepLog<boolean>()
+	private readonly replay = new Replay(this)
 
 	onInstruction(_address: number, _decoded: unknown, instructionCount = 0) {
-		this.at = instructionCount
+		this.replay.watch(instructionCount)
+		// Running on from a step back leaves a future that did not happen, and
+		// the machine's history drops the oldest instructions as it fills.
+		this.branches.dropFrom(instructionCount)
+		const oldest = this.replay.oldest
+		if (oldest !== undefined) this.branches.dropBefore(oldest)
 	}
 
 	onSeek(to: number) {
-		this.history.seek(to, this.state)
+		this.replay.seek(to)
+	}
+
+	onConfigure(machine: MachineConfig) {
+		this.replay.configure(machine)
+	}
+
+	replayStep(address: number, _decoded: unknown, instructionCount: number) {
+		const index = this.branches.indexFrom(instructionCount)
+		if (this.branches.countAt(index) === instructionCount) {
+			this.resolve(address, this.branches.valueAt(index)!)
+		}
 	}
 
 	constructor(settings: BranchHistorySettings = DEFAULT_BHT_SETTINGS) {
@@ -89,10 +96,13 @@ export class BranchHistoryTable implements ExecutionObserver {
 
 	configure(settings: BranchHistorySettings) {
 		this.settings = { ...settings, entryCount: Math.max(1, settings.entryCount) }
-		this.reset()
+		// A different table over the same branches, so it is filled again rather
+		// than emptied.
+		this.replay.rework()
 	}
 
-	reset() {
+	/** Everything worked out from the branches, which a replay redoes. */
+	clear() {
 		const { historyBits, initiallyTaken } = this.settings
 		const start = initiallyTaken ? (historyBits === 2 ? 3 : 1) : 0
 		this.counters = Array.from({ length: this.settings.entryCount }, () => ({
@@ -103,7 +113,12 @@ export class BranchHistoryTable implements ExecutionObserver {
 		}))
 		this.predictions = 0
 		this.correct = 0
-		this.history.clear()
+	}
+
+	reset() {
+		this.clear()
+		this.branches.clear()
+		this.replay.reset()
 	}
 
 	onReset() {
@@ -111,7 +126,13 @@ export class BranchHistoryTable implements ExecutionObserver {
 	}
 
 	onBranch(address: number, taken: boolean) {
-		this.history.record(this.at, this.state)
+		// The branch belongs to the instruction just taken on.
+		this.branches.record(this.replay.at - 1, taken)
+		this.resolve(address, taken)
+	}
+
+	/** One branch outcome through the table, live or replayed. */
+	private resolve(address: number, taken: boolean) {
 		const counter = this.counters[this.indexOf(address)]
 		const predicted = this.predictsTaken(counter.state)
 
@@ -142,6 +163,7 @@ export class BranchHistoryTable implements ExecutionObserver {
 	}
 
 	snapshot(): BranchHistorySnapshot {
+		this.replay.settle()
 		return {
 			settings: this.settings,
 			predictions: this.predictions,

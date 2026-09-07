@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { Assembler } from '../../core/assembler'
 import { firstError } from '../../core/diagnostics'
+import type { MachineConfig } from '../../core/observer'
 import { MipsSimulator } from '../../core/simulator'
 import { BranchHistoryTable } from '../branchHistory'
 import { CacheSimulator } from '../cache'
 import { PipelineModel } from '../pipeline'
 import { ExecutionProfile } from '../profile'
+import { MemoryReferenceVisualizer } from '../memoryReference'
 import { InstructionStatistics } from '../statistics'
 
 /** Loops, branches and touches memory, so every tool has something to count. */
@@ -24,8 +26,11 @@ loop:	sw $t0, 0($t1)
 	syscall
 `
 
-function build() {
-	const { program, machineCode, diagnostics } = new Assembler(PROGRAM).assemble()
+/** The same shape of work, but long enough to step back a long way through. */
+const LONG_PROGRAM = PROGRAM.replace('li $t0, 20', 'li $t0, 1500')
+
+function build(source = PROGRAM) {
+	const { program, machineCode, diagnostics } = new Assembler(source).assemble()
 	expect(firstError(diagnostics)?.message).toBeUndefined()
 	const simulator = new MipsSimulator(machineCode, program)
 	const tools = {
@@ -34,6 +39,15 @@ function build() {
 		branches: new BranchHistoryTable(),
 		pipeline: new PipelineModel(),
 		profile: new ExecutionProfile(),
+		memoryReference: new MemoryReferenceVisualizer(),
+	}
+	// What the registry tells a tool as it attaches: the pipeline rewinds by
+	// replaying the machine's log, so it has to be given one.
+	for (const tool of Object.values(tools)) {
+		(tool as { onConfigure?: (machine: MachineConfig) => void }).onConfigure?.({
+			delayedBranching: false,
+			history: simulator.executionHistory,
+		})
 	}
 	simulator.observers.push(...Object.values(tools))
 	return { simulator, tools }
@@ -45,6 +59,7 @@ const views = (tools: ReturnType<typeof build>['tools']) => ({
 	branches: tools.branches.snapshot(),
 	pipeline: tools.pipeline.snapshot(),
 	profile: tools.profile.snapshot(),
+	memoryReference: tools.memoryReference.snapshot(),
 })
 
 function stepTo(simulator: MipsSimulator, count: number) {
@@ -90,6 +105,25 @@ describe('the tools roll back with the machine', () => {
 			stepTo(simulator, 80)
 			expect(views(tools)).toEqual(settled)
 		}
+	})
+
+	/**
+	 * The tools kept one copy of themselves per step and could only go back over
+	 * the last two thousand of them.  Past that the panels showed a part of the
+	 * run the machine had long left, and said nothing about it.
+	 */
+	it('is exact after a rewind of thousands of instructions', () => {
+		const straight = build(LONG_PROGRAM)
+		stepTo(straight.simulator, 200)
+		const atTwoHundred = views(straight.tools)
+
+		const long = build(LONG_PROGRAM)
+		stepTo(long.simulator, 6000)
+		expect(long.simulator.instructionCount).toBeGreaterThan(5000)
+		while (long.simulator.instructionCount > 200) long.simulator.stepBack()
+
+		expect(long.simulator.instructionCount).toBe(200)
+		expect(views(long.tools)).toEqual(atTwoHundred)
 	})
 
 	it('keeps a cache hit rate that counts each access once', () => {

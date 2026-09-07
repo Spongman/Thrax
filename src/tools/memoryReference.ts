@@ -11,7 +11,9 @@
  * so both hooks feed the same counter here.
  */
 
-import type { ExecutionObserver } from '../core/observer'
+import type { ExecutionObserver, MachineConfig } from '../core/observer'
+import { Replay, type Replayable } from './replay'
+import { StepLog } from './stepLog'
 
 /** Low end of a reference-count range, and the colour shown for it. */
 export interface ColorStop {
@@ -105,10 +107,41 @@ export function colorForCount(count: number, colorRamp: ColorStop[]): string {
 	return color
 }
 
-export class MemoryReferenceVisualizer implements ExecutionObserver {
+export class MemoryReferenceVisualizer implements ExecutionObserver, Replayable {
 	private settings: MemoryReferenceSettings
 	private counts: number[] = []
 	private max = 0
+	/**
+	 * The addresses reached, in order.  A load works its address out from
+	 * registers as it runs, so the machine's log of what ran does not say where
+	 * it went; with this the run can be counted into the grid again, which is
+	 * how the grid follows a step back.
+	 */
+	private readonly reached = new StepLog<number>()
+	private readonly replay = new Replay(this)
+
+	onInstruction(_address: number, _decoded: unknown, instructionCount = 0) {
+		this.replay.watch(instructionCount)
+		// Running on from a step back leaves a future that did not happen, and
+		// the machine's history drops the oldest instructions as it fills.
+		this.reached.dropFrom(instructionCount)
+		const oldest = this.replay.oldest
+		if (oldest !== undefined) this.reached.dropBefore(oldest)
+	}
+
+	onSeek(to: number) {
+		this.replay.seek(to)
+	}
+
+	onConfigure(machine: MachineConfig) {
+		this.replay.configure(machine)
+	}
+
+	replayStep(_address: number, _decoded: unknown, instructionCount: number) {
+		for (let index = this.reached.indexFrom(instructionCount); this.reached.countAt(index) === instructionCount; index++) {
+			this.count(this.reached.valueAt(index)!)
+		}
+	}
 
 	constructor(settings: MemoryReferenceSettings = DEFAULT_MEMORY_REFERENCE_SETTINGS) {
 		this.settings = settings
@@ -117,12 +150,21 @@ export class MemoryReferenceVisualizer implements ExecutionObserver {
 
 	configure(settings: MemoryReferenceSettings) {
 		this.settings = settings
-		this.reset()
+		// A different grid over the same accesses, so it is counted again rather
+		// than emptied.
+		this.replay.rework()
+	}
+
+	/** Everything counted from the accesses, which a replay redoes. */
+	clear() {
+		this.counts = new Array(this.settings.rows * this.settings.columns).fill(0)
+		this.max = 0
 	}
 
 	reset() {
-		this.counts = new Array(this.settings.rows * this.settings.columns).fill(0)
-		this.max = 0
+		this.clear()
+		this.reached.clear()
+		this.replay.reset()
 	}
 
 	onReset() {
@@ -141,15 +183,14 @@ export class MemoryReferenceVisualizer implements ExecutionObserver {
 	 * One access, counted into whichever cell its unit falls in; an address
 	 * outside the grid is dropped, matching Grid.incrementElement returning -1
 	 * for an out-of-range row or column.
-	 *
-	 * NOTE for H2b (onRewind): this only ever adds, so a future rewind needs
-	 * either a per-access log of {instructionCount, index} to undo past a
-	 * target, or the registry to snapshot/restore `counts` and `max` itself.
-	 * Both are cheap here because a cell is a plain counter with no ordering
-	 * state (unlike cache LRU order or a BHT counter's saturation), so undoing
-	 * an access is just decrementing its cell - no per-tool replay logic needed.
 	 */
 	private access(address: number) {
+		this.reached.record(this.replay.at - 1, address)
+		this.count(address)
+	}
+
+	/** One access into the grid, live or replayed. */
+	private count(address: number) {
 		const index = this.indexFor(address)
 		if (index < 0) return
 		const count = ++this.counts[index]
@@ -175,6 +216,7 @@ export class MemoryReferenceVisualizer implements ExecutionObserver {
 	}
 
 	snapshot(): MemoryReferenceSnapshot {
+		this.replay.settle()
 		return {
 			settings: this.settings,
 			rows: this.settings.rows,
