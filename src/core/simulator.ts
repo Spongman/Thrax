@@ -183,12 +183,6 @@ export interface MidiPlayer {
 	play(note: MidiNote): void
 }
 
-/**
- * Runaway-loop guard.  This is a budget per `run`, not a lifetime total, so
- * continuing a paused program picks up with a fresh budget.
- */
-const INSTRUCTION_LIMIT = 1_000_000
-
 /** `backstepLimit`'s default, from `Config.properties:7`. */
 
 /** Instructions run between yields to the browser. */
@@ -565,14 +559,13 @@ export class MipsSimulator {
 		// A run never stops on the breakpoint it starts on: continuing while the
 		// pc sits on one has to make progress, or the button does nothing.
 		let firstInstruction = true
-		const budget = this.instructionCount + INSTRUCTION_LIMIT
 		// Timers overshoot, so a paced run measures the clock and makes up what it
 		// owes on the next pass instead of falling behind the speed that was asked for.
 		let lastTick = performance.now()
 		let owed = 0
 
 		try {
-			while (this.running && !this.halted && this.instructionCount < budget) {
+			while (this.running && !this.halted) {
 				const frameStarted = performance.now()
 				// Read every pass: the speed control moves while a run is going.
 				const batchSize = fixedBatchSize ?? this.batchSize()
@@ -589,7 +582,7 @@ export class MipsSimulator {
 					allowance = Math.max(1, Math.floor(owed))
 				}
 				let executed = 0
-				while (this.running && !this.halted && this.instructionCount < budget && executed < allowance) {
+				while (this.running && !this.halted && executed < allowance) {
 					if (!firstInstruction && this.breakpoints.has(this.pc)) {
 						this.paused = true
 						this.running = false
@@ -624,11 +617,6 @@ export class MipsSimulator {
 			const message = error instanceof Error ? error.message : String(error)
 			this.writeConsole(`\nError: ${message}\n`)
 			this.halted = true // Outside any instruction, so nothing records it.
-		}
-
-		if (this.instructionCount >= budget && !this.halted) {
-			this.paused = true
-			this.writeConsole(`\nExecution paused after ${INSTRUCTION_LIMIT.toLocaleString()} instructions. Continue to keep going.\n`)
 		}
 
 		this.running = false
