@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { Assembler, type SourceFile } from '../core/assembler'
 import { CP0_REGISTER_COUNT, CP0_STATUS_INITIAL, FP_CONDITION_FLAG_COUNT, FP_REGISTER_COUNT } from '../core/coprocessor'
-import { hasErrors } from '../core/diagnostics'
+import { formatDiagnostic, hasErrors } from '../core/diagnostics'
 import { disassemble } from '../core/disassembler'
 import { parseWord } from '../core/format'
 import { DEFAULT_SETTINGS, MEMORY_CONFIGURATIONS, SETTINGS_VALIDATORS, type MemoryConfigurationValues, type ThraxSettings } from '../core/settings'
@@ -530,7 +530,7 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 		const errors = diagnostics.filter((diagnostic) => diagnostic.severity === 'error')
 		return errors.length === 0
 			? { diagnostics }
-			: { diagnostics, console: errors.map((error) => `Error: ${error.message}`).join('\n') }
+			: { diagnostics, console: errors.map(formatDiagnostic).join('\n') }
 	}
 
 	/** An exception no pass turned into a diagnostic is reported as one. */

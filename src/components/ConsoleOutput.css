@@ -15,6 +15,23 @@
 	word-wrap: break-word;
 }
 
+/* An error's location reads as part of the line and clicks like a link. */
+.console-location {
+	background: none;
+	border: none;
+	padding: 0;
+	margin: 0;
+	font: inherit;
+	color: var(--data-label);
+	cursor: pointer;
+	text-decoration: underline;
+	text-decoration-color: transparent;
+}
+
+.console-location:hover {
+	text-decoration-color: currentColor;
+}
+
 .console-empty {
 	padding: 20px;
 	color: var(--text-muted);
@@ -49,9 +66,29 @@
 	padding: 6px 10px;
 }
 
+/* The field and its Send are one control; a yes/no pair sits side by side. */
+.console-entry {
+	display: flex;
+}
+
+.console-entry input {
+	flex: 1;
+	min-width: 0;
+	border-right-width: 0;
+	border-radius: var(--radius) 0 0 var(--radius);
+}
+
+.console-entry input + button {
+	border-radius: 0 var(--radius) var(--radius) 0;
+}
+
+.console-entry button + button {
+	margin-left: 6px;
+}
+
 /* A dialog adds buttons beside the field rather than stacking them. */
 .console-input.console-dialog {
-	grid-template-columns: 1fr auto auto;
+	grid-template-columns: 1fr auto;
 	align-items: center;
 }
 

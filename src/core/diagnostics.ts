@@ -21,6 +21,22 @@ export function formatPosition(position: SourcePosition): string {
 	return position.file ? `at ${position.file}:${position.line}${column}` : `at line ${position.line}${column}`
 }
 
+/**
+ * A diagnostic the way gcc prints one: `file:line:column: error: message`.
+ * The message already ends in the position, since the error carried it as
+ * text; that tail is taken off so the position is said once, up front where a
+ * reader (or a click) finds it.
+ */
+export function formatDiagnostic(diagnostic: Diagnostic): string {
+	const where = formatPosition(diagnostic)
+	const message = where && diagnostic.message.endsWith(` ${where}`)
+		? diagnostic.message.slice(0, -where.length - 1)
+		: diagnostic.message
+	if (diagnostic.line === undefined) return `${diagnostic.severity}: ${message}`
+	const column = diagnostic.column === undefined ? '' : `:${diagnostic.column}`
+	return `${diagnostic.file ?? 'source'}:${diagnostic.line}${column}: ${diagnostic.severity}: ${message}`
+}
+
 /** Position of `token`, spanning the text it was lexed from. */
 export function at(token: TokenData): SourcePosition {
 	return {

@@ -120,8 +120,8 @@ const MemoryPanel = () => {
 }
 
 const ConsolePanel = () => {
-	const { console: output, pendingInput, submitInput } = useTHRAXStore()
-	return <div className="dock-panel dock-panel-flush"><ConsoleOutput output={output} pendingInput={pendingInput} onSubmitInput={submitInput} /></div>
+	const { console: output, focusSourceLine, pendingInput, submitInput } = useTHRAXStore()
+	return <div className="dock-panel dock-panel-flush"><ConsoleOutput output={output} pendingInput={pendingInput} onSubmitInput={submitInput} onSelectSource={focusSourceLine} /></div>
 }
 
 const CallStackPanel = () => {
