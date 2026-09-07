@@ -269,3 +269,75 @@ bne $t0, $zero, loop`))
 		expect(simulator.observers).toHaveLength(observers)
 	})
 })
+
+describe('a tool that registers itself', () => {
+	beforeEach(() => store.clear())
+
+	it('joins a run already in progress and watches it', () => {
+		const { registry } = fakeRegistry()
+		const simulator = fakeSimulator()
+		registry.setWanted(new Set(['fake', 'late']))
+		registry.attach(simulator, { delayedBranching: false })
+		expect(registry.has('late')).toBe(false)
+
+		const late = new FakeTool()
+		registry.register({ key: 'late', tool: late })
+
+		expect(registry.has('late')).toBe(true)
+		// It starts from nothing, as any tool joining a run in progress does.
+		expect(late.resets).toBe(1)
+		expect(late.machines).toEqual([{ delayedBranching: false }])
+		for (const observer of simulator.observers) observer.onMemoryRead?.(0, 4)
+		expect(late.reads).toBe(1)
+		expect((registry.views() as Record<string, { reads: number }>).late.reads).toBe(1)
+	})
+
+	it('takes its stored settings with it', () => {
+		store.set('thrax-web.settings.tools.late', JSON.stringify({ label: 'remembered' }))
+		const { registry } = fakeRegistry()
+		const late = new FakeTool()
+		registry.register({ key: 'late', tool: late, setting: { storageKey: 'tools.late', defaults: FAKE_DEFAULTS, isValid: isFakeSettings } })
+		expect(late.settings.label).toBe('remembered')
+	})
+
+	it('stops watching when it is dropped, and its reading goes with it', () => {
+		const { registry } = fakeRegistry()
+		const simulator = fakeSimulator()
+		registry.setWanted(new Set(['late']))
+		registry.attach(simulator, { delayedBranching: false })
+
+		const late = new FakeTool()
+		const drop = registry.register({ key: 'late', tool: late })
+		const watching = simulator.observers.length
+		expect(watching).toBeGreaterThan(0)
+
+		expect(drop()).toBe(undefined)
+		expect(registry.has('late')).toBe(false)
+		expect(simulator.observers.length).toBe(watching - 1)
+		expect('late' in registry.views()).toBe(false)
+		// Nothing reaches it once it is gone, however long the run goes on.
+		for (const observer of simulator.observers) observer.onMemoryRead?.(0, 4)
+		expect(late.reads).toBe(0)
+	})
+
+	it('replaces whatever held the key before it', () => {
+		const { registry } = fakeRegistry()
+		const simulator = fakeSimulator()
+		registry.setWanted(new Set(['late']))
+		registry.attach(simulator, { delayedBranching: false })
+
+		const first = new FakeTool()
+		const second = new FakeTool()
+		registry.register({ key: 'late', tool: first })
+		registry.register({ key: 'late', tool: second })
+
+		for (const observer of simulator.observers) observer.onMemoryRead?.(0, 4)
+		expect(first.reads).toBe(0)
+		expect(second.reads).toBe(1)
+	})
+
+	it('says nothing was dropped when there was nothing to drop', () => {
+		const { registry } = fakeRegistry()
+		expect(registry.unregister('never-registered')).toBe(false)
+	})
+})

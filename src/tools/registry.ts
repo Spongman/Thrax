@@ -125,6 +125,40 @@ export class ToolRegistry<E extends Entries> {
 	}
 
 	/**
+	 * Takes on a tool the workspace was not built with, and hands back the way to
+	 * drop it again.  It joins whatever is already running: its stored settings
+	 * are applied, and if something is asking for it, it starts watching from
+	 * where the run has got to, exactly as a tool whose panel was just opened
+	 * does.  Registering the same key twice replaces the tool behind it.
+	 */
+	register(entry: ToolEntry): () => void {
+		this.unregister(entry.key)
+		const state = watch(entry)
+		this.states.push(state)
+		if (entry.setting) {
+			const stored = readStoredSetting(entry.setting.storageKey, entry.setting.defaults, entry.setting.isValid)
+			entry.tool.configure?.(stored)
+			state.version += 1
+		}
+		if (this.wanted.has(entry.key)) this.connect(state)
+		return () => { this.unregister(entry.key) }
+	}
+
+	/** Drops a tool: it stops watching, and its reading goes with it. */
+	unregister(key: string): boolean {
+		const at = this.states.findIndex((candidate) => candidate.entry.key === key)
+		if (at < 0) return false
+		this.disconnect(this.states[at])
+		this.states.splice(at, 1)
+		return true
+	}
+
+	/** Whether a tool of this key is registered, under whatever built it. */
+	has(key: string): boolean {
+		return this.states.some((candidate) => candidate.entry.key === key)
+	}
+
+	/**
 	 * Points the wanted tools at a fresh run of `machine`, from clean readings.
 	 * The reset and the machine both go out through the observer interface, which
 	 * is the only thing the simulator itself would use.
@@ -229,7 +263,7 @@ export class ToolRegistry<E extends Entries> {
 	 * hands back the same object, so a view of it does not redraw: snapshots are
 	 * whole-run copies, and most of them are taken for a panel nobody opened.
 	 */
-	views(): ToolViews<E> {
+	views(): ToolViews<E> & Record<string, unknown> {
 		const views: Record<string, unknown> = {}
 		for (const state of this.states) {
 			if (state.viewedVersion !== state.version) {
@@ -238,7 +272,7 @@ export class ToolRegistry<E extends Entries> {
 			}
 			views[state.entry.key] = state.view
 		}
-		return views as ToolViews<E>
+		return views as ToolViews<E> & Record<string, unknown>
 	}
 }
 
