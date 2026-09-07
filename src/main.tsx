@@ -2,7 +2,9 @@ import * as monaco from 'monaco-editor'
 import EditorWorker from 'monaco-editor/editor/common/services/editorWebWorkerMain?worker'
 import { loader } from '@monaco-editor/react'
 import { registerMipsLanguage } from './core/mipsLanguage'
+import { registerGotoDefinition } from './services/gotoDefinition'
 import { restoreGitHubSession } from './services/githubSession'
+import { useTHRAXStore } from './store/thraxStore'
 
 // Vite cannot bundle the core editor worker from Monaco's internal
 // `new URL('...editorWebWorkerMain.js', import.meta.url)` reference, so supply it
@@ -21,6 +23,13 @@ registerMipsLanguage()
 
 // A GitHub token kept from an earlier visit signs in again.
 restoreGitHubSession()
+
+// Ctrl+click on a name goes to its definition, in this file or another.
+registerGotoDefinition(monaco, {
+	files: () => useTHRAXStore.getState().workspaceSnapshot().files,
+	active: () => useTHRAXStore.getState().workspaceSnapshot().active,
+	open: (file, line) => useTHRAXStore.getState().focusSourceLine(file, line),
+})
 
 import React from 'react'
 import ReactDOM from 'react-dom/client'
