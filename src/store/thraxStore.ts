@@ -10,7 +10,7 @@ import { MipsSimulator } from '../core/simulator'
 import { EMPTY_SOURCE_INDEX, type SourceIndex, type SourceRow } from '../core/sourceIndex'
 import { EffectStore } from '../core/effectStore'
 import { HistoryLog, moveToEntry } from '../core/historyLog'
-import type { CallFrame, CodeWord, CoprocessorState, Diagnostic, KeyboardDisplayState, MemoryView, PendingInput, Registers, SymbolTables } from '../core/types'
+import type { CallFrame, CodeWord, CoprocessorState, DataEntry, Diagnostic, KeyboardDisplayState, MemoryView, PendingInput, Registers, SymbolTables } from '../core/types'
 import { DebugSession } from '../debug/session'
 import { isFlagSet, readStoredSetting, writeStoredSetting } from '../hooks/useStoredState'
 import { downloadHexText } from '../services/hexTextExport'
@@ -373,6 +373,11 @@ interface THRAXStore extends CoprocessorState {
 	/** Symbols of the assembled program, by the file that owns them. */
 	symbols: SymbolTables
 	/**
+	 * The runs of bytes the data directives laid out, which is what a symbol was
+	 * declared as: the symbol table reads a name's type and value from these.
+	 */
+	programData: DataEntry[]
+	/**
 	 * An address another panel asked the memory view to show.  It carries a
 	 * sequence number because asking for the same address twice has to move the
 	 * view both times.
@@ -642,6 +647,7 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 			historyEffects: simulator.effects,
 			historyVersion: get().historyVersion + 1,
 			symbols: simulator.program.symbols,
+			programData: simulator.program.data,
 			breakpoints: new Set(simulator.getBreakpoints()),
 			sourceIndex: simulator.program.sourceIndex,
 			codeWords: codeWordsByFile(simulator),
@@ -737,6 +743,7 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 			historyEffects: new EffectStore(),
 			historyVersion: (get()?.historyVersion ?? 0) + 1,
 			symbols: { locals: new Map(), globals: new Map() },
+			programData: [],
 			...initialCoprocessorState(),
 		}
 	}
