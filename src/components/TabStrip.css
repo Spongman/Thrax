@@ -1,0 +1,28 @@
+.tab-strip {
+	display: flex;
+	gap: 4px;
+}
+
+.tab {
+	/* Sharing the row, but not stretched across a panel far wider than the
+	   register file the strip was drawn for. */
+	flex: 1;
+	max-width: 240px;
+	padding: 5px 8px;
+	background: var(--surface-overlay);
+	color: var(--text-primary);
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	font-size: 12px;
+	cursor: pointer;
+}
+
+.tab:hover {
+	background: var(--surface-overlay);
+}
+
+.tab.active {
+	background: var(--accent-surface);
+	color: var(--text-bright);
+	border-color: var(--accent);
+}

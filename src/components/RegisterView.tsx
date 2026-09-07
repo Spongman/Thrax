@@ -1,11 +1,13 @@
 import React from 'react'
 import './RegisterView.css'
+import './ToggleGroup.css'
 import { bitsToDouble, bitsToSingle, CP0_REGISTERS, formatDouble, formatSingle } from '../core/coprocessor'
 import { formatWord } from '../core/format'
 import type { CoprocessorState, Registers } from '../core/types'
 import { advanceOne, isSolo, nextToggles } from './toggleGroup'
 import FloatBitsView from './FloatBitsView'
 import PanelGroup from './PanelGroup'
+import TabStrip, { type Tab } from './TabStrip'
 import HexNumber from './HexNumber'
 import EditableCell from './EditableCell'
 import { parseEditedDouble, parseEditedValue } from './editValue'
@@ -51,7 +53,7 @@ export function tabForRegister(name: string): RegisterTab {
 
 type Format = '0n' | '0x' | 'f' | 'd'
 
-const TABS: Array<{ id: RegisterTab; label: string }> = [
+const TABS: Array<Tab<RegisterTab>> = [
 	{ id: 'registers', label: 'Registers' },
 	{ id: 'coproc1', label: 'Coproc 1' },
 	{ id: 'coproc0', label: 'Coproc 0' },
@@ -192,11 +194,11 @@ function RegisterPanel({ title, entries, flags, onToggle, selected, onSelect, on
 			title={title}
 			flush
 			actions={(
-				<div className="format-toggles">
+				<div className="toggle-group">
 					{FORMATS.filter((format) => available.includes(format.id)).map((format) => (
 						<button
 							key={format.id}
-							className={`format-toggle${formats.includes(format.id) ? ' active' : ''}`}
+							className={`toggle-button${formats.includes(format.id) ? ' active' : ''}`}
 							title={format.title}
 							onClick={(event) => onToggle(title, format.id, event)}
 						>
@@ -339,17 +341,7 @@ function RegisterView({ registers, fpRegisters, fpConditionFlags, cp0Registers, 
 
 	return (
 		<div className="register-view">
-			<div className="register-tabs">
-				{TABS.map((item) => (
-					<button
-						key={item.id}
-						className={`register-tab${tab === item.id ? ' active' : ''}`}
-						onClick={() => setTab(item.id)}
-					>
-						{item.label}
-					</button>
-				))}
-			</div>
+			<TabStrip tabs={TABS} active={tab} onSelect={setTab} />
 
 			{tab === 'registers' && Object.entries(REGISTER_GROUPS).map(([group, names]) => (
 				<RegisterPanel
@@ -415,7 +407,7 @@ function RegisterView({ registers, fpRegisters, fpConditionFlags, cp0Registers, 
 					{selectedFp !== null && (
 						<PanelGroup
 							title={`$f${selectedFp}${fpDouble ? `/$f${selectedFp + 1}` : ''} bits`}
-							actions={<button className="format-toggle" title="Clear selection" onClick={() => setSelectedRegister(null)}>×</button>}
+							actions={<div className="toggle-group"><button className="toggle-button" title="Clear selection" onClick={() => setSelectedRegister(null)}>×</button></div>}
 						>
 							<FloatBitsView
 								bits={fpRegisters[selectedFp] >>> 0}

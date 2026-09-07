@@ -19,7 +19,6 @@
 	gap: 4px;
 }
 
-.memory-group-size,
 .memory-go,
 .memory-options {
 	padding: 3px 8px;
@@ -32,67 +31,40 @@
 	font-family: 'Courier New', monospace;
 }
 
-.memory-group-size:hover,
+/* The hamburger is a glyph with a line box of its own, so every control on the
+   row is told the same one and they stand the same height. */
+.memory-go,
+.memory-options,
+.memory-address-input {
+	line-height: 12px;
+	box-sizing: border-box;
+	height: 20px;
+}
+
 .memory-go:hover,
 .memory-options:hover {
 	background: var(--border-strong);
 }
 
-.memory-group-size.active,
 .memory-options.active {
 	background: var(--accent);
 	border-color: var(--accent);
 	color: white;
 }
 
-.memory-group-sizes {
-	display: flex;
-	gap: 2px;
-}
-
-.memory-group-size,
 .memory-options {
 	min-width: 26px;
 }
 
-/* Joined groups: the sections, and the row-shape toggles. */
-.memory-toggles {
+/* One digit apiece, so they are given a width rather than shrinking to fit. */
+.memory-sizes > .toggle-button {
+	min-width: 26px;
+}
+
+.memory-goto {
 	display: flex;
-}
-
-.memory-toggle {
-	padding: 3px 8px;
-	background: var(--surface-input);
-	border: 1px solid var(--border-strong);
-	border-right-width: 0;
-	color: var(--text-primary);
-	cursor: pointer;
-	font-size: 11px;
-	font-family: 'Courier New', monospace;
-}
-
-.memory-toggle:first-child {
-	border-radius: var(--radius) 0 0 var(--radius);
-}
-
-.memory-toggle:last-child {
-	border-right-width: 1px;
-	border-radius: 0 var(--radius) var(--radius) 0;
-}
-
-.memory-toggle:hover {
-	background: var(--border-strong);
-}
-
-.memory-toggle.active {
-	background: var(--accent);
-	border-color: var(--accent);
-	color: var(--text-bright);
-}
-
-/* Two selected neighbours share a blue edge, so draw the seam explicitly. */
-.memory-toggle.active + .memory-toggle.active {
-	border-left-color: var(--accent-active);
+	flex: 1;
+	min-width: 120px;
 }
 
 .memory-address-input {
@@ -100,11 +72,16 @@
 	min-width: 90px;
 	padding: 3px 6px;
 	background: var(--surface-input);
-	border: 1px solid var(--border);
+	border: 1px solid var(--border-strong);
+	border-right-width: 0;
 	color: var(--text-primary);
-	border-radius: var(--radius);
+	border-radius: var(--radius) 0 0 var(--radius);
 	font-size: 11px;
 	font-family: 'Courier New', monospace;
+}
+
+.memory-goto > .memory-go {
+	border-radius: 0 var(--radius) var(--radius) 0;
 }
 
 .memory-error {
@@ -234,11 +211,6 @@
 	opacity: 0.75;
 	font-weight: 600;
 	text-align: center;
-}
-
-.memory-toggle:disabled {
-	opacity: 0.4;
-	cursor: default;
 }
 
 .memory-byte.hovered,

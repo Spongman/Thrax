@@ -1,0 +1,52 @@
+/*
+ * Buttons that belong together, drawn as one control: no gaps, one border
+ * between neighbours, and the ends rounded.  The memory window picks its
+ * section and its row shape with these, and the symbol table its sort order,
+ * so a group of choices reads the same wherever it is.
+ */
+.toggle-group {
+	display: flex;
+}
+
+.toggle-button {
+	padding: 3px 8px;
+	background: var(--surface-input);
+	border: 1px solid var(--border-strong);
+	border-right-width: 0;
+	color: var(--text-primary);
+	cursor: pointer;
+	font-size: 11px;
+	font-family: 'Courier New', monospace;
+	line-height: 12px;
+	box-sizing: border-box;
+	height: 20px;
+}
+
+.toggle-button:first-child {
+	border-radius: var(--radius) 0 0 var(--radius);
+}
+
+.toggle-button:last-child {
+	border-right-width: 1px;
+	border-radius: 0 var(--radius) var(--radius) 0;
+}
+
+.toggle-button:hover {
+	background: var(--border-strong);
+}
+
+.toggle-button:disabled {
+	opacity: 0.4;
+	cursor: default;
+}
+
+.toggle-button.active {
+	background: var(--accent);
+	border-color: var(--accent);
+	color: var(--text-bright);
+}
+
+/* Two selected neighbours share a blue edge, so draw the seam explicitly. */
+.toggle-button.active + .toggle-button.active {
+	border-left-color: var(--accent-active);
+}

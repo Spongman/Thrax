@@ -1,5 +1,6 @@
 import React from 'react'
 import './MemoryView.css'
+import './ToggleGroup.css'
 import type { MemoryView as Memory } from '../core/types'
 import { formatHex, formatWord, parseWord } from '../core/format'
 import { disassemble } from '../core/disassembler'
@@ -468,31 +469,6 @@ function MemoryView({ memory, pc, returnAddresses, focusAddress, focusRequest = 
 					}}
 				>
 					<div className="memory-toolbar-row">
-						<div className="memory-toggles">
-							{sections.map((entry) => (
-								<button
-									key={entry.id}
-									className={`memory-toggle ${entry.id === section.id ? 'active' : ''}`}
-									title={`${formatAddress(entry.start)} - ${formatAddress(entry.end)}`}
-									onClick={() => showSection(entry)}
-								>
-									{entry.label}
-								</button>
-							))}
-						</div>
-						<span className="memory-status">
-							<HexWord value={alignedWindowStart} /> - <HexWord value={windowEnd} />
-							{windowEnd < section.end && ' (windowed; use Go to move)'}
-						</span>
-						<input
-							className="memory-address-input"
-							type="text"
-							value={addressInput}
-							onChange={(event) => setAddressInput(event.target.value)}
-							onKeyDown={(event) => { if (event.key === 'Enter') goToAddress() }}
-							placeholder="0x10010000"
-						/>
-						<button className="memory-go" onClick={goToAddress}>Go</button>
 						<button
 							className={`memory-options ${showOptions ? 'active' : ''}`}
 							title="Row options"
@@ -501,15 +477,41 @@ function MemoryView({ memory, pc, returnAddresses, focusAddress, focusRequest = 
 						>
 							&#9776;
 						</button>
+						<div className="toggle-group">
+							{sections.map((entry) => (
+								<button
+									key={entry.id}
+									className={`toggle-button ${entry.id === section.id ? 'active' : ''}`}
+									title={`${formatAddress(entry.start)} - ${formatAddress(entry.end)}`}
+									onClick={() => showSection(entry)}
+								>
+									{entry.label}
+								</button>
+							))}
+						</div>
+						<div className="memory-goto">
+							<input
+								className="memory-address-input"
+								type="text"
+								value={addressInput}
+								onChange={(event) => setAddressInput(event.target.value)}
+								onKeyDown={(event) => { if (event.key === 'Enter') goToAddress() }}
+								placeholder="0x10010000"
+							/>
+							<button className="memory-go" onClick={goToAddress}>Go</button>
+						</div>
+						<span className="memory-status">
+							<HexWord value={alignedWindowStart} /> - <HexWord value={windowEnd} />
+						</span>
 					</div>
 
 					{showOptions && (
 						<div className="memory-controls">
-							<div className="memory-group-sizes">
+							<div className="toggle-group memory-sizes">
 								{GROUP_SIZES.map((size) => (
 									<button
 										key={size}
-										className={`memory-group-size ${size === groupSize ? 'active' : ''}`}
+										className={`toggle-button ${size === groupSize ? 'active' : ''}`}
 										title={`${size}-byte groups`}
 										onClick={() => setGroupSize(size)}
 									>
@@ -517,23 +519,23 @@ function MemoryView({ memory, pc, returnAddresses, focusAddress, focusRequest = 
 									</button>
 								))}
 							</div>
-							<div className="memory-toggles">
+							<div className="toggle-group">
 								<button
-									className={`memory-toggle ${powerOfTwoRows ? 'active' : ''}`}
+									className={`toggle-button ${powerOfTwoRows ? 'active' : ''}`}
 									title="Wrap rows at a power of two bytes"
 									onClick={(event) => setRowOptions((current) => nextToggles(current, 'powerOfTwo', event))}
 								>
 									^2
 								</button>
 								<button
-									className={`memory-toggle ${showAscii ? 'active' : ''}`}
+									className={`toggle-button ${showAscii ? 'active' : ''}`}
 									title="Show the ASCII column"
 									onClick={(event) => setRowOptions((current) => nextToggles(current, 'ascii', event))}
 								>
 									ascii
 								</button>
 								<button
-									className={`memory-toggle ${showIcons ? 'active' : ''}`}
+									className={`toggle-button ${showIcons ? 'active' : ''}`}
 									title="Name each non-printing byte with its own glyph"
 									disabled={!showAscii}
 									onClick={(event) => setRowOptions((current) => nextToggles(current, 'icons', event))}
