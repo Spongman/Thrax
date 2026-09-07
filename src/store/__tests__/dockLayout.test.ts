@@ -24,7 +24,7 @@ const LAYOUT_KEY = 'thrax-web.dock-layout'
 const SHIPPED_LAYOUT_VERSION = 3
 
 /** A stored layout that has been pared back to the windows and one tool. */
-const STORED_PANELS = ['registers', 'callStack', 'memory', 'console', 'cache']
+const STORED_PANELS = ['registers', 'callStack', 'files', 'symbols', 'memory', 'console', 'history', 'cache']
 
 function storeLayout(components: string[]) {
 	const panels = Object.fromEntries(components.map((component) => [component, { id: component, contentComponent: component }]))
@@ -77,7 +77,7 @@ describe('dock layout', () => {
 		buildLayout(dock.api, new Set())
 
 		const opened = dock.added.filter((options) => options.component !== 'source').map((options) => options.id)
-		expect(opened).toEqual(['registers', 'memory', 'callStack', 'console'])
+		expect(opened).toEqual(['registers', 'memory', 'callStack', 'files', 'symbols', 'console', 'history'])
 		// A tool is opened from the menu, so nothing fetches its code on load.
 		for (const id of ['cache', 'xray', 'marsBot', 'digitalLab']) expect(dock.ids()).not.toContain(id)
 	})
@@ -98,7 +98,7 @@ describe('dock layout', () => {
 	})
 
 	it('adds back a window a stored arrangement predates', () => {
-		storeLayout(['registers', 'memory', 'console'])
+		storeLayout(['registers', 'files', 'symbols', 'memory', 'console', 'history'])
 		const dock = fakeApi()
 		buildLayout(dock.api, new Set())
 

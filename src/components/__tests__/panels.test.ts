@@ -7,10 +7,10 @@ describe('the panel catalogue', () => {
 		expect(new Set(ids).size).toBe(ids.length)
 	})
 
-	it('opens the four windows a run is watched through, and no tool', () => {
+	it('opens every window, and no tool', () => {
 		// A tool that starts by itself costs a tab nobody asked for and, now that
 		// its code is fetched on demand, a download nobody asked for either.
-		expect(INITIAL_PANELS.map((panel) => panel.id)).toEqual(['registers', 'callStack', 'memory', 'console'])
+		expect(INITIAL_PANELS.map((panel) => panel.id)).toEqual(['registers', 'callStack', 'files', 'symbols', 'memory', 'console', 'history'])
 		expect(INITIAL_PANELS.every((panel) => panel.group === 'window')).toBe(true)
 	})
 
@@ -25,7 +25,7 @@ describe('the panel catalogue', () => {
 	})
 
 	it('splits the menus between the workspace views and the tools', () => {
-		expect(panelsIn('window').map((panel) => panel.id)).toEqual(['registers', 'callStack', 'symbols', 'memory', 'console', 'history'])
+		expect(panelsIn('window').map((panel) => panel.id)).toEqual(['registers', 'callStack', 'files', 'symbols', 'memory', 'console', 'history'])
 		expect(panelsIn('tool')).toHaveLength(11)
 		expect(panelsIn('window').length + panelsIn('tool').length).toBe(PANELS.length)
 	})

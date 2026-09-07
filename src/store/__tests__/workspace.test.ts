@@ -19,7 +19,7 @@ Object.defineProperty(globalThis, 'window', {
 })
 
 const { downloadHexText } = await import('../../services/hexTextExport')
-const { useTHRAXStore } = await import('../thraxStore')
+const { shownDocuments, useTHRAXStore } = await import('../thraxStore')
 
 const state = () => useTHRAXStore.getState()
 const titleOf = (id: string) => state().documents.find((document) => document.id === id)?.title
@@ -123,10 +123,39 @@ describe('document ids', () => {
 	})
 })
 
-describe('closing a file', () => {
-	it('closes a file with nothing unsaved in it', () => {
-		openTwoFiles('one.asm', 'two.asm')
+describe('closing a tab', () => {
+	it('puts the file away rather than out of the project', () => {
+		openTwoFiles('one.asm', 'two.asm', true)
 		state().requestCloseDocument('two')
+
+		expect(state().pendingClose).toBe(null)
+		expect(isOpen('two')).toBe(true)
+		expect(state().documents.find((document) => document.id === 'two')?.hidden).toBe(true)
+		expect(shownDocuments(state().documents).map((document) => document.id)).toEqual(['one'])
+	})
+
+	it('brings the tab to the left forward when the active one goes', () => {
+		openTwoFiles('one.asm', 'two.asm')
+		state().selectDocument('two')
+		state().requestCloseDocument('two')
+
+		expect(state().activeDocumentId).toBe('one')
+	})
+
+	it('brings a put-away file back when it is selected', () => {
+		openTwoFiles('one.asm', 'two.asm')
+		state().hideDocument('two')
+		state().selectDocument('two')
+
+		expect(state().activeDocumentId).toBe('two')
+		expect(state().documents.find((document) => document.id === 'two')?.hidden).toBeUndefined()
+	})
+})
+
+describe('removing a file', () => {
+	it('removes a file with nothing unsaved in it', () => {
+		openTwoFiles('one.asm', 'two.asm')
+		state().requestDeleteDocument('two')
 
 		expect(state().pendingClose).toBe(null)
 		expect(isOpen('two')).toBe(false)
@@ -134,7 +163,7 @@ describe('closing a file', () => {
 
 	it('asks before discarding an edited file, and keeps it when the answer is no', () => {
 		openTwoFiles('one.asm', 'two.asm', true)
-		state().requestCloseDocument('two')
+		state().requestDeleteDocument('two')
 
 		expect(state().pendingClose).toBe('two')
 		expect(isOpen('two')).toBe(true)
@@ -144,13 +173,70 @@ describe('closing a file', () => {
 		expect(isOpen('two')).toBe(true)
 	})
 
-	it('closes the edited file once the answer is yes', () => {
+	it('removes the edited file once the answer is yes', () => {
 		openTwoFiles('one.asm', 'two.asm', true)
-		state().requestCloseDocument('two')
+		state().requestDeleteDocument('two')
 		state().confirmCloseDocument()
 
 		expect(state().pendingClose).toBe(null)
 		expect(isOpen('two')).toBe(false)
+	})
+})
+
+describe('opening files', () => {
+	it('adds files to the project and brings the first forward', () => {
+		openTwoFiles('one.asm', 'two.asm')
+		state().openFiles([{ title: 'lib.asm', code: '# lib\n' }, { title: 'more.asm', code: '' }])
+
+		expect(titles()).toEqual(['one.asm', 'two.asm', 'lib.asm', 'more.asm'])
+		expect(titleOf(state().activeDocumentId)).toBe('lib.asm')
+		expect(state().code).toBe('# lib\n')
+	})
+
+	it('reloads a file opened again instead of copying it', () => {
+		openTwoFiles('one.asm', 'two.asm', true)
+		state().openFiles([{ title: 'two.asm', code: '# fresh\n' }])
+
+		expect(titles()).toEqual(['one.asm', 'two.asm'])
+		const two = state().documents.find((document) => document.id === 'two')!
+		expect(two.code).toBe('# fresh\n')
+		expect(two.dirty).toBe(false)
+	})
+
+	it('replaces the project when asked to', () => {
+		openTwoFiles('one.asm', 'two.asm')
+		state().openFiles([{ title: 'a.asm', code: '' }, { title: 'b.asm', code: '' }], { replace: true, active: 'b.asm', assembleAll: true })
+
+		expect(titles()).toEqual(['a.asm', 'b.asm'])
+		expect(titleOf(state().activeDocumentId)).toBe('b.asm')
+		expect(state().settings.assembleAll).toBe(true)
+		state().setSetting('assembleAll', false)
+	})
+
+	it('snapshots the live text of the file being typed into', () => {
+		openTwoFiles('one.asm', 'two.asm')
+		state().setCode('# typing\n')
+
+		expect(state().workspaceSnapshot()).toEqual({
+			files: [{ title: 'one.asm', code: '# typing\n' }, { title: 'two.asm', code: '' }],
+			active: 'one.asm',
+			assembleAll: false,
+		})
+	})
+})
+
+describe('autosave', () => {
+	it('follows an edit into storage a little behind it', async () => {
+		storage.delete('thrax-web.autosave')
+		openTwoFiles('one.asm', 'two.asm')
+		state().setCode('# kept\n')
+		expect(storage.has('thrax-web.autosave')).toBe(false)
+
+		await new Promise((resolve) => setTimeout(resolve, 600))
+		const saved = JSON.parse(storage.get('thrax-web.autosave')!)
+		expect(saved.format).toBe('thrax-workspace')
+		expect(saved.files).toEqual([{ title: 'one.asm', code: '# kept\n' }, { title: 'two.asm', code: '' }])
+		expect(saved.active).toBe('one.asm')
 	})
 })
 

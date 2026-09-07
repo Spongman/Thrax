@@ -2,6 +2,7 @@ import * as monaco from 'monaco-editor'
 import EditorWorker from 'monaco-editor/editor/common/services/editorWebWorkerMain?worker'
 import { loader } from '@monaco-editor/react'
 import { registerMipsLanguage } from './core/mipsLanguage'
+import { restoreGitHubSession } from './services/githubSession'
 
 // Vite cannot bundle the core editor worker from Monaco's internal
 // `new URL('...editorWebWorkerMain.js', import.meta.url)` reference, so supply it
@@ -17,6 +18,9 @@ loader.config({ monaco })
 
 // Register MIPS language on app load
 registerMipsLanguage()
+
+// A GitHub token kept from an earlier visit signs in again.
+restoreGitHubSession()
 
 import React from 'react'
 import ReactDOM from 'react-dom/client'

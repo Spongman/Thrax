@@ -14,6 +14,7 @@ import type { CallFrame, CodeWord, CoprocessorState, Diagnostic, KeyboardDisplay
 import { DebugSession } from '../debug/session'
 import { isFlagSet, readStoredSetting, writeStoredSetting } from '../hooks/useStoredState'
 import { downloadHexText } from '../services/hexTextExport'
+import { fromWorkspaceDocument, toWorkspaceDocument, type WorkspaceFile, type WorkspaceSnapshot } from '../services/workspace'
 import type { BranchHistorySettings, BranchHistorySnapshot } from '../tools/branchHistory'
 import { effectiveCacheSettings, type CacheSettings, type CacheSnapshot } from '../tools/cache'
 import type { MarsBotSnapshot } from '../tools/marsBot'
@@ -32,13 +33,19 @@ import type { StatisticsSnapshot } from '../tools/statistics'
 export const RUN_SPEEDS: Array<number | null> = [1, 2, 5, 10, 30, 100, 300, 1000, 5000, 30000, null]
 
 const SAVED_PROGRAM_KEY = 'thrax-web.saved-program'
-const SAVED_PROGRAM_VERSION = 2
+/**
+ * Where the open files go as they are typed, so a reload or a closed tab loses
+ * nothing.  Separate from the slot Save writes: that one is what was asked for,
+ * this one is what was there.
+ */
+const AUTOSAVE_KEY = 'thrax-web.autosave'
+const AUTOSAVE_DELAY_MS = 400
 const INITIAL_CODE = '# Simple addition example\n# $t0 = 5, $t1 = 3, $t2 = $t0 + $t1\naddi $t0, $zero, 5\naddi $t1, $zero, 3\nadd $t2, $t0, $t1\n\n# Print result (syscall 1)\nmove $a0, $t2\naddi $v0, $zero, 1\nsyscall\n\n# Exit (syscall 10)\naddi $v0, $zero, 10\nsyscall\n'
+/** The shape the browser slot held before it was a workspace document. */
 interface SavedProgram {
 	version: number
 	code: string
-	savedAt: string
-	documents?: SourceDocument[]
+	documents?: Array<{ title: string, code: string, id?: string }>
 	activeDocumentId?: string
 	assembleAllFiles?: boolean
 }
@@ -123,6 +130,24 @@ export interface SourceDocument {
 	title: string
 	code: string
 	dirty: boolean
+	/**
+	 * In the project but off the tab bar.  Closing a tab puts a file here rather
+	 * than out of the program, so it still assembles and `.include` still finds
+	 * it; the file list is where it is brought back or removed for good.
+	 */
+	hidden?: true
+}
+
+/** What the tab bar shows: the files not put away. */
+export const shownDocuments = (documents: readonly SourceDocument[]) => documents.filter((document) => !document.hidden)
+
+/**
+ * The tab that comes forward when the one at `index` (in `before`) goes: the
+ * shown file nearest to its left, else the first still showing, else none.
+ */
+function neighbourOf(documents: readonly SourceDocument[], before: readonly SourceDocument[], index: number): SourceDocument | undefined {
+	const shown = shownDocuments(documents)
+	return [...shown].reverse().find((document) => before.indexOf(document) < index) ?? shown[0]
 }
 
 /**
@@ -151,39 +176,48 @@ export function sourceSignature(documents: readonly SourceDocument[]): string {
 	return documents.map((document) => `${document.title}\u0000${document.code}`).join('\u0001')
 }
 
-function getSavedProgram(): SavedProgram | null {
+/** A workspace document, or the older saved-program shape, from storage. */
+function readStoredWorkspace(key: string): WorkspaceSnapshot | null {
 	try {
-		const rawProgram = window.localStorage.getItem(SAVED_PROGRAM_KEY)
-		if (!rawProgram) return null
-		const program: unknown = JSON.parse(rawProgram)
-		if (
-			typeof program !== 'object' ||
-			program === null ||
-			!('version' in program) ||
-			!('code' in program) ||
-			((program as SavedProgram).version !== 1 && (program as SavedProgram).version !== SAVED_PROGRAM_VERSION) ||
-			typeof (program as SavedProgram).code !== 'string'
-		) {
-			return null
-		}
-		return program as SavedProgram
+		const raw = window.localStorage.getItem(key)
+		if (!raw) return null
+		const parsed: unknown = JSON.parse(raw)
+		const workspace = fromWorkspaceDocument(parsed)
+		if (workspace) return workspace
+		return fromSavedProgram(parsed)
 	} catch {
 		return null
 	}
 }
 
-function hasSavedDocuments(program: SavedProgram): program is SavedProgram & { documents: SourceDocument[], activeDocumentId: string } {
-	return Array.isArray(program.documents) &&
-		program.documents.length > 0 &&
-		program.documents.every((document) =>
-			typeof document === 'object' &&
-			document !== null &&
-			typeof document.id === 'string' &&
-			typeof document.title === 'string' &&
-			typeof document.code === 'string'
-		) &&
-		typeof program.activeDocumentId === 'string' &&
-		program.documents.some((document) => document.id === program.activeDocumentId)
+function fromSavedProgram(value: unknown): WorkspaceSnapshot | null {
+	if (typeof value !== 'object' || value === null) return null
+	const program = value as Partial<SavedProgram>
+	if (typeof program.version !== 'number' || typeof program.code !== 'string') return null
+	const documents = Array.isArray(program.documents) && program.documents.length > 0 &&
+		program.documents.every((document) => typeof document?.title === 'string' && typeof document.code === 'string')
+		? program.documents
+		: [{ title: 'main.asm', code: program.code }]
+	const active = documents.find((document) => document.id === program.activeDocumentId)?.title
+	return { files: documents.map(({ title, code }) => ({ title, code })), active, assembleAll: program.assembleAllFiles === true }
+}
+
+function writeStoredWorkspace(key: string, snapshot: WorkspaceSnapshot): boolean {
+	try {
+		window.localStorage.setItem(key, JSON.stringify(toWorkspaceDocument(snapshot)))
+		return true
+	} catch {
+		return false
+	}
+}
+
+/**
+ * Open files from what a workspace carries.  Titles are kept apart the way
+ * they are everywhere else, since a workspace saved before that can collide.
+ */
+function documentsFrom(files: readonly WorkspaceFile[]): SourceDocument[] {
+	return files.reduce<SourceDocument[]>((all, file) =>
+		[...all, { id: newDocumentId(), title: uniqueTitle(file.title, all), code: file.code, dirty: false }], [])
 }
 
 /**
@@ -253,6 +287,14 @@ function initialCoprocessorState(): CoprocessorState {
  */
 function liveWord(simulator: MipsSimulator, address: number): number {
 	return [0, 1, 2, 3].reduce((word, offset) => word | (simulator.readByte(address + offset) << (offset * 8)), 0) >>> 0
+}
+
+export interface OpenFilesOptions {
+	/** The files become the whole project rather than joining it. */
+	replace?: boolean
+	/** Title of the file to bring to the front; the first opened when absent. */
+	active?: string
+	assembleAll?: boolean
 }
 
 interface THRAXStore extends CoprocessorState {
@@ -368,15 +410,32 @@ interface THRAXStore extends CoprocessorState {
 	setDocumentCode: (documentId: string, code: string) => void
 	/** Changes one setting; the ones the assembler reads rebuild the program. */
 	setSetting: <Key extends keyof ThraxSettings>(key: Key, value: ThraxSettings[Key]) => void
+	/** Writes the workspace to this browser's slot; `loadProgram` reads it back. */
 	saveProgram: () => boolean
 	loadProgram: () => boolean
 	exportHexText: () => boolean
+	/** The project as a document: every file, the one in front, the multi-file setting. */
+	workspaceSnapshot: () => WorkspaceSnapshot
+	/**
+	 * Adds files to the project, or with `replace` makes them the project.  A
+	 * file named like one already open takes that file's place, so opening a
+	 * file again reloads it rather than making a copy.
+	 */
+	openFiles: (files: readonly WorkspaceFile[], options?: OpenFilesOptions) => void
+	/** Records that these files are on disk as they stand. */
+	markDocumentsSaved: (documentIds: readonly string[]) => void
 	createDocument: () => void
+	/** Brings a file to the front, back onto the tab bar if it was put away. */
 	selectDocument: (documentId: string) => void
 	renameDocument: (documentId: string, title: string) => void
+	/** Takes a file out of the project. */
 	closeDocument: (documentId: string) => void
-	/** Closes a file, asking first when it has edits that were never saved. */
+	/** Takes a file off the tab bar; it stays in the project. */
+	hideDocument: (documentId: string) => void
+	/** What closing a tab does: the file is put away, never lost. */
 	requestCloseDocument: (documentId: string) => void
+	/** Removes a file from the project, asking first when it has edits that were never saved. */
+	requestDeleteDocument: (documentId: string) => void
 	confirmCloseDocument: () => void
 	cancelCloseDocument: () => void
 	assemble: () => void
@@ -685,11 +744,17 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 	// `get()` has nothing to return while the initial state is being built.
 	const initialSettings = readSettings()
 
+	// What was open when the page was last here, or the first example when it never was.
+	const autosaved = readStoredWorkspace(AUTOSAVE_KEY)
+	const initialDocuments = autosaved ? documentsFrom(autosaved.files) : [{ id: 'main', title: 'main.asm', code: INITIAL_CODE, dirty: false }]
+	const initialActive = initialDocuments.find((document) => document.title === autosaved?.active) ?? initialDocuments[0]
+	if (autosaved) initialSettings.assembleAll = autosaved.assembleAll
+
 	return {
-		code: INITIAL_CODE,
-		documents: [{ id: 'main', title: 'main.asm', code: INITIAL_CODE, dirty: false }],
-		activeDocumentId: 'main',
-		entryDocumentId: 'main',
+		code: initialActive.code,
+		documents: initialDocuments,
+		activeDocumentId: initialActive.id,
+		entryDocumentId: initialActive.id,
 		settings: initialSettings,
 		...resetExecution(initialSettings),
 		focusedMemory: null,
@@ -707,7 +772,7 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 		runToken: 0,
 		consoleAttention: 'none',
 		openPanels: [],
-		hasSavedProgram: getSavedProgram() !== null,
+		hasSavedProgram: readStoredWorkspace(SAVED_PROGRAM_KEY) !== null,
 		runSpeed: readStoredSetting<number | null>(RUN_SPEED_SETTING, null, (value) => RUN_SPEEDS.includes(value as number | null)),
 		...tools.views(),
 		cacheSettings: effectiveCacheSettings(toolSettings.cache),
@@ -756,49 +821,61 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 			set({ settings, ...resetExecution(settings) })
 		},
 
-		saveProgram: () => {
-			try {
-				const state = get()
-				const documents = state.documents.map((document) => ({ ...document, dirty: false }))
-				const program: SavedProgram = {
-					version: SAVED_PROGRAM_VERSION,
-					code: state.code,
-					savedAt: new Date().toISOString(),
-					documents,
-					activeDocumentId: state.activeDocumentId,
-					assembleAllFiles: state.settings.assembleAll,
-				}
-				window.localStorage.setItem(SAVED_PROGRAM_KEY, JSON.stringify(program))
-				// What was written out is what is open, so nothing is unsaved any more.
-				set({ documents, hasSavedProgram: true })
-				return true
-			} catch {
-				return false
+		workspaceSnapshot: () => {
+			const { activeDocumentId, code, documents, settings } = get()
+			return {
+				// The tab being typed into holds its live text in `code`.
+				files: documents.map((document) => ({ title: document.title, code: document.id === activeDocumentId ? code : document.code })),
+				active: documents.find((document) => document.id === activeDocumentId)?.title,
+				assembleAll: settings.assembleAll,
 			}
 		},
 
+		saveProgram: () => {
+			if (!writeStoredWorkspace(SAVED_PROGRAM_KEY, get().workspaceSnapshot())) return false
+			// What was written out is what is open, so nothing is unsaved any more.
+			set((state) => ({ documents: state.documents.map((document) => ({ ...document, dirty: false })), hasSavedProgram: true }))
+			return true
+		},
+
 		loadProgram: () => {
-			const program = getSavedProgram()
-			if (!program) return false
-			const saved = hasSavedDocuments(program)
-				? program.documents
-				: [{ id: 'main', title: 'main.asm', code: program.code, dirty: false }]
-			// A workspace saved before titles were kept apart can still collide.
-			const documents = saved.reduce<SourceDocument[]>((all, document) =>
-				[...all, { ...document, dirty: false, title: uniqueTitle(document.title, all) }], [])
-			const activeDocumentId = hasSavedDocuments(program) ? program.activeDocumentId : documents[0].id
-			const activeDocument = documents.find((document) => document.id === activeDocumentId)!
+			const workspace = readStoredWorkspace(SAVED_PROGRAM_KEY)
+			if (!workspace) return false
+			get().openFiles(workspace.files, { replace: true, active: workspace.active, assembleAll: workspace.assembleAll })
+			set({ hasSavedProgram: true })
+			return true
+		},
+
+		openFiles: (files, options = {}) => {
+			if (files.length === 0) return
+			const state = get()
+			const kept = options.replace ? [] : state.documents
+			// A file opened again lands in its own document, shown again if it was put away.
+			const replaced = new Map(files.map((file) => [file.title, file]))
+			const updated = kept.map((document) => {
+				const file = replaced.get(document.title)
+				return file ? { id: document.id, title: document.title, code: file.code, dirty: false } : document
+			})
+			const added = documentsFrom(files.filter((file) => !kept.some((document) => document.title === file.title)))
+			const documents = [...updated, ...added]
+			const wanted = options.active ?? files[0].title
+			const active = documents.find((document) => document.title === wanted) ?? documents[0]
+			const settings = options.assembleAll === undefined ? state.settings : { ...state.settings, assembleAll: options.assembleAll }
+			if (settings !== state.settings) writeStoredSetting(SETTING_KEYS.assembleAll, settings.assembleAll)
 			debug.detach()
 			set({
-				code: activeDocument.code,
+				code: active.code,
 				documents,
-				activeDocumentId,
-				entryDocumentId: activeDocumentId,
-				settings: { ...get().settings, assembleAll: program.assembleAllFiles === true },
-				hasSavedProgram: true,
-				...resetExecution(),
+				activeDocumentId: active.id,
+				entryDocumentId: active.id,
+				settings,
+				...resetExecution(settings),
 			})
-			return true
+		},
+
+		markDocumentsSaved: (documentIds) => {
+			const saved = new Set(documentIds)
+			set((state) => ({ documents: state.documents.map((document) => saved.has(document.id) ? { ...document, dirty: false } : document) }))
 		},
 
 		exportHexText: () => {
@@ -846,9 +923,17 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 		// the file in front of the user the one being assembled.
 		selectDocument: (documentId) => {
 			const document = get().documents.find((candidate) => candidate.id === documentId)
-			if (!document || document.id === get().activeDocumentId) return
+			if (!document) return
+			// A file that was put away comes back onto the tab bar as it is selected.
+			const shown = document.hidden
+				? { documents: get().documents.map(({ hidden, ...rest }) => rest.id === documentId || !hidden ? rest : { ...rest, hidden }) }
+				: {}
+			if (document.id === get().activeDocumentId) {
+				if (document.hidden) set(shown)
+				return
+			}
 			const started = (debug.machine?.instructionCount ?? 0) > 0
-			set({ activeDocumentId: document.id, code: document.code, ...(started ? {} : { entryDocumentId: document.id }) })
+			set({ ...shown, activeDocumentId: document.id, code: document.code, ...(started ? {} : { entryDocumentId: document.id }) })
 			if (!started) get().refreshAssembly()
 		},
 
@@ -863,7 +948,22 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 			})
 		},
 
-		requestCloseDocument: (documentId) => {
+		requestCloseDocument: (documentId) => get().hideDocument(documentId),
+
+		hideDocument: (documentId) => {
+			const state = get()
+			const index = state.documents.findIndex((document) => document.id === documentId)
+			if (index < 0 || state.documents[index].hidden) return
+			const documents = state.documents.map((document) => document.id === documentId ? { ...document, hidden: true as const } : document)
+			if (documentId !== state.activeDocumentId) {
+				set({ documents })
+				return
+			}
+			const next = neighbourOf(documents, state.documents, index)
+			set(next ? { documents, activeDocumentId: next.id, code: next.code } : { documents })
+		},
+
+		requestDeleteDocument: (documentId) => {
 			const document = get().documents.find((candidate) => candidate.id === documentId)
 			if (!document) return
 			// Edits that were never saved are only thrown away on an explicit answer.
@@ -888,8 +988,9 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 			if (!state.documents.some((document) => document.id === documentId)) return
 			const documents = state.documents.filter((document) => document.id !== documentId)
 			const remainingDocuments = documents.length ? documents : [{ id: newDocumentId(), title: 'untitled.asm', code: '', dirty: false }]
+			const index = state.documents.findIndex((document) => document.id === documentId)
 			const activeDocument = documentId === state.activeDocumentId
-				? remainingDocuments[Math.max(0, state.documents.findIndex((document) => document.id === documentId) - 1)]
+				? (neighbourOf(remainingDocuments, state.documents, index) ?? remainingDocuments[Math.max(0, index - 1)])
 				: remainingDocuments.find((document) => document.id === state.activeDocumentId)!
 			debug.detach()
 			set({
@@ -1138,4 +1239,15 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 			get().refreshAssembly()
 		},
 	}
+})
+
+// The open files follow the typing into storage, a little behind it.
+let autosaveHandle: ReturnType<typeof setTimeout> | null = null
+useTHRAXStore.subscribe((state, previous) => {
+	if (state.documents === previous.documents && state.code === previous.code && state.settings.assembleAll === previous.settings.assembleAll) return
+	if (autosaveHandle !== null) clearTimeout(autosaveHandle)
+	autosaveHandle = setTimeout(() => {
+		autosaveHandle = null
+		writeStoredWorkspace(AUTOSAVE_KEY, useTHRAXStore.getState().workspaceSnapshot())
+	}, AUTOSAVE_DELAY_MS)
 })

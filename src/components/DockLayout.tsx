@@ -3,12 +3,13 @@ import { DockviewDefaultTab, DockviewReact, themeDark, type AddPanelOptions, typ
 import 'dockview-react/dist/styles/dockview.css'
 import { CP0_REGISTERS } from '../core/coprocessor'
 import { visibleAddresses } from '../debug/session'
-import { useTHRAXStore, type SourceDocument } from '../store/thraxStore'
+import { shownDocuments, useTHRAXStore, type SourceDocument } from '../store/thraxStore'
 import SourcePane from './SourcePane'
 import RegisterView from './RegisterView'
 import MemoryView from './MemoryView'
 import ConsoleOutput from './ConsoleOutput'
 import CallStackView from './CallStackView'
+import FilesPanel from './FilesView'
 import Modal from './Modal'
 import { INITIAL_PANELS, PANELS, panelById } from './panels'
 import './DockLayout.css'
@@ -57,6 +58,10 @@ const fileTitle = (document: SourceDocument) => `${document.dirty ? '● ' : ''}
 
 const SourcePanel = (props: IDockviewPanelProps) => (
 	<div className="dock-panel dock-panel-flush"><SourcePane documentId={props.params.documentId as string} /></div>
+)
+
+const FilesWindow = () => (
+	<div className="dock-panel"><FilesPanel /></div>
 )
 
 const RegistersPanel = () => {
@@ -233,6 +238,7 @@ const tabComponents = { console: ConsoleTab, source: SourceTab }
 
 const components = {
 	source: SourcePanel,
+	files: FilesWindow,
 	history: HistoryPanel,
 	symbols: SymbolTablePanel,
 	registers: RegistersPanel,
@@ -325,7 +331,8 @@ function saveLayout(api: DockviewApi) {
  * while it is running, so both directions are reconciled here.
  */
 function syncFilePanels(api: DockviewApi, documents: readonly SourceDocument[], removing: Set<string>) {
-	const wanted = new Map(documents.map((document) => [filePanelId(document.id), document]))
+	// A file put away keeps its place in the project and gives up its tab.
+	const wanted = new Map(shownDocuments(documents).map((document) => [filePanelId(document.id), document]))
 	for (const panel of api.panels) {
 		if (!isFilePanel(panel) || wanted.has(panel.id)) continue
 		// Removing a panel ourselves must not read back as the user closing a file.
@@ -346,12 +353,24 @@ function syncFilePanels(api: DockviewApi, documents: readonly SourceDocument[], 
 			tabComponent: 'source',
 			title: fileTitle(document),
 			params: { documentId: document.id },
-			...(anchor ? { position: { referencePanel: anchor.id, direction: 'within' as const } } : {}),
+			position: anchor ? { referencePanel: anchor.id, direction: 'within' } : editorPlacement(api),
 			inactive: true,
 		})
 		anchor ??= panel
 	}
 	return anchor
+}
+
+/**
+ * Where the editors go when every tab has been put away and one comes back.
+ * Its group went with the last tab, so without this the file would join
+ * whichever group is in front; the default arrangement has it above the
+ * memory and left of the registers, and that is where it is put back.
+ */
+function editorPlacement(api: DockviewApi): AddPanelOptions['position'] {
+	if (api.getPanel(DOCK_LEADER.bottom)) return { referencePanel: DOCK_LEADER.bottom, direction: 'above' }
+	if (api.getPanel(DOCK_LEADER.side)) return { referencePanel: DOCK_LEADER.side, direction: 'left' }
+	return undefined
 }
 
 /**

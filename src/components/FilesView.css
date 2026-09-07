@@ -1,0 +1,112 @@
+.files-view {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	font-size: 12px;
+}
+
+.files-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+}
+
+.files-folder a {
+	color: var(--accent-hover);
+	text-decoration: none;
+}
+
+.files-folder a:hover {
+	text-decoration: underline;
+}
+
+.files-folder {
+	color: var(--text-secondary);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.files-list {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.files-item {
+	display: flex;
+	align-items: center;
+	border: 1px solid transparent;
+	border-radius: var(--radius);
+}
+
+.files-item:hover {
+	background: var(--surface-overlay);
+}
+
+.files-item.active {
+	border-color: var(--accent);
+}
+
+/* A file off the tab bar is still in the project, so it is dimmed rather than gone. */
+.files-item.hidden-file .files-name {
+	color: var(--text-muted);
+	font-style: italic;
+}
+
+.files-name {
+	flex: 1;
+	min-width: 0;
+	background: transparent;
+	border: none;
+	color: var(--text-primary);
+	cursor: pointer;
+	font-family: 'Courier New', monospace;
+	font-size: 12px;
+	padding: 4px 6px;
+	text-align: left;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.files-marker {
+	display: inline-block;
+	width: 10px;
+	color: var(--data-label);
+}
+
+.files-dirty {
+	color: var(--warning);
+}
+
+.files-icon {
+	display: inline-flex;
+	align-items: center;
+	background: transparent;
+	border: none;
+	color: var(--text-secondary);
+	cursor: pointer;
+	font-size: 12px;
+	padding: 2px 5px;
+	visibility: hidden;
+}
+
+.files-item:hover .files-icon,
+.files-item.active .files-icon {
+	visibility: visible;
+}
+
+.files-icon:hover {
+	color: var(--text-bright);
+}
+
+.files-message {
+	color: var(--text-secondary);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}

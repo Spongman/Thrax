@@ -2,6 +2,8 @@
  * HexText export for a contiguous sequence of words.
  * Each word is represented by eight lowercase hexadecimal characters and a newline.
  */
+import { downloadBlob } from './download'
+
 function formatHexTextWord(word: number): string {
 	if (!Number.isInteger(word) || word < -0x80000000 || word > 0xffffffff) {
 		throw new RangeError(`Expected a signed or unsigned 32-bit word, received ${word}`)
@@ -28,13 +30,5 @@ function createHexTextBlob(machineCode: readonly number[]): Blob {
  * Starts a browser download of assembled text-segment words in HexText format.
  */
 export function downloadHexText(machineCode: readonly number[], filename = 'thrax-text.hex'): void {
-	const url = URL.createObjectURL(createHexTextBlob(machineCode))
-	const link = document.createElement('a')
-	link.href = url
-	link.download = filename
-	link.style.display = 'none'
-	document.body.append(link)
-	link.click()
-	link.remove()
-	window.setTimeout(() => URL.revokeObjectURL(url), 0)
+	downloadBlob(createHexTextBlob(machineCode), filename)
 }

@@ -1,6 +1,8 @@
 import React from 'react'
 import { sourceSignature, useTHRAXStore } from './store/thraxStore'
 import { useExamples } from './hooks/useExamples'
+import { useWorkspaceUrl } from './hooks/useWorkspaceUrl'
+import { openDroppedFiles } from './services/workspaceActions'
 import Toolbar from './components/Toolbar'
 import DockLayout from './components/DockLayout'
 import { useHighlightTheme } from './components/highlight'
@@ -15,6 +17,18 @@ function App() {
 
 	useExamples()
 	useHighlightTheme()
+	useWorkspaceUrl(setError)
+
+	// Files dropped anywhere on the workspace join the project.
+	const handleDragOver = React.useCallback((event: React.DragEvent) => {
+		if (event.dataTransfer.types.includes('Files')) event.preventDefault()
+	}, [])
+	const handleDrop = React.useCallback((event: React.DragEvent) => {
+		if (event.dataTransfer.files.length === 0) return
+		event.preventDefault()
+		openDroppedFiles(Array.from(event.dataTransfer.files))
+			.catch((error: unknown) => setError(error instanceof Error ? error.message : String(error)))
+	}, [])
 
 	// Keep the assembled program (and so the memory view) in step with the source.
 	React.useEffect(() => {
@@ -37,7 +51,7 @@ function App() {
 	}, [reset])
 
 	return (
-		<div className="thrax-app">
+		<div className="thrax-app" onDragOver={handleDragOver} onDrop={handleDrop}>
 			<Toolbar onRun={handleRun} onReset={handleReset} />
 
 			{error && (

@@ -1,0 +1,185 @@
+/* The dialog carries its own opening size, so resizing can take it under. */
+.github-dialog {
+	width: 460px;
+}
+
+.github-dialog .modal-body {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	font-size: 12px;
+}
+
+.github-sign-in {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+.github-sign-in p {
+	margin: 0;
+	color: var(--text-secondary);
+	line-height: 1.45;
+}
+
+.github-sign-in code {
+	color: var(--data-register);
+}
+
+.github-dialog a {
+	color: var(--accent-hover);
+}
+
+.github-token-row,
+.github-publish {
+	display: flex;
+	gap: 6px;
+}
+
+.github-token-row input,
+.github-publish input {
+	flex: 1;
+	min-width: 0;
+	padding: 6px 8px;
+	border: 1px solid var(--border-strong);
+	border-radius: var(--radius);
+	background: var(--surface-input);
+	color: var(--text-primary);
+	font-family: Consolas, 'Courier New', monospace;
+}
+
+.github-bound {
+	flex: 1;
+	align-self: center;
+	color: var(--text-secondary);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.github-gist.bound {
+	border-color: var(--accent);
+}
+
+.github-viewer {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.github-viewer img {
+	border-radius: 50%;
+}
+
+.github-viewer span {
+	flex: 1;
+}
+
+.github-gists-head {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	color: var(--text-secondary);
+}
+
+.github-filter {
+	margin-left: auto;
+	margin-right: 8px;
+	font-size: 11px;
+	padding: 2px 8px;
+}
+
+.github-filter.active {
+	border-color: var(--accent);
+}
+
+.github-pager {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+}
+
+.github-gists {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	max-height: 320px;
+	overflow-y: auto;
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.github-gist {
+	display: flex;
+	align-items: stretch;
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+}
+
+.github-gist:hover {
+	background: var(--surface-overlay);
+}
+
+/* A gist with nothing to assemble is listed, so it is known to exist, but cannot be opened. */
+.github-gist.no-source .github-gist-open {
+	color: var(--text-muted);
+}
+
+.github-gist-open {
+	flex: 1;
+	min-width: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	padding: 6px 8px;
+	background: transparent;
+	border: none;
+	color: var(--text-primary);
+	cursor: pointer;
+	text-align: left;
+}
+
+.github-gist-open:disabled {
+	cursor: default;
+}
+
+.github-gist-title {
+	font-weight: 600;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.github-gist-files {
+	color: var(--data-string);
+	font-family: Consolas, 'Courier New', monospace;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.github-gist-meta {
+	color: var(--text-muted);
+}
+
+.github-gist-link {
+	display: flex;
+	align-items: center;
+	padding: 0 10px;
+	text-decoration: none;
+}
+
+.github-empty {
+	color: var(--text-muted);
+	font-style: italic;
+	padding: 8px;
+}
+
+.github-status {
+	color: var(--text-secondary);
+}
+
+.github-error {
+	color: var(--danger-text);
+}
