@@ -46,10 +46,13 @@ function EditableCell({ children, text, editable, title, className, address, siz
 	}
 
 	if (!editing) {
+		// No title at all where none was asked for: the memory window has tips of
+		// its own, and the browser's would sit on top of them.
+		const tip = title === undefined ? undefined : editable ? `${title}: double-click to edit` : title
 		return (
 			<span
 				className={className}
-				title={editable ? `${title ?? text}: double-click to edit` : title ?? text}
+				title={tip}
 				data-address={address}
 				data-size={size}
 				onDoubleClick={start}

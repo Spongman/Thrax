@@ -192,7 +192,6 @@ const MemoryRow = React.memo(function MemoryRow({ row, top, left, width, groupSi
 					<EditableCell
 						key={groupIndex}
 						text={groupText}
-						title={`${formatAddress(group.start)}`}
 						editable={writable}
 						address={group.start}
 						size={groupSize}
