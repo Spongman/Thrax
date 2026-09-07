@@ -8,6 +8,7 @@ import type { HistoryLog } from '../core/historyLog'
 import type { Effect, HistoryEntry } from '../core/types'
 import { useTHRAXStore } from '../store/thraxStore'
 import { HexWord } from './HexNumber'
+import { rowAt, rowForScroll, scrollStep } from './historyDrag'
 import { rowTop, rowWindow, useFixedRowScroller } from './rowWindow'
 
 const ROW_HEIGHT = 20
@@ -228,19 +229,124 @@ interface HistoryViewProps {
 function HistoryView({ entries, cursor, version, sourceOf, onSelect, onSetNow, onSelectAddress, onSelectSource, onSelectRegister, onHoverAddress, hoveredAddress, onHoverRegister, hoveredRegister, selectedId, effects }: HistoryViewProps) {
 	const { ref: scrollRef, originRef, viewport, scrollTop, frame, onScroll } = useFixedRowScroller(ROW_HEIGHT)
 	const [following, setFollowing] = React.useState(true)
+	/** Whether the marker is being dragged, and where the pointer last was. */
+	const [dragging, setDragging] = React.useState(false)
+	const pointerY = React.useRef(0)
+	// Read inside the drag handlers, which outlive the render that made them.
+	const cursorRef = React.useRef(cursor)
+	cursorRef.current = cursor
+	const entriesRef = React.useRef(entries)
+	entriesRef.current = entries
 
-	// The list follows the tail while a program runs, until the user scrolls off it.
+	/** Puts the present on the row the pointer is over, if it is not there. */
+	const moveToPointer = React.useCallback(() => {
+		const element = scrollRef.current
+		const held = entriesRef.current
+		if (!element || held.length === 0) return
+		const box = element.getBoundingClientRect()
+		const row = rowAt(pointerY.current, box.top, box.bottom, element.scrollTop, ROW_HEIGHT, held.length)
+		const entry = held.at(row)
+		if (entry && row !== cursorRef.current) onSetNow(entry)
+	}, [onSetNow, scrollRef])
+
+	// Wherever the present lands, it is brought into sight: a step back from the
+	// tail otherwise leaves the marker somewhere above the panel with nothing to
+	// say where.  The drag does its own scrolling, so it is left alone.
 	React.useEffect(() => {
 		const element = scrollRef.current
-		if (!element || !following) return
+		if (fromScroll.current) {
+			fromScroll.current = false
+			return
+		}
+		if (!element || dragging || cursor >= entries.length) return
+		const top = cursor * ROW_HEIGHT
+		if (top < element.scrollTop) element.scrollTop = top
+		else if (top + ROW_HEIGHT > element.scrollTop + element.clientHeight) {
+			element.scrollTop = top + ROW_HEIGHT - element.clientHeight
+		}
+	}, [cursor, dragging, entries.length, scrollRef])
+
+	// The pointer is followed wherever it goes, since a drag that leaves the
+	// panel is how the list is asked to scroll rather than the end of it.
+	React.useEffect(() => {
+		if (!dragging) return
+		const move = (event: PointerEvent) => {
+			pointerY.current = event.clientY
+			moveToPointer()
+		}
+		const stop = () => setDragging(false)
+		window.addEventListener('pointermove', move)
+		window.addEventListener('pointerup', stop)
+		window.addEventListener('pointercancel', stop)
+		return () => {
+			window.removeEventListener('pointermove', move)
+			window.removeEventListener('pointerup', stop)
+			window.removeEventListener('pointercancel', stop)
+		}
+	}, [dragging, moveToPointer])
+
+	// Held outside the panel, the list scrolls under the marker until it is let
+	// go, so the run can be crossed without a pointer big enough to reach it.
+	React.useEffect(() => {
+		if (!dragging) return
+		let frameHandle = 0
+		const tick = () => {
+			const element = scrollRef.current
+			if (element) {
+				const box = element.getBoundingClientRect()
+				const step = scrollStep(pointerY.current, box.top, box.bottom)
+				if (step !== 0) {
+					element.scrollTop += step
+					moveToPointer()
+				}
+			}
+			frameHandle = requestAnimationFrame(tick)
+		}
+		frameHandle = requestAnimationFrame(tick)
+		return () => cancelAnimationFrame(frameHandle)
+	}, [dragging, moveToPointer, scrollRef])
+
+	// The list follows the tail while a program runs, until the user scrolls off
+	// it.  Once the present is behind the tail the marker is what matters, and
+	// chasing the end would drag the view off it after every step back.
+	React.useEffect(() => {
+		const element = scrollRef.current
+		if (!element || !following || cursor < entries.length) return
 		element.scrollTop = element.scrollHeight
-	}, [version, following])
+	}, [version, following, cursor, entries.length, scrollRef])
+
+	// Shift is read from the events themselves rather than held as state: a
+	// scroll event says nothing about the keyboard, and the pointer that took
+	// hold of the scrollbar does.
+	const shiftHeld = React.useRef(false)
+	/** Set when the present moved because the view did, to break the loop. */
+	const fromScroll = React.useRef(false)
+	React.useEffect(() => {
+		const track = (event: KeyboardEvent) => { shiftHeld.current = event.shiftKey }
+		window.addEventListener('keydown', track)
+		window.addEventListener('keyup', track)
+		return () => {
+			window.removeEventListener('keydown', track)
+			window.removeEventListener('keyup', track)
+		}
+	}, [])
 
 	const handleScroll = (event: React.UIEvent<HTMLDivElement>) => {
 		onScroll(event)
 		const element = event.currentTarget
 		const atEnd = element.scrollHeight - element.scrollTop - element.clientHeight < ROW_HEIGHT
 		setFollowing(atEnd)
+		// Held down, the scrollbar drags the present as well as the view: the
+		// whole run under the track, first instruction at the top of it and last
+		// at the bottom.
+		if (!shiftHeld.current || entriesRef.current.length === 0) return
+		const row = rowForScroll(element.scrollTop, element.scrollHeight, element.clientHeight, entriesRef.current.length)
+		const entry = entriesRef.current.at(row)
+		if (!entry || row === cursorRef.current) return
+		// Scrolling to the marker now would undo the scroll that moved it, which
+		// is what pinned it to the last instruction once it reached the bottom.
+		fromScroll.current = true
+		onSetNow(entry)
 	}
 
 	// A fixed pool of rows pinned by hand, as the memory window draws its own: the
@@ -250,8 +356,13 @@ function HistoryView({ entries, cursor, version, sourceOf, onSelect, onSetNow, o
 	const rows = entries.slice(first, first + count)
 
 	return (
-		<div className="history-view">
-			<div className="history-scroll" ref={scrollRef} onScroll={handleScroll}>
+		<div className={`history-view${dragging ? ' dragging' : ''}`}>
+			<div
+				className="history-scroll"
+				ref={scrollRef}
+				onScroll={handleScroll}
+				onPointerDown={(event) => { shiftHeld.current = event.shiftKey }}
+			>
 				{entries.length === 0 && <div className="history-empty">Step or run a program to fill the history.</div>}
 				<div className="history-spacer" style={{ height: entries.length * ROW_HEIGHT }}>
 					{/* Reports where fixed positioning resolves from, for the rows below. */}
@@ -274,7 +385,20 @@ function HistoryView({ entries, cursor, version, sourceOf, onSelect, onSetNow, o
 								title={ahead ? 'Ahead of the present' : 'Already run'}
 							>
 								<span className="history-count">{entry.kind === 'edit' ? 'edit' : entry.instructionCount}</span>
-								<span className={`history-next${next ? ' active' : ''}`} aria-hidden={!next} title={next ? 'The next instruction to run' : undefined} />
+								<span
+									className={`history-next${next ? ' active' : ''}`}
+									aria-hidden={!next}
+									title={next ? 'The next instruction to run; drag it to move through the run' : undefined}
+									onPointerDown={next ? (event) => {
+										// The row beneath would otherwise take it as a click on itself,
+										// and the list must stop chasing the tail while it is dragged.
+										event.preventDefault()
+										event.stopPropagation()
+										pointerY.current = event.clientY
+										setFollowing(false)
+										setDragging(true)
+									} : undefined}
+								/>
 								{/* The address and the source name the same line, so both go there;
 								    hovering either lights it in the editor without moving anything. */}
 								<button

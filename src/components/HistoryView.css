@@ -73,6 +73,24 @@
 	border-top: 5px solid transparent;
 	border-bottom: 5px solid transparent;
 	border-left: 7px solid var(--warning);
+	position: relative;
+	cursor: grab;
+}
+
+/* The marker is a seven-pixel triangle drawn in borders, which is too small to
+   take hold of: this is the part the hand actually grabs. */
+.history-next.active::after {
+	content: '';
+	position: absolute;
+	inset: -6px -8px -6px -12px;
+}
+
+/* Nothing is selected or clicked while the marker is being dragged, and the
+   hand keeps its grip wherever in the panel the pointer happens to be. */
+.history-view.dragging,
+.history-view.dragging .history-next.active {
+	cursor: grabbing;
+	user-select: none;
 }
 
 .history-count {
