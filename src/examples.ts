@@ -1,9 +1,12 @@
+import { BitmapIcon, BitwiseIcon, CoprocessorIcon, FactorialIcon, FibonacciIcon, HelloIcon, InputIcon, KeyboardIcon, LoopIcon, MacrosIcon, MandelbrotIcon, RecursionIcon, SumIcon } from './components/icons'
+
 /**
  * Example MIPS Programs
  */
 
 export const EXAMPLES = {
 	input: {
+		icon: InputIcon,
 		name: 'Interactive Input',
 		description: 'Read and echo a string using syscall 8',
 		code: `# Read a line into a data buffer, then print it
@@ -28,6 +31,7 @@ main:
 	},
 
 	hello: {
+		icon: HelloIcon,
 		name: 'Hello, THRAX!',
 		description: 'Print a string stored in the data segment',
 		code: `# Data directives and print-string syscall
@@ -47,6 +51,7 @@ main:
 	},
 
 	sum: {
+		icon: SumIcon,
 		name: 'Sum of Numbers',
 		description: 'Add 5 + 3 and print the result',
 		code: `# Simple addition example
@@ -79,6 +84,7 @@ main:
 	},
 
 	factorial: {
+		icon: FactorialIcon,
 		name: 'Factorial',
 		description: 'Compute 5! (5 factorial) = 120',
 		code: `# Factorial example
@@ -109,6 +115,7 @@ done:
 	},
 
 	fibonacci: {
+		icon: FibonacciIcon,
 		name: 'Fibonacci',
 		description: 'Compute the 10th Fibonacci number',
 		code: `# Fibonacci sequence
@@ -143,6 +150,7 @@ done:
 	},
 
 	ackermann: {
+		icon: RecursionIcon,
 		name: 'Ackermann',
 		description: 'Deep recursion: compute A(3, 3) = 61',
 		code: `# Ackermann function
@@ -209,6 +217,7 @@ ackermann_return:
 	},
 
 	loop: {
+		icon: LoopIcon,
 		name: 'Loop Counter',
 		description: 'Print numbers from 1 to 5',
 		code: `# Loop counter example
@@ -250,6 +259,7 @@ done:
 	},
 
 	coprocessor: {
+		icon: CoprocessorIcon,
 		name: 'Coprocessors',
 		description: 'Floating-point math on CP1 and a CP0 register read',
 		code: `# Coprocessor 1 arithmetic, comparison, and conversion,
@@ -329,6 +339,7 @@ report:
 	},
 
 	bitwise: {
+		icon: BitwiseIcon,
 		name: 'Bitwise Operations',
 		description: 'Demonstrate AND, OR, XOR operations',
 		code: `# Bitwise operations
@@ -373,6 +384,7 @@ main:
 	},
 
 	bitmap: {
+		icon: BitmapIcon,
 		name: 'Bitmap Display',
 		description: 'Draw a colour gradient for the Bitmap Display tool',
 		code: `# Fill a 32 x 32 grid of pixels for the Bitmap Display tool.
@@ -410,6 +422,7 @@ column:
 	},
 
 	mmio: {
+		icon: KeyboardIcon,
 		name: 'Keyboard and Display',
 		description: 'Echo queued keystrokes through the MMIO tool',
 		code: `# Memory-mapped I/O, through the Keyboard and Display Simulator.
@@ -442,6 +455,7 @@ poll:
 	},
 
 	macros: {
+		icon: MacrosIcon,
 		name: 'Macros',
 		description: 'Define once, use many times with .macro and .eqv',
 		code: `# Macros are expanded by the assembler, so each call costs no
@@ -493,6 +507,7 @@ main:
 `,
 	},
 	mandelbrot: {
+		icon: MandelbrotIcon,
 		name: 'Mandelbrot Set',
 		description: 'Escape-time fractal on coprocessor 1, drawn to the Bitmap Display',
 		code: `# Mandelbrot set, rendered with single-precision coprocessor 1 arithmetic.

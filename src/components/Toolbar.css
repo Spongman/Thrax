@@ -114,9 +114,12 @@
 	accent-color: var(--accent);
 }
 
+/* The turtle faces the slider it marks the slow end of, rather than away
+   from it, which is the way the glyph is drawn. */
 .toolbar-speed-icon {
 	font-size: 13px;
 	line-height: 1;
+	transform: scaleX(-1);
 }
 
 .toolbar-speed-value {

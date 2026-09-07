@@ -1,5 +1,6 @@
 import React from 'react'
 import { EXAMPLES } from '../examples'
+import { ExamplesIcon, FileMenuIcon, SettingsIcon, ToolsIcon, WindowIcon, type Icon } from './icons'
 import { menuLabel, panelsIn, type PanelSpec } from './panels'
 import './MainMenu.css'
 
@@ -11,17 +12,30 @@ import './MainMenu.css'
  * every few seconds.
  */
 
+/** One line of the File menu; a label of `-` is a separator. */
+export interface MenuAction {
+	id: string
+	label: string
+	/** The glyph beside the name; a separator needs none. */
+	icon?: Icon
+	title?: string
+	disabled?: boolean
+	run: () => void
+}
+
 interface MainMenuProps {
 	onSettings: () => void
 	onLoadExample: (code: string) => void
 	onOpenPanel: (id: string) => void
 	/** Panels already on screen, shown as such rather than offered again. */
 	openPanels: readonly string[]
+	/** What the File menu offers; the toolbar owns the actions and their reporting. */
+	fileActions: readonly MenuAction[]
 }
 
-type Submenu = 'examples' | 'window' | 'tools'
+type Submenu = 'file' | 'examples' | 'window' | 'tools'
 
-function MainMenu({ onSettings, onLoadExample, onOpenPanel, openPanels }: MainMenuProps) {
+function MainMenu({ onSettings, onLoadExample, onOpenPanel, openPanels, fileActions }: MainMenuProps) {
 	const [open, setOpen] = React.useState(false)
 	const [submenu, setSubmenu] = React.useState<Submenu | null>(null)
 	const menuRef = React.useRef<HTMLDivElement>(null)
@@ -65,17 +79,16 @@ function MainMenu({ onSettings, onLoadExample, onOpenPanel, openPanels }: MainMe
 				// Already open still selects it: the tab may be behind another.
 				title={shown ? `${menuLabel(panel)} is open; bring it forward` : `Open ${menuLabel(panel)}`}
 			>
-				<span className="item-name">
-					<span className="menu-check" aria-hidden="true">{shown ? '✓' : ''}</span>
-					{menuLabel(panel)}
-				</span>
+				<span className="menu-check" aria-hidden="true">{shown ? '✓' : ''}</span>
+				<panel.icon />
+				<span className="item-name">{menuLabel(panel)}</span>
 				{panel.description && <span className="item-desc">{panel.description}</span>}
 			</button>
 		)
 	}
 
 	/** `wide` is for the lists whose items carry a line of prose under the name. */
-	const section = (key: Submenu, label: string, items: React.ReactNode, wide = false) => (
+	const section = (key: Submenu, label: string, Glyph: Icon, items: React.ReactNode, wide = false) => (
 		<div
 			className={`menu-section${submenu === key ? ' expanded' : ''}`}
 			onMouseEnter={() => setSubmenu(key)}
@@ -87,7 +100,8 @@ function MainMenu({ onSettings, onLoadExample, onOpenPanel, openPanels }: MainMe
 				aria-expanded={submenu === key}
 				onClick={() => setSubmenu(submenu === key ? null : key)}
 			>
-				{label}
+				<Glyph />
+				<span className="item-name">{label}</span>
 				<span className="menu-arrow" aria-hidden="true">›</span>
 			</button>
 			{submenu === key && <div className={`menu-flyout${wide ? ' menu-flyout-wide' : ''}`} role="menu">{items}</div>}
@@ -115,25 +129,43 @@ function MainMenu({ onSettings, onLoadExample, onOpenPanel, openPanels }: MainMe
 						onMouseEnter={() => setSubmenu(null)}
 						onClick={() => { onSettings(); close() }}
 					>
-						Settings…
+						<SettingsIcon />
+						<span className="item-name">Settings…</span>
 					</button>
 
 					<div className="menu-separator" />
 
-					{section('examples', 'Examples', Object.entries(EXAMPLES).map(([key, example]) => (
+					{section('file', 'File', FileMenuIcon, fileActions.map((action) => action.label === '-'
+						? <div key={action.id} className="menu-separator" />
+						: (
+							<button
+								key={action.id}
+								className="menu-item"
+								role="menuitem"
+								disabled={action.disabled}
+								title={action.title}
+								onClick={() => { action.run(); close() }}
+							>
+								{action.icon && <action.icon />}
+								<span className="item-name">{action.label}</span>
+							</button>
+						)))}
+
+					{section('examples', 'Examples', ExamplesIcon, Object.entries(EXAMPLES).map(([key, example]) => (
 						<button
 							key={key}
 							className="menu-item menu-item-described"
 							role="menuitem"
 							onClick={() => { onLoadExample(example.code); close() }}
 						>
+							<example.icon />
 							<span className="item-name">{example.name}</span>
 							<span className="item-desc">{example.description}</span>
 						</button>
 					)), true)}
 
-					{section('window', 'Window', panelsIn('window').map((panel) => panelItem(panel)))}
-					{section('tools', 'Tools', panelsIn('tool').map((panel) => panelItem(panel, true)), true)}
+					{section('window', 'Window', WindowIcon, panelsIn('window').map((panel) => panelItem(panel)))}
+					{section('tools', 'Tools', ToolsIcon, panelsIn('tool').map((panel) => panelItem(panel, true)), true)}
 				</div>
 			)}
 		</div>
