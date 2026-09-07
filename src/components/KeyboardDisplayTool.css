@@ -41,31 +41,45 @@
 	white-space: pre-wrap;
 }
 
-.keyboard-display-input {
-	display: grid;
-	grid-template-columns: 1fr auto;
-	gap: 6px;
-}
-
-.keyboard-display-input label {
-	grid-column: 1 / -1;
-}
-
-.keyboard-display-input input,
-.keyboard-display-input button {
+/* The keyboard is a box to type into; the keys not yet read wait in it. */
+.keyboard-display-keys {
 	box-sizing: border-box;
-	min-width: 0;
-	padding: 6px 8px;
+	min-height: 44px;
+	padding: 8px;
 	border: 1px solid var(--border-strong);
-	border-radius: var(--radius);
 	background: var(--surface-input);
 	color: var(--text-primary);
+	font-family: Consolas, 'Courier New', monospace;
+	white-space: pre-wrap;
+	word-break: break-all;
+	cursor: text;
+	outline: none;
 }
 
-.keyboard-display-input button {
-	cursor: pointer;
+.keyboard-display-keys.focused {
+	border-color: var(--accent);
 }
 
-.keyboard-display-input button:hover {
-	background: var(--border-strong);
+.keyboard-display-hint {
+	color: var(--text-muted);
+	font-family: inherit;
+	font-style: italic;
+}
+
+.keyboard-display-queued {
+	color: var(--data-string);
+}
+
+.keyboard-display-caret {
+	display: inline-block;
+	width: 1px;
+	height: 1.1em;
+	margin-left: 1px;
+	vertical-align: text-bottom;
+	background: var(--text-primary);
+	animation: keyboard-display-blink 1s steps(2) infinite;
+}
+
+@keyframes keyboard-display-blink {
+	to { opacity: 0; }
 }
