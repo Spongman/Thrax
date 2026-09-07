@@ -38,7 +38,7 @@ describe('DEFAULT_SETTINGS', () => {
 			// following, and a value that moved is worth seeing move.
 			highlightNavigation: true,
 			highlightChanges: true,
-			highlightSeconds: 2.5,
+			highlightSeconds: 0.3,
 			highlightNavigationColor: '#4094ff',
 			highlightChangeColor: '#f0a830',
 		})

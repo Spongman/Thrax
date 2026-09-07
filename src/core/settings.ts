@@ -234,7 +234,7 @@ export const DEFAULT_SETTINGS: ThraxSettings = {
 	hexDimming: 'nibbles',
 	highlightNavigation: true,
 	highlightChanges: true,
-	highlightSeconds: 2.5,
+	highlightSeconds: 0.3,
 	highlightNavigationColor: '#4094ff',
 	highlightChangeColor: '#f0a830',
 	programArguments: false,

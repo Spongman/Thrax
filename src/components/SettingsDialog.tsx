@@ -265,13 +265,13 @@ function SettingsDialog({ onClose }: SettingsDialogProps) {
 				<label className="settings-row settings-field" title="How long a highlight takes to fade">
 					<span>
 						Highlight fade
-						<span className="settings-hint">The eye is usually in another panel when a flash starts, so it has to last long enough to be followed</span>
+						<span className="settings-hint">Long enough to catch, since the eye is often in another panel when a flash starts, and short enough not to sit there afterwards</span>
 					</span>
 					<input
 						type="number"
 						min={MIN_HIGHLIGHT_SECONDS}
 						max={MAX_HIGHLIGHT_SECONDS}
-						step={0.5}
+						step={0.1}
 						value={settings.highlightSeconds}
 						disabled={!settings.highlightNavigation && !settings.highlightChanges}
 						onChange={(event) => {

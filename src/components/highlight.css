@@ -16,7 +16,7 @@
 	   drifting through any other hue on its way out. */
 	--flash-navigation-clear: rgba(64, 148, 255, 0);
 	--flash-change-clear: rgba(240, 168, 48, 0);
-	--flash-duration: 2.5s;
+	--flash-duration: 0.3s;
 }
 
 /*
