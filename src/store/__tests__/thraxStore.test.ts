@@ -184,15 +184,23 @@ describe('pointing at something', () => {
 		// and much of the workspace reads the store whole, so repeating what it
 		// already says would re-render every panel sixty times a second.
 		const store = () => useTHRAXStore.getState()
-		store().setHoveredAddress(null)
+		store().hover({ address: null })
 
-		expect(publishes(() => store().setHoveredAddress(0x00400000))).toBe(1)
-		expect(publishes(() => store().setHoveredAddress(0x00400000))).toBe(0)
-		expect(publishes(() => store().setHoveredAddress(null))).toBe(1)
-		expect(publishes(() => store().setHoveredAddress(null))).toBe(0)
+		expect(publishes(() => store().hover({ address: 0x00400000 }))).toBe(1)
+		expect(publishes(() => store().hover({ address: 0x00400000 }))).toBe(0)
+		expect(publishes(() => store().hover({ address: null }))).toBe(1)
+		expect(publishes(() => store().hover({ address: null }))).toBe(0)
 
-		store().setHoveredRegister(null)
-		expect(publishes(() => store().setHoveredRegister('$t0'))).toBe(1)
-		expect(publishes(() => store().setHoveredRegister('$t0'))).toBe(0)
+		store().hover({ register: null })
+		expect(publishes(() => store().hover({ register: '$t0' }))).toBe(1)
+		expect(publishes(() => store().hover({ register: '$t0' }))).toBe(0)
+
+		// A panel speaks only for what it knows: naming one kind leaves the rest
+		// as they were, and a hover of several kinds at once is one publish.
+		store().hover({ address: null, register: null, symbol: null })
+		expect(publishes(() => store().hover({ symbol: 'buffer', address: 0x10010000 }))).toBe(1)
+		expect(store().hovered).toEqual({ address: 0x10010000, register: null, symbol: 'buffer' })
+		expect(publishes(() => store().hover({ register: '$t0' }))).toBe(1)
+		expect(store().hovered.symbol).toBe('buffer')
 	})
 })

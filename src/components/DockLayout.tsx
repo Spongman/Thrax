@@ -60,7 +60,7 @@ const SourcePanel = (props: IDockviewPanelProps) => (
 )
 
 const RegistersPanel = () => {
-	const { registers, fpRegisters, fpConditionFlags, cp0Registers, focusedRegister, halted, hoveredAddress, hoveredRegister, isPaused, isRunning, setHoveredAddress, setHoveredRegister, setRegisterValue, setFpRegisterValue, setCp0RegisterValue } = useTHRAXStore()
+	const { registers, fpRegisters, fpConditionFlags, cp0Registers, focusedRegister, halted, hovered, isPaused, isRunning, hover, setRegisterValue, setFpRegisterValue, setCp0RegisterValue } = useTHRAXStore()
 	// Only while the machine is stopped, and only once it has one to edit.
 	const editable = !isRunning && (isPaused || halted)
 
@@ -82,10 +82,10 @@ const RegistersPanel = () => {
 				registers={registers}
 				editable={editable}
 				focused={focusedRegister}
-				hoveredAddress={hoveredAddress}
-				onHoverAddress={setHoveredAddress}
-				hoveredRegister={hoveredRegister}
-				onHoverRegister={setHoveredRegister}
+				hoveredAddress={hovered.address}
+				onHoverAddress={(address) => hover({ address })}
+				hoveredRegister={hovered.register}
+				onHoverRegister={(register) => hover({ register })}
 				onEdit={handleEdit}
 				fpRegisters={fpRegisters}
 				fpConditionFlags={fpConditionFlags}
@@ -96,7 +96,7 @@ const RegistersPanel = () => {
 }
 
 const MemoryPanel = () => {
-	const { callStack, focusedMemory, halted, hoveredAddress, isPaused, isRunning, memory, pc, setMemoryValue, sourceIndex, setHoveredAddress } = useTHRAXStore()
+	const { callStack, focusedMemory, halted, hovered, isPaused, isRunning, memory, pc, setMemoryValue, sourceIndex, hover } = useTHRAXStore()
 	const editable = !isRunning && (isPaused || halted)
 	// Mark the program counter only where the editor can highlight it too: once a
 	// program halts, the pc sits past the last instruction and belongs to neither.
@@ -110,8 +110,8 @@ const MemoryPanel = () => {
 				returnAddresses={returnAddresses}
 				focusAddress={focusedMemory?.address ?? null}
 				focusRequest={focusedMemory?.request ?? 0}
-				onHoverAddress={setHoveredAddress}
-				hoveredAddress={hoveredAddress}
+				onHoverAddress={(address) => hover({ address })}
+				hoveredAddress={hovered.address}
 				editable={editable}
 				onEditWord={setMemoryValue}
 			/>

@@ -348,7 +348,7 @@ function HistoryView({ entries, cursor, version, sourceOf, onSelect, onSetNow, o
 
 /** The history of the program the workspace is running. */
 export function HistoryPanel() {
-	const { executionHistory, historyCursor, historyEffects, historyVersion, hoveredAddress, hoveredRegister, sourceIndex, focusMemoryAddress, focusRegister, focusSourceLine, moveHistoryTo, setHoveredAddress, setHoveredRegister } = useTHRAXStore()
+	const { executionHistory, historyCursor, historyEffects, historyVersion, hovered, sourceIndex, focusMemoryAddress, focusRegister, focusSourceLine, moveHistoryTo, hover } = useTHRAXStore()
 	const [selectedId, setSelectedId] = React.useState<number | null>(null)
 
 	const sourceOf = React.useCallback((entry: HistoryEntry) => sourceIndex.lineForAddress(entry.address), [sourceIndex])
@@ -371,10 +371,10 @@ export function HistoryPanel() {
 			onSelectAddress={focusMemoryAddress}
 			onSelectSource={focusSourceLine}
 			onSelectRegister={focusRegister}
-			onHoverAddress={setHoveredAddress}
-			hoveredAddress={hoveredAddress}
-			onHoverRegister={setHoveredRegister}
-			hoveredRegister={hoveredRegister}
+			onHoverAddress={(address) => hover({ address })}
+			hoveredAddress={hovered.address}
+			onHoverRegister={(register) => hover({ register })}
+			hoveredRegister={hovered.register}
 		/>
 	)
 }

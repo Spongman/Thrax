@@ -150,7 +150,7 @@ interface SourcePaneProps {
 function SourcePane({ documentId }: SourcePaneProps) {
 	const store = useTHRAXStore()
 	const hexDimming = store.settings.hexDimming
-	const { activeDocumentId, branchHistory, breakpoints, callStack, documents, entryDocumentId, focusedSource, gutterColumns, heatMap: showHeatMap, heatMapLines: showHeatLines, hoveredAddress, pipeline, profile, selectedFrame, setBreakpointLines, setDocumentCode, toggleBreakpointAddress, toggleBreakpointLine } = store
+	const { activeDocumentId, branchHistory, breakpoints, callStack, documents, entryDocumentId, focusedSource, gutterColumns, heatMap: showHeatMap, heatMapLines: showHeatLines, hovered, pipeline, profile, selectedFrame, setBreakpointLines, setDocumentCode, toggleBreakpointAddress, toggleBreakpointLine } = store
 	// Bug 12: every editor marks up its own file.  The keyboard and the find
 	// widget still belong to the tab in front of the user, and a diagnostic with
 	// no file of its own to the entry file the assembler started from.
@@ -199,16 +199,15 @@ function SourcePane({ documentId }: SourcePaneProps) {
 	 * every line's injected text.
 	 */
 	const hoveredLine = React.useMemo(() => {
-		if (store.hoveredAddress === null) return undefined
-		const location = sourceIndex.lineForAddress(store.hoveredAddress)
+		if (store.hovered.address === null) return undefined
+		const location = sourceIndex.lineForAddress(store.hovered.address)
 		return location?.file === title ? location.line : undefined
-	}, [sourceIndex, store.hoveredAddress, title])
-	const hoveredAddressRef = React.useRef(store.hoveredAddress)
+	}, [sourceIndex, store.hovered.address, title])
+	const hoveredAddressRef = React.useRef(store.hovered.address)
 	/** The address span of each zone row, so a hover can light one in place. */
 	const zoneAddressNodes = React.useRef<{ address: number, node: HTMLElement }[]>([])
 	const focusMemoryAddressRef = React.useRef(store.focusMemoryAddress)
-	const setHoveredAddressRef = React.useRef(store.setHoveredAddress)
-	const setHoveredRegisterRef = React.useRef(store.setHoveredRegister)
+	const hoverRef = React.useRef(store.hover)
 	const handleAssemblyHoverRef = React.useRef<(element: HTMLElement | undefined, clientX: number) => void>(() => {})
 	const clearAssemblyTipRef = React.useRef<() => void>(() => {})
 	/** The editor's own node, which the data tip is drawn inside. */
@@ -219,10 +218,9 @@ function SourcePane({ documentId }: SourcePaneProps) {
 	const tipTimer = React.useRef<number | undefined>(undefined)
 
 	sourceIndexRef.current = sourceIndex
-	hoveredAddressRef.current = store.hoveredAddress
+	hoveredAddressRef.current = store.hovered.address
 	focusMemoryAddressRef.current = store.focusMemoryAddress
-	setHoveredAddressRef.current = store.setHoveredAddress
-	setHoveredRegisterRef.current = store.setHoveredRegister
+	hoverRef.current = store.hover
 	toggleBreakpointLineRef.current = toggleBreakpointLine
 	toggleBreakpointAddressRef.current = toggleBreakpointAddress
 	setBreakpointLinesRef.current = setBreakpointLines
@@ -238,7 +236,7 @@ function SourcePane({ documentId }: SourcePaneProps) {
 	assemblyTipRef.current = assemblyTip
 
 	const hoverRegister = React.useCallback((name: string | null) => {
-		setHoveredRegisterRef.current(name)
+		hoverRef.current({ register: name })
 	}, [])
 
 	const clearAssemblyTip = React.useCallback(() => {
@@ -376,10 +374,10 @@ function SourcePane({ documentId }: SourcePaneProps) {
 			if (event.target.element?.closest('.code-word-zone')) return
 			const line = event.target.element?.closest('.code-word-address') ? event.target.position?.lineNumber : undefined
 			const address = line === undefined ? undefined : sourceIndexRef.current.addressesForLine(titleRef.current, line)[0]
-			setHoveredAddressRef.current(address ?? null)
+			hoverRef.current({ address: address ?? null })
 		})
 		editorInstance.onMouseLeave(() => {
-			setHoveredAddressRef.current(null)
+			hoverRef.current({ address: null })
 			clearAssemblyTipRef.current()
 		})
 		// The tip is placed against the editor rather than against the text, so it
@@ -841,8 +839,8 @@ function SourcePane({ documentId }: SourcePaneProps) {
 						event.stopPropagation()
 						focusMemoryAddressRef.current(entry.address)
 					})
-					rowAddress.addEventListener('mouseenter', () => setHoveredAddressRef.current(entry.address))
-					rowAddress.addEventListener('mouseleave', () => setHoveredAddressRef.current(null))
+					rowAddress.addEventListener('mouseenter', () => hoverRef.current({ address: entry.address }))
+					rowAddress.addEventListener('mouseleave', () => hoverRef.current({ address: null }))
 					const parts = restParts(entry)
 					const asmSpan = document.createElement('span')
 					asmSpan.className = 'code-word-asm'
@@ -884,9 +882,9 @@ function SourcePane({ documentId }: SourcePaneProps) {
 	// pointed at, without touching the rows themselves.
 	React.useEffect(() => {
 		for (const { address, node } of zoneAddressNodes.current) {
-			node.classList.toggle('address-hovered', address === hoveredAddress)
+			node.classList.toggle('address-hovered', address === hovered.address)
 		}
-	}, [hoveredAddress])
+	}, [hovered.address])
 
 	return (
 		<div className="source-pane">

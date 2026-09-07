@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { HOVER_KINDS, NOTHING_HOVERED, type Hovered } from './hover'
 import { Assembler, type SourceFile } from '../core/assembler'
 import { CP0_REGISTER_COUNT, CP0_STATUS_INITIAL, FP_CONDITION_FLAG_COUNT, FP_REGISTER_COUNT } from '../core/coprocessor'
 import { formatDiagnostic, hasErrors } from '../core/diagnostics'
@@ -305,14 +306,14 @@ interface THRAXStore extends CoprocessorState {
 	/** Whether the heat map tints the source line behind the code as well. */
 	heatMapLines: boolean
 	/** Whether the source editor is showing its find and replace bar. */
-	/** Address the memory view is pointing at, highlighted in the source editor. */
-	hoveredAddress: number | null
 	/**
-	 * The register under the pointer, wherever it is being pointed at.  Named
-	 * rather than indexed, since the history knows a register by its name and the
-	 * three files ($t0, $f0, CP0) share one namespace here.
+	 * What is under the pointer, by kind: an address, a register named rather
+	 * than indexed (the history knows a register by its name, and $t0, $f0 and
+	 * the CP0 registers share one namespace here), a symbol.  Whichever panel
+	 * the pointer is over says what it is over and every other answers; see
+	 * `store/hover`.
 	 */
-	hoveredRegister: string | null
+	hovered: Hovered
 	/** Index into callStack of the selected frame, -1 for the running frame, null for none. */
 	selectedFrame: number | null
 	/** The file whose close is waiting on an answer, or null when none is. */
@@ -420,8 +421,8 @@ interface THRAXStore extends CoprocessorState {
 	toggleBreakpointAt: (file: string, line: number, address: number) => void
 	/** Writes a machine code word typed into the text segment table. */
 	setBreakpointLines: (file: string, lines: Iterable<number>) => void
-	setHoveredAddress: (address: number | null) => void
-	setHoveredRegister: (name: string | null) => void
+	/** Says what is under the pointer; kinds left out keep what they had. */
+	hover: (values: Partial<Hovered>) => void
 	setSelectedFrame: (frame: number | null) => void
 	setGutterColumns: (columns: GutterColumns) => void
 	setHeatMap: (shown: boolean) => void
@@ -697,8 +698,7 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 		breakpointLines: new Map<string, Set<number>>(),
 		breakpointAddresses: new Set<number>(),
 		diagnostics: [],
-		hoveredAddress: null,
-		hoveredRegister: null,
+		hovered: NOTHING_HOVERED,
 		selectedFrame: null,
 		pendingClose: null,
 		gutterColumns: savedGutterColumns,
@@ -1087,11 +1087,11 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 		// Pointing at what is already pointed at is not news.  Zustand publishes on
 		// every `set`, and much of the workspace reads the store whole, so an
 		// unguarded write here re-renders every panel on each mouse move.
-		setHoveredAddress: (address) => {
-			if (get().hoveredAddress !== address) set({ hoveredAddress: address })
-		},
-		setHoveredRegister: (name) => {
-			if (get().hoveredRegister !== name) set({ hoveredRegister: name })
+		hover: (values) => {
+			const held = get().hovered
+			// Pointing at what is already pointed at is not news.
+			if (HOVER_KINDS.every((kind) => !(kind in values) || values[kind] === held[kind])) return
+			set({ hovered: { ...held, ...values } })
 		},
 
 		setSelectedFrame: (frame) => set({ selectedFrame: frame }),

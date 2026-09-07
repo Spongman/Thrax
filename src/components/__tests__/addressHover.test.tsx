@@ -7,6 +7,7 @@ import type { HistoryEntry } from '../../core/types'
 import HistoryView from '../HistoryView'
 import MemoryView from '../MemoryView'
 import RegisterView from '../RegisterView'
+import SymbolTableView from '../SymbolTableView'
 
 /**
  * One address under the pointer, lit in every window that shows it.  Each of
@@ -28,6 +29,13 @@ const memory = () => ({
 // Most of a register file is zero, which is why an address hover has to mean an
 // address: thirty registers share that value.
 const registers = () => ({ $zero: 0, $t0: ADDRESS, $t1: 0, $t2: 0 })
+
+
+/** Two names, one of them at the address every window here is pointing at. */
+const symbols = () => ({
+	globals: new Map([['buffer', ADDRESS], ['elsewhere', 0x10010000]]),
+	locals: new Map(),
+})
 
 describe('the address under the pointer', () => {
 	it('lights the word at it, and any word holding it, in memory', () => {
@@ -62,6 +70,23 @@ describe('the address under the pointer', () => {
 				hoveredAddress={0x7fffeffc} onHoverAddress={() => {}} />
 		)
 		expect(markup).not.toContain('address-hovered')
+	})
+
+	it('lights the symbol that names it', () => {
+		const markup = renderToStaticMarkup(<SymbolTableView symbols={symbols()} hoveredAddress={ADDRESS} />)
+		expect(markup).toContain('address-hovered')
+		// One row, not the whole table: the other symbol is somewhere else.
+		expect(markup.match(/address-hovered/g)).toHaveLength(1)
+	})
+
+	it('leaves the symbols alone when it names none of them', () => {
+		const markup = renderToStaticMarkup(<SymbolTableView symbols={symbols()} hoveredAddress={0x7fffeffc} />)
+		expect(markup).not.toContain('address-hovered')
+	})
+
+	it('lights a symbol row by name, for a hover that came from its own window', () => {
+		const markup = renderToStaticMarkup(<SymbolTableView symbols={symbols()} hoveredSymbol="elsewhere" />)
+		expect(markup).toContain('address-hovered')
 	})
 
 	it('lights the history rows that ran it', () => {
