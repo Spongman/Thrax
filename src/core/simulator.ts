@@ -41,7 +41,8 @@ import { FileTable, STDERR, STDOUT } from './files'
 import type { DevicePort, ExecutionObserver } from './observer'
 import { RandomStreams } from './random'
 import { EffectStore } from './effectStore'
-import { KIND_REGISTER, KIND_FP, KIND_FLAG, KIND_CP0, KIND_MEMORY, KIND_CONSOLE, KIND_CONSOLE_RESET, KIND_DISPLAY, KIND_QUEUED_INPUT, KIND_CALL, KIND_HI_LO, KIND_HEAP_POINTER, KIND_HALTED, KIND_EXIT_CODE, KIND_SLEEP, KIND_INPUT } from './effectKind'
+import { packService, serviceOf, slotOf, type MachineService, type ServiceRecorder } from './service'
+import { KIND_REGISTER, KIND_FP, KIND_FLAG, KIND_CP0, KIND_MEMORY, KIND_CONSOLE, KIND_CONSOLE_RESET, KIND_DISPLAY, KIND_QUEUED_INPUT, KIND_CALL, KIND_HI_LO, KIND_HEAP_POINTER, KIND_HALTED, KIND_EXIT_CODE, KIND_SLEEP, KIND_INPUT, KIND_SERVICE } from './effectKind'
 
 import { HistoryLog } from './historyLog'
 import { REGISTER_FILE_NAMES, REGISTER_NAMES, registerFileIndex } from './registers'
@@ -290,6 +291,12 @@ export class MipsSimulator {
 	observers: ExecutionObserver[]
 	breakpoints: Set<number>
 	readonly executionHistory = new HistoryLog()
+	/**
+	 * Whatever has asked to be rolled back with the machine, in the order they
+	 * asked: a record names one by its place here, so the machine needs to know
+	 * nothing else about any of them.
+	 */
+	private readonly services: MachineService[] = []
 	/**
 	 * The `backstepLimit` setting, which the workspace assigns as it assigns
 	 * `delayedBranching`.  MARS counts *backstep operations* and notes that one
@@ -971,6 +978,16 @@ export class MipsSimulator {
 			// The registers and memory the answer landed in carry it both ways.
 			case KIND_INPUT:
 				return
+			// Whatever this means is the service's own: the machine hands back
+			// what was kept and files what the service hands over instead.
+			case KIND_SERVICE: {
+				const service = this.services[serviceOf(a)]
+				if (!service) return
+				const held = service.exchange(slotOf(a), b, value)
+				effects.setB(index, held.value)
+				if (held.payload !== undefined || value !== undefined) effects.setValue(index, held.payload)
+				return
+			}
 		}
 	}
 
@@ -1093,6 +1110,25 @@ export class MipsSimulator {
 	 */
 	private record(kind: number, a: number, b: number, value?: unknown) {
 		if (this.entry) this.effects.push(kind, a, b, value)
+	}
+
+	/**
+	 * Signs a service up to be rolled back with the machine, and hands back the
+	 * way it says what it changed.  What the records mean is the service's; the
+	 * machine only files them against the instruction in hand.
+	 */
+	register(service: MachineService): ServiceRecorder {
+		// Signing up twice is the same service, not a second one: a tool is told
+		// about the machine again whenever its panel is reopened.
+		const existing = this.services.indexOf(service)
+		const id = existing >= 0 ? existing : this.services.length
+		if (existing < 0) this.services.push(service)
+		this.effects.nameService(id, service.name)
+		return {
+			keep: (slot: number, value: number, payload?: unknown) => {
+				this.record(KIND_SERVICE, packService(id, slot), value, payload)
+			},
+		}
 	}
 
 	/** Closes the entry in flight, which owns everything recorded since it opened. */

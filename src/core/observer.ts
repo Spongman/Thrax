@@ -8,6 +8,7 @@
  */
 
 import type { Decoded } from './decoder'
+import type { ServiceHost } from './service'
 
 /**
  * A memory-mapped device's way of answering the program.
@@ -41,6 +42,26 @@ export interface DevicePort {
 	interrupt(cause: number): boolean
 }
 
+/** One instruction the machine has run, as a tool replaying them reads it. */
+export interface ExecutedInstruction {
+	address: number
+	/** The word executed, which a tool decodes for itself. */
+	word: number | null
+	/** The count before this instruction ran. */
+	instructionCount: number
+	kind: 'instruction' | 'edit'
+}
+
+/**
+ * The instructions that have run, in order.  A tool rebuilds itself from these
+ * rather than keeping a copy of its own state for every step, which is the
+ * bargain the machine's own history already makes.
+ */
+export interface InstructionHistory {
+	readonly length: number
+	at(index: number): ExecutedInstruction | undefined
+}
+
 /** What a tool needs to know about the machine, as opposed to the run on it. */
 export interface MachineConfig {
 	/** Delayed branching: the instruction after a branch runs first. */
@@ -50,6 +71,17 @@ export interface MachineConfig {
 	 * tool attached to something that offers no device port.
 	 */
 	device?: DevicePort
+	/**
+	 * The log of instructions the machine keeps anyway, for a tool that rewinds
+	 * by replaying them.  Absent where whatever the tool watches keeps none.
+	 */
+	history?: InstructionHistory
+	/**
+	 * Where a tool holding state of its own signs up to be rolled back with the
+	 * machine.  A device with a position cannot be replayed out of the log the
+	 * way a tally can, so it says what changed instead; see `core/service`.
+	 */
+	services?: ServiceHost
 }
 
 export interface ExecutionObserver {

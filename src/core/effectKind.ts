@@ -21,7 +21,7 @@
 export const EFFECT_KINDS = [
 	'register', 'fp', 'flag', 'cp0', 'memory', 'console', 'consoleReset',
 	'display', 'queuedInput', 'call', 'hiLo', 'heapPointer', 'halted',
-	'exitCode', 'sleep', 'input',
+	'exitCode', 'sleep', 'input', 'service',
 ] as const
 
 /**
@@ -52,6 +52,13 @@ export class Kind {
 	static readonly EXIT_CODE = 13
 	static readonly SLEEP = 14
 	static readonly INPUT = 15
+	/**
+	 * A change to something the machine holds but does not understand: a tool's
+	 * device, an open file, a stream of numbers.  The service says what it would
+	 * take to put itself back and the machine keeps it with everything else the
+	 * instruction did.
+	 */
+	static readonly SERVICE = 16
 }
 
 /** The kinds this file dispatches on, bound so each case is a plain read. */
@@ -78,3 +85,4 @@ export const KIND_HALTED = Kind.HALTED
 export const KIND_EXIT_CODE = Kind.EXIT_CODE
 export const KIND_SLEEP = Kind.SLEEP
 export const KIND_INPUT = Kind.INPUT
+export const KIND_SERVICE = Kind.SERVICE

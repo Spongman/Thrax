@@ -230,6 +230,12 @@ export type Effect =
 	| { kind: typeof Kind.EXIT_CODE, value: number | null }
 	| { kind: typeof Kind.SLEEP, value: number }
 	/**
+	 * A change to something the machine holds and does not understand, named by
+	 * the service that owns it and the slot within it.  Nothing outside that
+	 * service can say what it was, which is the point of it.
+	 */
+	| { kind: typeof Kind.SERVICE, name: string, service: number, slot: number, value: number }
+	/**
 	 * What the user typed at a console or dialog read.  The registers and memory
 	 * it landed in are effects of their own, so this changes nothing on the way
 	 * back or forward; it is here so the history panel can show the answer.

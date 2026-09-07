@@ -19,7 +19,8 @@
  */
 
 import { REGISTER_FILE_NAMES } from './registers'
-import { KIND_REGISTER, KIND_FP, KIND_FLAG, KIND_CP0, KIND_MEMORY, KIND_CONSOLE, KIND_CONSOLE_RESET, KIND_DISPLAY, KIND_QUEUED_INPUT, KIND_CALL, KIND_HI_LO, KIND_HEAP_POINTER, KIND_HALTED, KIND_EXIT_CODE, KIND_SLEEP, KIND_INPUT } from './effectKind'
+import { serviceOf, slotOf } from './service'
+import { KIND_REGISTER, KIND_FP, KIND_FLAG, KIND_CP0, KIND_MEMORY, KIND_CONSOLE, KIND_CONSOLE_RESET, KIND_DISPLAY, KIND_QUEUED_INPUT, KIND_CALL, KIND_HI_LO, KIND_HEAP_POINTER, KIND_HALTED, KIND_EXIT_CODE, KIND_SLEEP, KIND_INPUT, KIND_SERVICE } from './effectKind'
 import type { CallFrame, DelayState, Effect } from './types'
 
 
@@ -243,6 +244,16 @@ export class EffectStore {
 	 * The effect as an object, for the history panel.  Only the rows on screen
 	 * are ever built, so this costs nothing for a log nobody is looking at.
 	 */
+	/**
+	 * What each registered service is called, for the one panel that prints it.
+	 * The store keeps no other idea of what a service is.
+	 */
+	private readonly serviceNames: string[] = []
+
+	nameService(id: number, name: string) {
+		this.serviceNames[id] = name
+	}
+
 	materialize(index: number): Effect {
 		const { kind: code, a, b, value } = this.slotAt(index)
 		switch (code) {
@@ -266,6 +277,10 @@ export class EffectStore {
 			case KIND_QUEUED_INPUT:
 			case KIND_INPUT:
 				return { kind: code, value: String(value) }
+			case KIND_SERVICE: {
+				const service = serviceOf(a)
+				return { kind: code, name: this.serviceNames[service] ?? 'device', service, slot: slotOf(a), value: b }
+			}
 		}
 		throw new Error(`Effect ${index} has an unknown kind: ${code}`)
 	}
