@@ -10,6 +10,7 @@
 
 .symbol-controls {
 	display: flex;
+	flex-wrap: wrap;
 	align-items: center;
 	gap: 6px;
 	position: sticky;
@@ -17,14 +18,6 @@
 	background: var(--panel-bg, #1e1e1e);
 	padding-bottom: 4px;
 	z-index: 1;
-}
-
-.symbol-filter {
-	flex: 1;
-	min-width: 0;
-	font-family: inherit;
-	font-size: 12px;
-	padding: 2px 6px;
 }
 
 .symbol-heading {
@@ -50,20 +43,31 @@
 	white-space: nowrap;
 }
 
+/*
+ * The columns are coloured the way the editor colours the same things: a name
+ * is a label, an address is an address wherever the workspace shows one, a
+ * directive is a keyword, and a value is a number or a string.
+ */
 .symbol-name {
 	width: 99%;
 	overflow: hidden;
 	text-overflow: ellipsis;
+	color: var(--data-label);
+}
+
+/* The colon is punctuation rather than part of the name. */
+.symbol-colon {
+	color: var(--text-primary);
 }
 
 .symbol-address {
-	text-align: right;
+	color: var(--data-register);
 }
 
 /* What the name was declared as, and what is in it now. */
 .symbol-type {
 	text-align: right;
-	opacity: 0.6;
+	color: var(--data-keyword);
 }
 
 .symbol-value {
@@ -72,6 +76,16 @@
 	overflow: hidden;
 	text-overflow: ellipsis;
 	color: var(--data-number);
+}
+
+.symbol-value.text {
+	color: var(--data-string);
+}
+
+/* A lit row reads as one thing, so the highlight wins over the column colours. */
+.symbol-table tr.address-hovered td,
+.symbol-table tr.address-hovered .symbol-colon {
+	color: var(--text-bright);
 }
 
 .symbol-link {
@@ -85,6 +99,15 @@
 
 .symbol-link:hover {
 	text-decoration: underline;
+}
+
+/* The name is the column that gives, so its link ellipsizes rather than the cell. */
+.symbol-name .symbol-link {
+	display: block;
+	width: 100%;
+	text-align: left;
+	overflow: hidden;
+	text-overflow: ellipsis;
 }
 
 .symbol-empty {
