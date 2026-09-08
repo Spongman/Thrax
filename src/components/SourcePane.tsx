@@ -298,7 +298,18 @@ function SourcePane({ documentId }: SourcePaneProps) {
 
 	React.useEffect(() => {
 		if (!focusedSource || focusedSource.file !== title) return
-		editorRef.current?.revealLineInCenterIfOutsideViewport(focusedSource.line)
+		const editorInstance = editorRef.current
+		if (!editorInstance) return
+		const { line } = focusedSource
+		// Arriving at a line means arriving in the file: the caret goes to the
+		// first thing on the line and the keyboard comes with it, so the next
+		// keystroke edits what was navigated to.
+		editorInstance.setPosition({ lineNumber: line, column: editorInstance.getModel()?.getLineFirstNonWhitespaceColumn(line) ?? 1 })
+		editorInstance.revealLineInCenterIfOutsideViewport(line)
+		// The dock brings the tab forward in its own effect, which runs after this
+		// one and would take the focus back, so the editor asks for it afterwards.
+		const handle = window.requestAnimationFrame(() => editorInstance.focus())
+		return () => window.cancelAnimationFrame(handle)
 	}, [focusedSource, title])
 
 	const handleEditorMount: OnMount = React.useCallback((editorInstance, monaco) => {
