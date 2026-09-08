@@ -5,6 +5,7 @@
 import { doubleToBits, singleToBits } from './coprocessor'
 import { AssemblyError, at } from './diagnostics'
 import { MEMORY_CONFIGURATIONS, type MemoryConfigurationValues } from './settings'
+import type { SourceLocation } from './sourceIndex'
 import type {
 	DataEntry,
 	DataValue,
@@ -80,6 +81,8 @@ export interface ParseResult {
 	symbols: SymbolTables
 	/** Names `.globl` moved out of their file's table, and the file each came from. */
 	globalNames: Map<string, string>
+	/** Where each name was written, per unit: the line the label itself is on. */
+	symbolSites: Map<string, Map<string, SourceLocation>>
 	data: DataEntry[]
 	/** Text labels with no instruction after them; the assembler places them. */
 	segmentEndLabels: SegmentEndLabels[]
@@ -106,6 +109,8 @@ export class Parser {
 	segmentEndLabels: SegmentEndLabels[]
 	/** Names each unit has defined, so the same name can occur in two files. */
 	definedLabels: Map<string, Set<string>>
+	/** The line each of those names is written on, which is where it is defined. */
+	symbolSites: Map<string, Map<string, SourceLocation>>
 	/** Automatic data alignment, off from `.align 0` until the next `.data`. */
 	autoAlign: boolean
 	/** `.extern` allocates here; the cursor spans the whole assembly, not one file. */
@@ -138,6 +143,7 @@ export class Parser {
 		this.segmentStarts = { text: starts.text, ktext: starts.ktext }
 		this.segmentEndLabels = []
 		this.definedLabels = new Map()
+		this.symbolSites = new Map()
 		this.autoAlign = true
 		// Initialized once per assembly, not once per file.
 		this.externAddress = memory.externBaseAddress
@@ -154,6 +160,19 @@ export class Parser {
 			this.locals.set(unit, table)
 		}
 		return table
+	}
+
+	/**
+	 * Where a name is written.  An `.include` keeps its own file, so the site
+	 * names the file the text is in rather than the unit that owns the name.
+	 */
+	recordSite(unit: string, name: string, token: TokenData) {
+		let sites = this.symbolSites.get(unit)
+		if (!sites) {
+			sites = new Map()
+			this.symbolSites.set(unit, sites)
+		}
+		sites.set(name, { file: token.file ?? '', line: token.line })
 	}
 
 	parse(): ParseResult {
@@ -193,6 +212,7 @@ export class Parser {
 			instructions: this.instructions,
 			symbols: { locals: this.locals, globals: this.globals },
 			globalNames,
+			symbolSites: this.symbolSites,
 			data: this.data,
 			segmentEndLabels: this.segmentEndLabels,
 			segmentStarts: this.segmentStarts,
@@ -274,6 +294,7 @@ export class Parser {
 
 		// A name already global names the same storage, and allocates nothing more.
 		if (this.globals.has(label.value)) return
+		this.recordSite(this.currentUnit, label.value, token)
 		this.globals.set(label.value, this.externAddress)
 		this.externAddress += size
 	}
@@ -355,6 +376,7 @@ export class Parser {
 		}
 		if (defined.has(name)) throw new AssemblyError(`Duplicate label: ${name}`, at(token))
 		defined.add(name)
+		this.recordSite(unit, name, token)
 		this.localTable(unit)
 		this.pendingLabels[this.segment].push({ name, unit })
 	}

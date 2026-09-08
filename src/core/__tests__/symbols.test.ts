@@ -19,6 +19,34 @@ function ok(files: SourceFile[]) {
 	return result
 }
 
+describe('where a name is written', () => {
+	it("is the label's own line, not the line of the word it names", () => {
+		const { program } = ok([{
+			name: 'a.asm',
+			code: '\t.data\ncount:\t.word 1\n\t.text\nmain:\n\n\tj main\nend:\tj end\n',
+		}])
+
+		const sites = program.symbolSites.get('a.asm')
+		// `main:` is on line 4; the instruction it names is on line 6.
+		expect(sites?.get('main')).toEqual({ file: 'a.asm', line: 4 })
+		expect(program.sourceIndex.lineForAddress(program.symbols.locals.get('a.asm')!.get('main')!)?.line).toBe(6)
+		// A label sharing its line with what it names is on that line either way.
+		expect(sites?.get('end')).toEqual({ file: 'a.asm', line: 7 })
+		expect(sites?.get('count')).toEqual({ file: 'a.asm', line: 2 })
+	})
+
+	it("keeps each unit's own names apart, and an extern where it is declared", () => {
+		const { program } = ok([
+			{ name: 'a.asm', code: '\t.extern shared, 4\nloop:\n\tj loop\n' },
+			{ name: 'b.asm', code: '\n\nloop:\n\tj loop\n' },
+		])
+
+		expect(program.symbolSites.get('a.asm')?.get('loop')?.line).toBe(2)
+		expect(program.symbolSites.get('b.asm')?.get('loop')?.line).toBe(3)
+		expect(program.symbolSites.get('a.asm')?.get('shared')).toEqual({ file: 'a.asm', line: 1 })
+	})
+})
+
 describe('symbols are scoped to the file that defines them', () => {
 	it('lets two files each define the same name', () => {
 		const { program } = ok([

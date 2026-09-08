@@ -1,6 +1,6 @@
 import type { Kind } from './effectKind'
 
-import type { SourceIndex } from './sourceIndex'
+import type { SourceIndex, SourceLocation } from './sourceIndex'
 
 export type TokenType =
 	| 'COMMA'
@@ -113,6 +113,12 @@ export interface MipsProgram {
 	 */
 	labels: Map<string, number>
 	symbols: SymbolTables
+	/**
+	 * Where each name was written, per unit, which is not where the word it names
+	 * ended up: a label on a line of its own belongs to that line, not to the
+	 * instruction beneath it.
+	 */
+	symbolSites: Map<string, Map<string, SourceLocation>>
 	data: DataEntry[]
 	/** Which line of which file every machine word came from. */
 	sourceIndex: SourceIndex

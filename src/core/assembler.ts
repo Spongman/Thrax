@@ -60,6 +60,7 @@ function emptyProgram(): MipsProgram {
 		instructions: [],
 		labels: new Map(),
 		symbols: { locals: new Map(), globals: new Map() },
+		symbolSites: new Map(),
 		data: [],
 		sourceIndex: EMPTY_SOURCE_INDEX,
 	}
@@ -518,6 +519,7 @@ export class Assembler {
 			instructions: expanded,
 			labels: flattenSymbols(symbols),
 			symbols,
+			symbolSites: parsed.symbolSites,
 			data: parsed.data,
 			sourceIndex: buildSourceIndex(this.entryFile, expanded, parsed.data),
 		}
