@@ -7,7 +7,7 @@ import { disassemble } from '../core/disassembler'
 import { parseWord } from '../core/format'
 import { DEFAULT_SETTINGS, MEMORY_CONFIGURATIONS, SETTINGS_VALIDATORS, type MemoryConfigurationValues, type ThraxSettings } from '../core/settings'
 import { MipsSimulator } from '../core/simulator'
-import { EMPTY_SOURCE_INDEX, type SourceIndex, type SourceRow } from '../core/sourceIndex'
+import { EMPTY_SOURCE_INDEX, type SourceIndex, type SourceLocation, type SourceRow } from '../core/sourceIndex'
 import { EffectStore } from '../core/effectStore'
 import { HistoryLog, moveToEntry } from '../core/historyLog'
 import type { CallFrame, CodeWord, CoprocessorState, DataEntry, Diagnostic, KeyboardDisplayState, MemoryView, PendingInput, Registers, SymbolTables } from '../core/types'
@@ -372,6 +372,8 @@ interface THRAXStore extends CoprocessorState {
 	historyVersion: number
 	/** Symbols of the assembled program, by the file that owns them. */
 	symbols: SymbolTables
+	/** Where each of those names is written, so a name can open its own line. */
+	symbolSites: Map<string, Map<string, SourceLocation>>
 	/**
 	 * The runs of bytes the data directives laid out, which is what a symbol was
 	 * declared as: the symbol table reads a name's type and value from these.
@@ -647,6 +649,7 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 			historyEffects: simulator.effects,
 			historyVersion: get().historyVersion + 1,
 			symbols: simulator.program.symbols,
+			symbolSites: simulator.program.symbolSites,
 			programData: simulator.program.data,
 			breakpoints: new Set(simulator.getBreakpoints()),
 			sourceIndex: simulator.program.sourceIndex,
@@ -743,6 +746,7 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 			historyEffects: new EffectStore(),
 			historyVersion: (get()?.historyVersion ?? 0) + 1,
 			symbols: { locals: new Map(), globals: new Map() },
+			symbolSites: new Map(),
 			programData: [],
 			...initialCoprocessorState(),
 		}
