@@ -1,7 +1,25 @@
 import * as monaco from 'monaco-editor'
+import { INSTRUCTION_MNEMONICS } from './isa'
+import { instructionHelp, instructionSignature } from './isaDocs'
+
+/**
+ * Every mnemonic the assembler accepts, lower case and in alphabetical order,
+ * which is the order the completion list offers them in.  The one table says
+ * what they are, so an instruction added there is offered here (`isa.ts`).
+ */
+const MNEMONICS: readonly string[] =
+	[...INSTRUCTION_MNEMONICS].map((mnemonic) => mnemonic.toLowerCase()).sort()
 
 export function registerMipsLanguage(): void {
 	monaco.languages.register({ id: 'mips' })
+
+	monaco.languages.setLanguageConfiguration('mips', {
+		comments: { lineComment: '#' },
+		// A word runs through `.` and `$`, so `add.s` and `$t0` are each one
+		// word: what completion replaces, and what a double click selects.  It
+		// is what a name may be spelled with (`gotoDefinition.ts:23`).
+		wordPattern: /[A-Za-z_.$][\w.$]*/,
+	})
 
 	monaco.languages.setMonarchTokensProvider('mips', {
 		tokenizer: {
@@ -53,26 +71,13 @@ export function registerMipsLanguage(): void {
 
 	// Completion items
 	monaco.languages.registerCompletionItemProvider('mips', {
-		provideCompletionItems: (_model, position) => {
-			const range = new monaco.Range(position.lineNumber, position.column, position.lineNumber, position.column)
-			const instructions = [
-				'add', 'addu', 'addi', 'addiu', 'sub', 'subu', 'mul', 'mult', 'multu', 'div', 'divu',
-				'and', 'andi', 'or', 'ori', 'xor', 'xori', 'nor',
-				'sll', 'srl', 'sra', 'sllv', 'srlv', 'srav',
-				'slt', 'slti', 'sltu', 'sltiu',
-				'beq', 'bne', 'bgez', 'bgtz', 'blez', 'bltz',
-				'j', 'jal', 'jr', 'jalr',
-				'lw', 'lh', 'lhu', 'lb', 'lbu', 'sw', 'sh', 'sb', 'lui', 'la',
-				'mfhi', 'mflo', 'mthi', 'mtlo',
-				'move', 'li', 'nop', 'syscall',
-				'lwc1', 'swc1', 'ldc1', 'sdc1', 'l.s', 'l.d', 's.s', 's.d', 'li.s', 'li.d',
-				'mfc1', 'mtc1', 'mfc0', 'mtc0', 'eret', 'bc1t', 'bc1f', 'movf', 'movt',
-				'add.s', 'add.d', 'sub.s', 'sub.d', 'mul.s', 'mul.d', 'div.s', 'div.d',
-				'abs.s', 'abs.d', 'neg.s', 'neg.d', 'sqrt.s', 'sqrt.d', 'mov.s', 'mov.d',
-				'cvt.s.w', 'cvt.s.d', 'cvt.d.w', 'cvt.d.s', 'cvt.w.s', 'cvt.w.d',
-				'round.w.s', 'trunc.w.s', 'ceil.w.s', 'floor.w.s',
-				'c.eq.s', 'c.eq.d', 'c.lt.s', 'c.lt.d', 'c.le.s', 'c.le.d',
-			]
+		provideCompletionItems: (model, position) => {
+			// The word already typed is replaced rather than added to, so
+			// completing `ad` gives `add` and not `adadd`.  A mnemonic keeps its
+			// format suffix and a register its `$`, which is what the word
+			// pattern above is for.
+			const word = model.getWordUntilPosition(position)
+			const range = new monaco.Range(position.lineNumber, word.startColumn, position.lineNumber, position.column)
 
 			const registers = [
 				'$zero', '$at', '$v0', '$v1',
@@ -86,12 +91,13 @@ export function registerMipsLanguage(): void {
 
 			return {
 				suggestions: [
-					...instructions.map((instr) => ({
-						label: instr,
+					...MNEMONICS.map((mnemonic) => ({
+						label: mnemonic,
 						kind: monaco.languages.CompletionItemKind.Keyword,
-						insertText: instr,
+						insertText: mnemonic,
 						range,
-						documentation: `MIPS instruction: ${instr}`,
+						detail: instructionSignature(mnemonic),
+						documentation: { value: (instructionHelp(mnemonic) ?? []).join('\n\n') },
 					})),
 					...registers.map((reg) => ({
 						label: reg,
