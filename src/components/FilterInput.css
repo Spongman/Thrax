@@ -1,0 +1,45 @@
+/*
+ * A filter and its clear button drawn as one control: they share an edge and
+ * the ends are rounded, the way the memory window joins its address box to Go.
+ */
+.filter-input {
+	display: flex;
+	flex: 1;
+	min-width: 0;
+}
+
+.filter-text,
+.filter-clear {
+	background: var(--surface-input);
+	border: 1px solid var(--border-strong);
+	color: var(--text-primary);
+	font-size: 11px;
+	font-family: 'Courier New', monospace;
+	line-height: 12px;
+	box-sizing: border-box;
+	height: 20px;
+}
+
+.filter-text {
+	flex: 1;
+	min-width: 0;
+	padding: 3px 6px;
+	border-right-width: 0;
+	border-radius: var(--radius) 0 0 var(--radius);
+}
+
+.filter-clear {
+	padding: 3px 8px;
+	border-radius: 0 var(--radius) var(--radius) 0;
+	cursor: pointer;
+}
+
+.filter-clear:hover {
+	background: var(--border-strong);
+}
+
+/* Nothing to clear is worth showing rather than hiding: the row keeps its shape. */
+.filter-clear:disabled {
+	opacity: 0.4;
+	cursor: default;
+}
