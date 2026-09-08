@@ -118,6 +118,13 @@
 	color: var(--text-bright);
 }
 
+/* The name under the pointer in the symbol window, lit where it is defined.
+   The label is a value in a line rather than the line, so only it lights. */
+.monaco-editor .symbol-hovered-label {
+	background: var(--accent-surface);
+	border-radius: var(--radius);
+}
+
 /* The address is the way into the memory window, so it offers the same
    highlight that window gives a word under the pointer. */
 .monaco-editor .code-word-address:hover,

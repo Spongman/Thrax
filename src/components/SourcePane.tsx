@@ -203,6 +203,19 @@ function SourcePane({ documentId }: SourcePaneProps) {
 		const location = sourceIndex.lineForAddress(store.hovered.address)
 		return location?.file === title ? location.line : undefined
 	}, [sourceIndex, store.hovered.address, title])
+	const hoveredAddress = store.hovered.address
+	/**
+	 * The name under the pointer somewhere, lit here where it is defined.
+	 *
+	 * Two files may define the same name, so the file holding the hovered address
+	 * is the one that answers; a name with no address in any file, such as an
+	 * `.extern`, lights wherever it is written.
+	 */
+	const hoveredLabel = React.useMemo(() => {
+		if (store.hovered.symbol === null || !/^[A-Za-z_]\w*$/.test(store.hovered.symbol)) return null
+		if (hoveredAddress !== null && hoveredLine === undefined && sourceIndex.lineForAddress(hoveredAddress) !== null) return null
+		return store.hovered.symbol
+	}, [hoveredAddress, hoveredLine, sourceIndex, store.hovered.symbol])
 	const hoveredAddressRef = React.useRef(store.hovered.address)
 	/** The address span of each zone row, so a hover can light one in place. */
 	const zoneAddressNodes = React.useRef<{ address: number, node: HTMLElement }[]>([])
@@ -545,6 +558,19 @@ function SourcePane({ documentId }: SourcePaneProps) {
 				options: { lineNumberClassName: 'address-hovered-number', isWholeLine: true },
 			})
 		}
+		// The label the hovered name is written as, which is where the name lives
+		// rather than where the word it points at does.
+		if (hoveredLabel !== null) {
+			const model = editorInstance.getModel()
+			const matches = model?.findMatches(`^([ \t]*)${hoveredLabel}[ \t]*:`, false, true, true, null, true) ?? []
+			for (const match of matches) {
+				const indent = match.matches?.[1]?.length ?? 0
+				hoverDecorations.push({
+					range: new monaco.Range(match.range.startLineNumber, match.range.startColumn + indent, match.range.endLineNumber, match.range.endColumn),
+					options: { className: 'symbol-hovered-label' },
+				})
+			}
+		}
 		// A line another panel navigated to, lit in the navigation colour until it
 		// fades.  Whole-line, since it is the line rather than a value in it.
 		if (navigatedLine !== null) {
@@ -577,7 +603,7 @@ function SourcePane({ documentId }: SourcePaneProps) {
 			const line = lineAt(selectedAddress)
 			if (line !== undefined) editorInstance.revealLineInCenterIfOutsideViewport(line)
 		}
-	}, [breakpointLines, breakpoints, callStack, hoveredLine, navigatedLine, pc, selectedFrame, showWordRows, sourceIndex, title])
+	}, [breakpointLines, breakpoints, callStack, hoveredLabel, hoveredLine, navigatedLine, pc, selectedFrame, showWordRows, sourceIndex, title])
 
 	// Assembly diagnostics for this file, as squiggles under the offending text.
 	// An empty list clears them, so a fixed line stops being marked as the user types.
