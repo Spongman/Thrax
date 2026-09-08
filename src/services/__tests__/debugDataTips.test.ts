@@ -38,6 +38,30 @@ describe('the token a pointer is over', () => {
 		expect(describeToken('nop            ', 12, state)).toBeNull()
 	})
 
+	it('reads a mnemonic as the instruction it is', () => {
+		const text = 'addu $t2, $t1, $zero'
+		expect(tipParagraphs(describeToken(text, at(text, 'addu'), state)?.contents ?? []))
+			.toEqual([
+				'**addu** basic instruction',
+				'Add two registers, wrapping around on overflow.',
+				'`addu $t1,$t2,$t3`',
+				'Pseudo forms: `addu $t1,$t2,100000`',
+			])
+	})
+
+	it('keeps a format suffix with its mnemonic', () => {
+		const text = 'cvt.w.s $f0, $f1'
+		const described = describeToken(text, at(text, 'cvt.w.s'), state)
+		expect(text.slice(described?.start, (described?.start ?? 0) + (described?.length ?? 0))).toBe('cvt.w.s')
+		expect(described?.contents[1]).toBe('Convert a single to an integer word.')
+	})
+
+	it('prefers a label to nothing, and a mnemonic to a label spelled like one', () => {
+		const labelled: DebugDataTipState = { ...state, labels: new Map([['sub', 0x00400010]]) }
+		expect(describeToken('sub $t1, $t2, $t3', 0, labelled)?.address).toBeUndefined()
+		expect(describeToken('j main', at('j main', 'main'), state)?.address).toBe(0x00400000)
+	})
+
 	it('answers for the disassembly the gutter draws, not only for the source', () => {
 		// The two have to agree: an instruction decoded out of its machine word must
 		// report the same register value as the same instruction typed in a file.

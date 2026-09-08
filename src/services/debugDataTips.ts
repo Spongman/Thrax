@@ -1,6 +1,7 @@
 import { Assembler } from '../core/assembler'
 import { bitsToDouble, bitsToSingle, formatDouble, formatSingle } from '../core/coprocessor'
 import { formatWord, parseWord } from '../core/format'
+import { instructionHelp } from '../core/isaDocs'
 import { REGISTER_NAMES } from '../core/registers'
 import type { MemoryView, Registers } from '../core/types'
 
@@ -139,6 +140,18 @@ export function describeToken(
 		}
 	}
 
+	// A word that names an instruction is one, whatever else it may also name:
+	// the lexer resolves a bare word the same way, so a mnemonic wins over a
+	// label spelled like it (`lexer.ts:140`).  The format suffix belongs to the
+	// mnemonic, so `add.s` is one word and not `add`.
+	const mnemonicMatch = /[A-Za-z][\w.]*/g
+	for (const match of line.matchAll(mnemonicMatch)) {
+		const start = match.index ?? 0
+		if (offset < start || offset > start + match[0].length) continue
+		const help = instructionHelp(match[0])
+		if (help) return { start, length: match[0].length, contents: help }
+	}
+
 	const tokenMatch = /-?(?:0x[0-9a-f]+|\d+)|[A-Za-z_]\w*/ig
 	for (const match of line.matchAll(tokenMatch)) {
 		const start = match.index ?? 0
@@ -160,7 +173,11 @@ export function describeToken(
 	return null
 }
 
-/** Installs live MIPS register, label, literal, and address hover data tips. */
+/**
+ * Installs live MIPS register, label, literal, and address hover data tips,
+ * and the instruction docs, which are the one tip that does not depend on
+ * where the program has got to.
+ */
 export function registerMipsDebugDataTips(monaco: MonacoLike, getState: () => DebugDataTipState) {
 	let cachedCode = ''
 	let cachedLabels = new Map<string, number>()
