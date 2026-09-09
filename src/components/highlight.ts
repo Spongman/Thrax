@@ -127,11 +127,19 @@ const NOTHING: ReadonlySet<string> = new Set()
  * A panel showing a file of values needs the whole file diffed rather than a
  * token per value, and the first render reports nothing: arriving at a panel is
  * not a change to what it shows.
+ *
+ * `edits` counts the changes the panel made itself.  A change flash says what
+ * the machine did; what the user just typed is already under their caret, so a
+ * diff that follows a bump of this counter is recorded without being lit.  The
+ * counter is a dependency as well as a signal, so an edit that writes back the
+ * value already there still clears it rather than leaving it to swallow the
+ * next real change.
  */
-export function useChangedEntries(entries: ReadonlyArray<readonly [string, number]>): ReadonlySet<string> {
+export function useChangedEntries(entries: ReadonlyArray<readonly [string, number]>, edits = 0): ReadonlySet<string> {
 	const enabled = useTHRAXStore((state) => state.settings.highlightChanges)
 	const milliseconds = useFlashMilliseconds()
 	const previous = React.useRef<ReadonlyMap<string, number> | null>(null)
+	const lastEdits = React.useRef(edits)
 	const [changed, flash] = useFading<ReadonlySet<string>>(NOTHING)
 	// The values themselves are the dependency; the array holding them is rebuilt
 	// every render and would fire this on every one.
@@ -141,11 +149,13 @@ export function useChangedEntries(entries: ReadonlyArray<readonly [string, numbe
 		const before = previous.current
 		const now = new Map(entries)
 		previous.current = now
-		if (!enabled) return
+		const typed = lastEdits.current !== edits
+		lastEdits.current = edits
+		if (!enabled || typed) return
 		const moved = movedEntries(before, now)
 		if (moved.size === 0) return
 		flash(moved, milliseconds)
-	}, [signature, enabled, flash, milliseconds])
+	}, [signature, edits, enabled, flash, milliseconds])
 
 	return enabled ? changed : NOTHING
 }
