@@ -78,12 +78,21 @@ const REGISTER_GROUPS: Record<string, string[]> = {
 	'Special': ['$pc', '$hi', '$lo'],
 }
 
-/** Widest rendering of each format at the list font, in pixels. */
-const FORMAT_WIDTHS: Record<Format, number> = { '0n': 72, '0x': 72, 'f': 94, 'd': 130 }
+/** Widest rendering of each format, in characters: `0xffffffff`, `4294967295`. */
+const FORMAT_CHARS: Record<Format, number> = { '0n': 10, '0x': 10, 'f': 13, 'd': 18 }
 
 /** Advance of the monospace list font at 12px, which names are measured in. */
 const NAME_CHAR_WIDTH = 7.2
 const MIN_NAME_WIDTH = 48
+
+/**
+ * Room for the widest value a format can show, with a couple of pixels over.
+ * A character of the list font measures a shade wider than its nominal advance
+ * at the weight a value is set in, so reserving an exact multiple loses the
+ * last digit to the ellipsis: `0x00000000` comes to 72.01px in the 72 that ten
+ * characters of 7.2 pay for.
+ */
+const formatWidth = (format: Format) => Math.ceil(FORMAT_CHARS[format] * NAME_CHAR_WIDTH) + 2
 
 const hex = formatWord
 
@@ -187,7 +196,7 @@ function RegisterPanel({ title, entries, flags, onToggle, selected, onSelect, on
 	// Columns are only as wide as the names and the visible radixes need.  CP0
 	// names carry what the register is for, which is wider than a `$t0`.
 	const nameWidth = Math.ceil(Math.max(MIN_NAME_WIDTH, ...entries.map((entry) => entry.name.length * NAME_CHAR_WIDTH)))
-	const columnWidth = nameWidth + 24 + formats.reduce((total, format) => total + FORMAT_WIDTHS[format] + 8, 0)
+	const columnWidth = nameWidth + 24 + formats.reduce((total, format) => total + formatWidth(format) + 8, 0)
 
 	return (
 		<PanelGroup
