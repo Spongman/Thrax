@@ -1,4 +1,5 @@
 import React from 'react'
+import './EditableCell.css'
 
 interface EditableCellProps {
 	/** What the cell shows when it is not being edited. */

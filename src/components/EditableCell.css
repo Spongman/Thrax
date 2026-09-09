@@ -1,0 +1,45 @@
+/*
+ * A cell being typed over stands in exactly the space the value occupied, so
+ * nothing under the pointer moves as the editor opens.
+ *
+ * An input carries the user agent's own font and colour rather than the ones
+ * the cell around it is set in, and those have to be displaced without
+ * displacing what the cell set for itself: a register value is one weight, a
+ * float-bits readout is another size.  `:where` is what makes that work.  It
+ * contributes no specificity, so this beats the user agent, being an author
+ * rule, and loses to every rule the cell carries a class for.  The plain
+ * shorthand would win over both and take the cell's own font with it.
+ */
+:where(.cell-editor) {
+	font: inherit;
+	color: inherit;
+}
+
+/*
+ * The frame is painted inside the box rather than bordered, and there is no
+ * padding: either would inset the digits by its own width and grow the row by
+ * twice it, which is the value moving as the editor opens.
+ */
+.cell-editor {
+	background: rgba(80, 140, 220, 0.18);
+	border: none;
+	padding: 0;
+	box-shadow: inset 0 0 0 1px rgba(80, 140, 220, 0.7);
+	border-radius: 2px;
+	min-width: 0;
+	width: 100%;
+	box-sizing: border-box;
+}
+
+/* The frame is the affordance, and a ring outside the box would be the one
+   thing here allowed to overhang.  It says nothing the frame does not. */
+.cell-editor:focus,
+.cell-editor:focus-visible {
+	outline: none;
+}
+
+/* A value that does not read keeps the editor open, and says so in the frame. */
+.cell-editor.rejected {
+	background: rgba(217, 83, 79, 0.18);
+	box-shadow: inset 0 0 0 1px #d9534f;
+}
