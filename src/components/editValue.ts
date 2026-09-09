@@ -38,6 +38,14 @@ export function parseEditedValue(text: string, format: EditFormat): number | nul
 	return ((negative ? -magnitude : magnitude) >>> 0)
 }
 
+/**
+ * What an edit starts from, which is not quite what the cell shows: a hex value
+ * comes without its leading zero run.  They are the digits nobody means to
+ * keep, and eight of them stand between the caret and anything worth typing.
+ * One zero survives, so a zero value is still a value.
+ */
+export const withoutLeadingZeros = (text: string) => text.replace(/^(0[xX])0+(?=.)/, '$1')
+
 /** Both words of a double, since it occupies an even register and its odd partner. */
 export function parseEditedDouble(text: string): { low: number, high: number } | null {
 	const value = Number(text.trim())

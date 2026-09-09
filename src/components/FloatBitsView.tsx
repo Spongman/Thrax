@@ -2,7 +2,7 @@ import { bitsToDouble, bitsToSingle, formatDouble, formatSingle } from '../core/
 import { formatHex, formatWord } from '../core/format'
 import './ToolPanels.css'
 import EditableCell from './EditableCell'
-import { parseEditedDouble, parseEditedValue } from './editValue'
+import { parseEditedDouble, parseEditedValue, withoutLeadingZeros } from './editValue'
 
 interface Props {
 	/** The raw word of the register being inspected, or the low word of a pair. */
@@ -67,7 +67,7 @@ function FloatBitsView({ bits: word, highBits, onEdit, editable = false }: Props
 					{/* A double is two words, so only the single form is one cell. */}
 					<EditableCell
 						className="tool-metric-value"
-						text={double ? `${formatWord(high)} ${formatWord(word)}` : formatWord(word)}
+						text={double ? `${formatWord(high)} ${formatWord(word)}` : withoutLeadingZeros(formatWord(word))}
 						editable={writable && !double}
 						onCommit={(typed) => {
 							const value = parseEditedValue(typed, '0x')

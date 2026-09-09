@@ -10,7 +10,7 @@ import PanelGroup from './PanelGroup'
 import TabStrip, { type Tab } from './TabStrip'
 import HexNumber from './HexNumber'
 import EditableCell from './EditableCell'
-import { parseEditedDouble, parseEditedValue } from './editValue'
+import { parseEditedDouble, parseEditedValue, withoutLeadingZeros } from './editValue'
 import { flashClass, useChangedEntries, useFlash } from './highlight'
 import { MEMORY_CONFIGURATIONS, isMappedAddress } from '../core/settings'
 import { useTHRAXStore } from '../store/thraxStore'
@@ -270,7 +270,7 @@ function RegisterPanel({ title, entries, flags, onToggle, selected, onSelect, on
 								<EditableCell
 									key={format}
 									className="reg-value"
-									text={text}
+									text={withoutLeadingZeros(text)}
 									title={text}
 									editable={writable}
 									onCommit={(typed) => {
