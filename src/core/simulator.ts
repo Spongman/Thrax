@@ -1091,6 +1091,67 @@ export class MipsSimulator {
 		return true
 	}
 
+	/** One byte, past the same protections, which is what the hex editor writes. */
+	setMemoryByte(address: number, value: number): boolean {
+		this.edit(() => this.writeByte(address >>> 0, value & 0xff))
+		return true
+	}
+
+	/**
+	 * The highest address in `[from, to]` whose word has ever been written.
+	 *
+	 * A shift only has to move the bytes as far as this: past it the region is
+	 * zero, and moving zeros over zeros changes nothing.  The whole word map is
+	 * walked to find it, which costs one pass per keystroke and is what keeps a
+	 * shift over a region gigabytes wide from being a loop over all of it.
+	 */
+	private lastWrittenByte(from: number, to: number): number {
+		const firstWord = from >>> 2
+		const lastWord = to >>> 2
+		let highest = -1
+		for (const word of this.memory.keys()) {
+			if (word >= firstWord && word <= lastWord && word > highest) highest = word
+		}
+		return highest < 0 ? from : Math.min(to, highest * 4 + 3)
+	}
+
+	/** The byte at an address, read from the word map rather than from a device. */
+	private byteRaw(address: number): number {
+		return ((this.memory.get(address >>> 2) || 0) >>> ((address & 3) * 8)) & 0xff
+	}
+
+	/**
+	 * Inserts `value` at `address`, moving every byte up to `limit` one place up
+	 * and dropping the one that reaches the end.  The region is bounded because
+	 * memory is not a file: something has to be the end that a byte falls off,
+	 * and the section the window is showing is what the user can see it fall off.
+	 */
+	insertMemoryByte(address: number, limit: number, value: number): boolean {
+		const start = address >>> 0
+		const end = limit >>> 0
+		if (end < start) return false
+		// One place past the last written byte is where that byte moves to.
+		const top = Math.min(end, this.lastWrittenByte(start, end) + 1)
+		this.edit(() => {
+			for (let target = top; target > start; target--) this.writeByte(target, this.byteRaw(target - 1))
+			this.writeByte(start, value & 0xff)
+		})
+		return true
+	}
+
+	/** Removes the byte at `address`, moving the region down and zeroing `limit`. */
+	deleteMemoryByte(address: number, limit: number): boolean {
+		const start = address >>> 0
+		const end = limit >>> 0
+		if (end < start) return false
+		const top = Math.min(end, this.lastWrittenByte(start, end))
+		this.edit(() => {
+			for (let target = start; target < top; target++) this.writeByte(target, this.byteRaw(target + 1))
+			this.writeByte(top, 0)
+		})
+		return true
+	}
+
 	/**
 	 * Notes one change on the entry in flight; a no-op when nothing is recording.
 	 * Effects go straight into the shared store, since an entry's are written in

@@ -472,14 +472,21 @@ interface THRAXStore extends CoprocessorState {
 	/** Steps back until the history entry with this id has been undone. */
 	rewindTo: (id: number) => void
 	/**
-	 * Sets a register, a coprocessor register or a word of memory by hand.  Each
+	 * Sets a register, a coprocessor register or a byte of memory by hand.  Each
 	 * is a history entry of its own, so it shows in the panel and steps back
 	 * like anything else.
 	 */
 	setRegisterValue: (name: string, value: number) => boolean
 	setFpRegisterValue: (index: number, value: number) => boolean
 	setCp0RegisterValue: (index: number, value: number) => boolean
-	setMemoryValue: (address: number, value: number) => boolean
+	setMemoryByte: (address: number, value: number) => boolean
+	/**
+	 * Makes room for a byte, or takes one away, moving the rest of the region
+	 * `[address, limit]` with it.  `limit` is the end of the memory section on
+	 * show, which is what a byte pushed off the end falls off.
+	 */
+	insertMemoryByte: (address: number, limit: number, value: number) => boolean
+	deleteMemoryByte: (address: number, limit: number) => boolean
 	stepOver: () => Promise<void>
 	stepToReturn: () => Promise<void>
 	/** Runs until the given address is reached, without keeping a breakpoint there. */
@@ -1171,7 +1178,9 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 		setRegisterValue: (name, value) => edited((machine) => machine.setRegister(name, value)),
 		setFpRegisterValue: (index, value) => edited((machine) => machine.setFpRegister(index, value)),
 		setCp0RegisterValue: (index, value) => edited((machine) => machine.setCp0Register(index, value)),
-		setMemoryValue: (address, value) => edited((machine) => machine.setMemoryWord(address, value)),
+		setMemoryByte: (address, value) => edited((machine) => machine.setMemoryByte(address, value)),
+		insertMemoryByte: (address, limit, value) => edited((machine) => machine.insertMemoryByte(address, limit, value)),
+		deleteMemoryByte: (address, limit) => edited((machine) => machine.deleteMemoryByte(address, limit)),
 
 		stepOver: () => controlledAsync(() => debug.stepOver(), () => paused),
 
