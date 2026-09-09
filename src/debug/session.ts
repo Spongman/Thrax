@@ -13,6 +13,13 @@ import { EMPTY_SOURCE_INDEX, type SourceIndex } from '../core/sourceIndex'
 
 /** Breakpoint state as the workspace shows it. */
 export interface DebugView {
+	/**
+	 * Whether there is a program loaded to debug.  A panel offering to edit the
+	 * machine needs it: with no machine an edit has nowhere to land, and a cell
+	 * that takes the value anyway can only refuse it, which reads as the value
+	 * being wrong rather than as there being no program.
+	 */
+	hasMachine: boolean
 	/** Lines holding a breakpoint, keyed by the file they were set in. */
 	breakpointLines: Map<string, Set<number>>
 	/** Breakpoints on addresses with no source line, such as a pseudo-instruction tail. */
@@ -102,6 +109,7 @@ export class DebugSession {
 
 	view(): DebugView {
 		return {
+			hasMachine: this.simulator !== null,
 			breakpointLines: new Map([...this.lines].map(([file, lines]) => [file, new Set(lines)])),
 			breakpointAddresses: new Set(this.addresses),
 			breakpoints: new Set(this.simulator?.getBreakpoints() ?? []),

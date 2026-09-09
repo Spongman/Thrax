@@ -126,7 +126,7 @@ describe('debug session stepping', () => {
 		expect(session.step()).toBe(false)
 		expect(session.stepBack()).toBe(false)
 		expect(session.pause()).toBe(false)
-		expect(session.view()).toEqual({ breakpointLines: new Map(), breakpointAddresses: new Set(), breakpoints: new Set() })
+		expect(session.view()).toEqual({ hasMachine: false, breakpointLines: new Map(), breakpointAddresses: new Set(), breakpoints: new Set() })
 	})
 
 	it('paces a run over the same addresses stepping stops at', () => {

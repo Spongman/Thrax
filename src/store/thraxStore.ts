@@ -327,6 +327,13 @@ interface THRAXStore extends CoprocessorState {
 	isRunning: boolean
 	isPaused: boolean
 	breakpoints: Set<number>
+	/**
+	 * Whether a program is loaded, from the debugger's own view of itself.  A
+	 * panel offering to edit the machine asks this: with no machine an edit has
+	 * nowhere to land, and a cell that accepts the value only to refuse it reads
+	 * as the value being wrong rather than as there being no program.
+	 */
+	hasMachine: boolean
 	/** Lines holding a breakpoint, keyed by the file they were set in. */
 	breakpointLines: Map<string, Set<number>>
 	/** Breakpoints on addresses with no source line, such as the tail of a pseudo-instruction. */
@@ -773,6 +780,9 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 		focusedRegister: null,
 		breakpointLines: new Map<string, Set<number>>(),
 		breakpointAddresses: new Set<number>(),
+		// Nothing is assembled until something asks for it, so the panels start out
+		// with values to look at and nothing to edit.
+		hasMachine: false,
 		diagnostics: [],
 		hovered: NOTHING_HOVERED,
 		selectedFrame: null,
@@ -1022,7 +1032,9 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 			try {
 				const created = createSimulator()
 				if (!created.simulator) {
-					set({ diagnostics: created.diagnostics })
+					// The machine has just been let go, so the debugger's view of it is
+					// republished rather than left claiming there is still one.
+					set({ ...debug.view(), diagnostics: created.diagnostics })
 					return
 				}
 				set({ ...simulatorView(), ...debug.view(), diagnostics: created.diagnostics })
