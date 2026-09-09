@@ -41,7 +41,7 @@ describe('the address under the pointer', () => {
 	it('lights the word at it, and any word holding it, in memory', () => {
 		const markup = renderToStaticMarkup(
 			<MemoryView memory={memory()} pc={null} returnAddresses={new Set()} focusAddress={null}
-				hoveredAddress={ADDRESS} onHoverAddress={() => {}} onEditWord={() => true} />
+				hoveredAddress={ADDRESS} onHoverAddress={() => {}} onEditByte={() => true} />
 		)
 		expect(markup).toContain('address-hovered')
 	})

@@ -213,6 +213,49 @@
 	text-align: center;
 }
 
+/*
+ * The grid takes the keys the caret moves on, and says so by the caret alone:
+ * a focus ring around a whole panel says nothing about where typing would land.
+ */
+.memory-grid:focus,
+.memory-grid:focus-visible {
+	outline: none;
+}
+
+/*
+ * Where a keystroke goes: one hex digit, or one character of the ASCII column.
+ *
+ * The two modes are two shapes, since what they are about to do to the digit
+ * differs.  Overwrite replaces the digit it stands on, so it is a box around
+ * that digit.  Insert goes between digits rather than over one, so it is a bar
+ * on the leading edge, which is where the new byte will appear.  Both are
+ * drawn as shadows, so neither moves a digit by existing, and the digit keeps
+ * its own colour: a filled block would hide the value being typed over.  The
+ * box sits just outside the digit's cell rather than on it, clear of the glyph
+ * it surrounds, and is lifted so a neighbouring cell cannot paint over it.
+ */
+.memory-caret {
+	position: relative;
+	z-index: 1;
+	box-shadow: 0 0 0 1px var(--caret);
+	border-radius: 1px;
+}
+
+.memory-grid.inserting .memory-caret {
+	box-shadow: inset 2px 0 0 0 var(--caret);
+	border-radius: 0;
+}
+
+/* Dimmed while the panel does not have the keys, so a glance elsewhere still
+   keeps the place without the caret claiming to be where typing goes. */
+.memory-grid {
+	--caret: #fff;
+}
+
+.memory-grid:not(:focus-within) {
+	--caret: rgba(255, 255, 255, 0.4);
+}
+
 .memory-byte.hovered,
 .memory-char.hovered {
 	background: var(--accent-surface);

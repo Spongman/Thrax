@@ -6,8 +6,7 @@ import { formatHex, formatWord, parseWord } from '../core/format'
 import { disassemble } from '../core/disassembler'
 import { nextToggles } from './toggleGroup'
 import HexNumber, { HexWord, dimmedDigits } from './HexNumber'
-import EditableCell from './EditableCell'
-import { parseEditedValue } from './editValue'
+import { afterWrite, applyNibble, asciiByte, beforeCaret, Column, hexDigit, moveCaret, type Caret, type CaretBounds } from './memoryCaret'
 import { flashClass, useChangedEntries, useFlash } from './highlight'
 import { MEMORY_CONFIGURATIONS, type HexDimming, type MemoryConfigurationValues } from '../core/settings'
 import { useTHRAXStore } from '../store/thraxStore'
@@ -29,10 +28,14 @@ interface MemoryViewProps {
 	 * already shown brings it back into view rather than doing nothing.
 	 */
 	focusRequest?: number
-	/** Off while a program runs; on, a word can be typed over. */
+	/** Off while a program runs; on, the caret's byte can be typed over. */
 	editable?: boolean
-	/** Writes one aligned word, returning false when the machine refused it. */
-	onEditWord?: (address: number, value: number) => boolean
+	/** Writes one byte, returning false when the machine refused it. */
+	onEditByte?: (address: number, value: number) => boolean
+	/** Makes room for a byte, moving `[address, limit]` up and dropping its end. */
+	onInsertByte?: (address: number, limit: number, value: number) => boolean
+	/** Takes the byte away again, moving the rest of the region back down. */
+	onDeleteByte?: (address: number, limit: number) => boolean
 	onHoverAddress: (address: number | null) => void
 }
 
@@ -153,7 +156,7 @@ interface MemoryByte { address: number, value: number }
 interface MemoryGroup { start: number, bytes: MemoryByte[], zero: boolean, leadingZeros: number, value: number | null }
 interface MemoryRowData { address: number, groups: MemoryGroup[], bytes: MemoryByte[] }
 
-const MemoryRow = React.memo(function MemoryRow({ row, top, left, width, groupSize, showAscii, showIcons, hexDimming, hover, pc, returnAddresses, editable, onEditWord, pointed, flashed, changed }: {
+const MemoryRow = React.memo(function MemoryRow({ row, top, left, width, groupSize, showAscii, showIcons, hexDimming, hover, pc, returnAddresses, caret, pointed, flashed, changed }: {
 	row: MemoryRowData
 	top: number
 	left: number
@@ -165,8 +168,8 @@ const MemoryRow = React.memo(function MemoryRow({ row, top, left, width, groupSi
 	hover: HoverRange | null
 	pc: number | null
 	returnAddresses: Set<number>
-	editable: boolean
-	onEditWord?: (address: number, value: number) => boolean
+	/** The caret, when it is on this row, and null on every other row. */
+	caret: Caret | null
 	/** The address under the pointer, wherever in the workspace it is being pointed at. */
 	pointed: number | null
 	/** The word a navigation landed on, lit until it fades. */
@@ -184,21 +187,11 @@ const MemoryRow = React.memo(function MemoryRow({ row, top, left, width, groupSi
 			<span className="memory-row-groups">
 				{row.groups.map((group, groupIndex) => {
 					const digits = group.bytes.length * 2
-					// A word is what the machine writes, so only a four-byte group is
-					// a cell an edit can land in whole.
-					const writable = editable && onEditWord !== undefined && groupSize === 4 && group.start % 4 === 0
-					const groupText = [...group.bytes].reverse().map((byte) => toHex(byte.value)).join('')
 					return (
-					<EditableCell
+					<span
 						key={groupIndex}
-						text={groupText}
-						editable={writable}
-						address={group.start}
-						size={groupSize}
-						onCommit={(typed) => {
-							const value = parseEditedValue(typed, '0x')
-							return value !== null && (onEditWord?.(group.start, value) ?? false)
-						}}
+						data-address={group.start}
+						data-size={groupSize}
 						className={[
 							'memory-group',
 							group.zero ? 'zero' : '',
@@ -222,14 +215,23 @@ const MemoryRow = React.memo(function MemoryRow({ row, top, left, width, groupSi
 							// applied here rather than baked into the row data.
 							const dimTotal = dimmedDigits(group.leadingZeros, digits, hexDimming)
 							const dimmed = Math.min(2, Math.max(0, dimTotal - byteIndex * 2))
+							// Each digit is its own element so the caret can sit on one of
+							// them: typing writes a nibble, so a nibble is what it points at.
+							const typing = caret !== null && caret.column === Column.HEX && caret.address === byte.address
 							return (
-								<span key={byteIndex} className={`memory-byte ${isHovered(byte.address) ? 'hovered' : ''}`}>
-									{dimmed > 0 && <span className="hex-zero">{text.slice(0, dimmed)}</span>}
-									{text.slice(dimmed)}
+								<span key={byteIndex} className={`memory-byte ${isHovered(byte.address) ? 'hovered' : ''}`} data-byte={byte.address}>
+									{[0, 1].map((half) => (
+										<span
+											key={half}
+											className={[half < dimmed ? 'hex-zero' : '', typing && caret.nibble === half ? 'memory-caret' : ''].filter(Boolean).join(' ')}
+										>
+											{text[half]}
+										</span>
+									))}
 								</span>
 							)
 						})}
-					</EditableCell>
+					</span>
 					)
 				})}
 			</span>
@@ -238,7 +240,7 @@ const MemoryRow = React.memo(function MemoryRow({ row, top, left, width, groupSi
 					{row.bytes.map((byte, byteIndex) => (
 						<span
 							key={byteIndex}
-							className={`memory-char ${isPrintable(byte.value) ? '' : showIcons ? 'icon' : 'unprintable'} ${isHovered(byte.address) ? 'hovered' : ''}`}
+							className={`memory-char ${isPrintable(byte.value) ? '' : showIcons ? 'icon' : 'unprintable'} ${isHovered(byte.address) ? 'hovered' : ''} ${caret !== null && caret.column === Column.ASCII && caret.address === byte.address ? 'memory-caret' : ''}`}
 							data-address={byte.address}
 							data-size={1}
 						>
@@ -251,7 +253,7 @@ const MemoryRow = React.memo(function MemoryRow({ row, top, left, width, groupSi
 	)
 })
 
-function MemoryView({ memory, pc, returnAddresses, focusAddress, focusRequest = 0, editable = false, onEditWord, onHoverAddress, hoveredAddress = null }: MemoryViewProps) {
+function MemoryView({ memory, pc, returnAddresses, focusAddress, focusRequest = 0, editable = false, onEditByte, onInsertByte, onDeleteByte, onHoverAddress, hoveredAddress = null }: MemoryViewProps) {
 	const memoryConfiguration = useTHRAXStore((state) => state.settings.memoryConfiguration)
 	const sections = React.useMemo(() => sectionsFor(MEMORY_CONFIGURATIONS[memoryConfiguration]), [memoryConfiguration])
 	const textSection = sections[0]
@@ -276,6 +278,14 @@ function MemoryView({ memory, pc, returnAddresses, focusAddress, focusRequest = 
 	// deep until they are asked for.
 	const [showOptions, setShowOptions] = React.useState(false)
 	const [hover, setHover] = React.useState<HoverRange | null>(null)
+	/** Where typing lands, placed by a click and moved by the arrow keys. */
+	const [caret, setCaret] = React.useState<Caret | null>(null)
+	/**
+	 * Typing makes room rather than replacing what is there.  Session state and
+	 * not a stored option: it changes what a keystroke destroys, so it starts
+	 * where every hex editor starts it.
+	 */
+	const [insertMode, setInsertMode] = React.useState(false)
 	const focusedRef = React.useRef<string | null>(null)
 	const probeRef = React.useRef<HTMLSpanElement>(null)
 
@@ -382,11 +392,124 @@ function MemoryView({ memory, pc, returnAddresses, focusAddress, focusRequest = 
 	const visibleWords = React.useMemo(() => rows.flatMap((row) =>
 		row.groups.flatMap((group) => group.value === null ? [] : [[formatWord(group.start), group.value] as const])),
 	[rows])
-	const changed = useChangedEntries(visibleWords)
+	// A change flash reports the machine's work, not the user's: an edit made here
+	// bumps this so the diff it causes is absorbed rather than lit.
+	const [edits, setEdits] = React.useState(0)
+	const countEdit = () => setEdits((count) => count + 1)
+	const changed = useChangedEntries(visibleWords, edits)
 
 	const navigating = useFlash('navigation', focusAddress === null ? null : focusRequest)
 	// The word a navigation asked for, aligned to the group it lands in.
 	const flashed = navigating && focusAddress !== null ? focusAddress - (focusAddress % groupSize) : null
+
+	// The caret stays inside what is drawn, which is the section clipped to the
+	// window over it, and moves by the shape the rows are being drawn in.
+	const bounds = React.useMemo<CaretBounds>(() => ({
+		start: Math.max(section.start, alignedWindowStart),
+		end: Math.min(section.end, windowEnd),
+		origin: alignedWindowStart,
+		stride: bytesPerRow,
+		group: groupSize,
+		page: Math.max(1, Math.floor(viewport.height / ROW_HEIGHT) - 1),
+	}), [alignedWindowStart, bytesPerRow, groupSize, section.end, section.start, viewport.height, windowEnd])
+
+	// Keeps the caret on screen after a key moves it, without disturbing the
+	// scroll while it is already in view.  Row zero sits under the toolbar band,
+	// so a row is only clear of the band once it is below it.
+	React.useEffect(() => {
+		const grid = scrollRef.current
+		if (!caret || !grid) return
+		const row = Math.floor((caret.address - alignedWindowStart) / bytesPerRow)
+		const offset = row * ROW_HEIGHT - grid.scrollTop + toolbarHeight
+		if (offset < toolbarHeight) grid.scrollTop = row * ROW_HEIGHT
+		else if (offset + ROW_HEIGHT > viewport.height) grid.scrollTop = row * ROW_HEIGHT + toolbarHeight + ROW_HEIGHT - viewport.height
+	}, [alignedWindowStart, bytesPerRow, caret, toolbarHeight, viewport.height])
+
+	/** Writes one byte where the caret is, making room for it first in insert mode. */
+	const writeByte = (address: number, value: number, makeRoom: boolean) => {
+		const written = (makeRoom ? onInsertByte?.(address, section.end, value) : onEditByte?.(address, value)) ?? false
+		if (written) countEdit()
+		return written
+	}
+
+	const handleKey = (event: React.KeyboardEvent<HTMLDivElement>) => {
+		// The address box lives inside the scroller, so its own typing arrives here.
+		if ((event.target as HTMLElement).tagName === 'INPUT') return
+		if (event.key === 'Insert') {
+			event.preventDefault()
+			setInsertMode((current) => !current)
+			return
+		}
+		if (event.ctrlKey || event.metaKey || event.altKey) return
+
+		// With no caret yet, a movement key places one rather than moving it, so
+		// the first arrow shows where typing would go instead of guessing.
+		const seed: Caret = { address: bounds.start, nibble: 0, column: Column.HEX }
+		if (caret === null) {
+			if (event.key === 'Tab' || moveCaret(seed, event.key, bounds) === null) return
+			event.preventDefault()
+			setCaret(seed)
+			return
+		}
+
+		const moved = moveCaret(caret, event.key, bounds)
+		if (moved !== null) {
+			event.preventDefault()
+			setCaret(moved)
+			return
+		}
+		if (event.key === 'Escape') {
+			// Releases the panel: with a caret set, Tab is the column switch.
+			event.preventDefault()
+			setCaret(null)
+			return
+		}
+		if (!editable) return
+
+		if (event.key === 'Delete' || event.key === 'Backspace') {
+			event.preventDefault()
+			const target = event.key === 'Delete' ? caret : beforeCaret(caret, bounds)
+			if (event.key === 'Backspace' && target.address === caret.address) return
+			// Overwrite has nothing to remove, so it clears the byte in place.
+			if (insertMode) onDeleteByte?.(target.address, section.end)
+			else onEditByte?.(target.address, 0)
+			countEdit()
+			setCaret(target)
+			return
+		}
+
+		if (caret.column === Column.ASCII) {
+			const byte = asciiByte(event.key)
+			if (byte === null) return
+			event.preventDefault()
+			if (writeByte(caret.address, byte, insertMode)) setCaret(afterWrite(caret, bounds))
+			return
+		}
+
+		const digit = hexDigit(event.key)
+		if (digit === null) return
+		event.preventDefault()
+		// Insert mode makes a byte out of the first digit typed into it; the second
+		// digit finishes that same byte, so it is written where the first one landed.
+		const makeRoom = insertMode && caret.nibble === 0
+		const value = makeRoom ? digit << 4 : applyNibble(byteAt(memory, caret.address), caret.nibble, digit)
+		if (writeByte(caret.address, value, makeRoom)) setCaret(afterWrite(caret, bounds))
+	}
+
+	/** A click puts the caret on the digit or the character it landed on. */
+	const handleClick = (event: React.MouseEvent<HTMLDivElement>) => {
+		scrollRef.current?.focus({ preventScroll: true })
+		const element = (event.target as HTMLElement).closest<HTMLElement>('[data-byte], .memory-char')
+		if (!element) return
+		const ascii = element.dataset.byte === undefined
+		const address = Number(ascii ? element.dataset.address : element.dataset.byte)
+		const rect = element.getBoundingClientRect()
+		setCaret({
+			address,
+			nibble: !ascii && event.clientX - rect.left > rect.width / 2 ? 1 : 0,
+			column: ascii ? Column.ASCII : Column.HEX,
+		})
+	}
 
 	const handleHover = (event: React.MouseEvent<HTMLDivElement>) => {
 		const target = (event.target as HTMLElement).closest<HTMLElement>('[data-address]')
@@ -452,7 +575,15 @@ function MemoryView({ memory, pc, returnAddresses, focusAddress, focusRequest = 
 		<div className="memory-view">
 			<span className="memory-probe" ref={probeRef}>00000000000000000000</span>
 
-			<div className="memory-grid" ref={scrollRef} onScroll={(event) => { onScroll(event); clearHover() }}>
+			{/* Focusable so the caret has somewhere to take its keys from; the rows
+			    themselves are fixed and out of the tab order. */}
+			<div
+				className={`memory-grid${insertMode ? ' inserting' : ''}`}
+				ref={scrollRef}
+				tabIndex={0}
+				onKeyDown={handleKey}
+				onScroll={(event) => { onScroll(event); clearHover() }}
+			>
 				<span className="memory-origin" ref={originRef} />
 
 				{/* Stands over the rows on the origin the rows are placed against, so
@@ -487,6 +618,21 @@ function MemoryView({ memory, pc, returnAddresses, focusAddress, focusRequest = 
 									{entry.label}
 								</button>
 							))}
+						</div>
+						<div className="toggle-group">
+							<button
+								className={`toggle-button ${insertMode ? 'active' : ''}`}
+								title={insertMode
+									? 'Insert: a typed byte makes room, moving the section up and dropping its last byte'
+									: 'Overwrite: a typed byte replaces the one it is on'}
+								disabled={!editable}
+								// The mode belongs to the caret, so clicking it leaves the
+								// caret's focus where it is rather than taking it.
+								onMouseDown={(event) => event.preventDefault()}
+								onClick={() => setInsertMode((current) => !current)}
+							>
+								{insertMode ? 'INS' : 'OVR'}
+							</button>
 						</div>
 						<div className="memory-goto">
 							<input
@@ -552,6 +698,7 @@ function MemoryView({ memory, pc, returnAddresses, focusAddress, focusRequest = 
 						className="memory-rows"
 						onMouseOver={handleHover}
 						onMouseLeave={clearHover}
+						onMouseDown={handleClick}
 					>
 						{rows.map((row, slot) => (
 							<MemoryRow
@@ -562,8 +709,7 @@ function MemoryView({ memory, pc, returnAddresses, focusAddress, focusRequest = 
 								width={frame.width}
 								groupSize={groupSize}
 								showAscii={showAscii}
-								editable={editable}
-								onEditWord={onEditWord}
+								caret={caret !== null && caret.address >= row.address && caret.address < row.address + bytesPerRow ? caret : null}
 								showIcons={showIcons}
 								hexDimming={hexDimming}
 								pc={groupSize === 4 ? pc : null}

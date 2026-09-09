@@ -65,9 +65,12 @@ const FilesWindow = () => (
 )
 
 const RegistersPanel = () => {
-	const { registers, fpRegisters, fpConditionFlags, cp0Registers, focusedRegister, halted, hovered, isPaused, isRunning, hover, setRegisterValue, setFpRegisterValue, setCp0RegisterValue } = useTHRAXStore()
-	// Only while the machine is stopped, and only once it has one to edit.
-	const editable = !isRunning && (isPaused || halted)
+	const { registers, fpRegisters, fpConditionFlags, cp0Registers, focusedRegister, hasMachine, hovered, isRunning, hover, setRegisterValue, setFpRegisterValue, setCp0RegisterValue } = useTHRAXStore()
+	// Whenever the machine is stopped, which includes a program that has been
+	// assembled and not yet started: setting up a register before the first step
+	// is what editing one is mostly for.  A machine has to exist to be edited,
+	// though, or a cell would take the value only to refuse it.
+	const editable = !isRunning && hasMachine
 
 	const handleEdit = React.useCallback((entry: { name: string }, bits: number, high?: number) => {
 		const name = entry.name
@@ -101,8 +104,8 @@ const RegistersPanel = () => {
 }
 
 const MemoryPanel = () => {
-	const { callStack, focusedMemory, halted, hovered, isPaused, isRunning, memory, pc, setMemoryValue, sourceIndex, hover } = useTHRAXStore()
-	const editable = !isRunning && (isPaused || halted)
+	const { callStack, deleteMemoryByte, focusedMemory, hasMachine, hovered, insertMemoryByte, isRunning, memory, pc, setMemoryByte, sourceIndex, hover } = useTHRAXStore()
+	const editable = !isRunning && hasMachine
 	// Mark the program counter only where the editor can highlight it too: once a
 	// program halts, the pc sits past the last instruction and belongs to neither.
 	const instructionAddresses = React.useMemo(() => visibleAddresses(sourceIndex), [sourceIndex])
@@ -118,7 +121,9 @@ const MemoryPanel = () => {
 				onHoverAddress={(address) => hover({ address })}
 				hoveredAddress={hovered.address}
 				editable={editable}
-				onEditWord={setMemoryValue}
+				onEditByte={setMemoryByte}
+				onInsertByte={insertMemoryByte}
+				onDeleteByte={deleteMemoryByte}
 			/>
 		</div>
 	)

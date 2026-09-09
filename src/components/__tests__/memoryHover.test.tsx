@@ -40,7 +40,7 @@ describe('the memory view', () => {
 			focusAddress={null}
 			onHoverAddress={() => {}}
 			editable={editable}
-			onEditWord={() => true}
+			onEditByte={() => true}
 		/>
 	)
 
