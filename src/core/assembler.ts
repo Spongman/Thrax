@@ -665,7 +665,7 @@ export class Assembler {
 	 */
 	extendedFormMessage(instruction: MipsInstruction): string {
 		const refusal = 'Extended (pseudo) instruction or format not permitted'
-		let basic = ''
+		let basic: string
 		try {
 			basic = this.expandInstruction(instruction).map(formatInstruction).join('; ')
 		} catch {
@@ -1390,9 +1390,10 @@ export class Assembler {
 	}
 
 	encodeIType(name: string, args: MipsArgument[], opcode: number): number {
-		let rs = 0,
-			rt = 0,
-			imm = 0
+		// Only `rs` has a default: the load/store and LUI forms leave it at zero.
+		let rs = 0
+		let rt: number
+		let imm: number
 
 		// Load/Store instructions: rt, offset(rs)
 		if (LOAD_STORE_NAMES.has(name)) {

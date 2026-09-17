@@ -1931,7 +1931,7 @@ export class MipsSimulator {
 		} catch (error) {
 			if (error instanceof ExceptionAbort) throw error
 			const message = error instanceof Error ? error.message : String(error)
-			throw new Error(`Error executing ${op}: ${message}`)
+			throw new Error(`Error executing ${op}: ${message}`, { cause: error })
 		}
 	}
 
