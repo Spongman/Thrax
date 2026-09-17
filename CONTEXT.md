@@ -161,6 +161,22 @@ pseudo-instruction's expanded words become visible only when disassembly rows ar
 An expanded word of a pseudo-instruction that is not currently visible; stepping passes
 through it without stopping.
 
+**Caret**:
+Where typing lands in the memory window: one nibble of one byte, or one character of the
+ASCII column.  The window is a hex editor and not a grid of edit boxes, so there is no
+value being committed and nothing to abandon: a keystroke is a byte written and the caret
+moved on.  Which byte a key reaches is arithmetic over an address, so it is decided apart
+from the panel that draws it.
+_Avoid_: selection, cell editor (the register window has cells; this does not)
+
+**Insert mode**:
+Typing makes room rather than replacing: the region from the caret to the end of the
+section on show moves up a byte, and the byte that reaches the end falls off.  Memory is
+not a file, so something has to be that end, and the section is the one the user can see
+it happen in.  A shift stops at the last word ever written, since moving zeros over zeros
+changes nothing.
+_Avoid_: overtype flag (the mode that shifts is the one worth naming)
+
 ### X-ray
 
 **X-ray**:

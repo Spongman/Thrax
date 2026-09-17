@@ -87,6 +87,14 @@ and font, printing, and external tool loading.
   navigation asked for. A navigation flash starts from nothing so that a panel opened *by* a
   navigation lights its destination, and a panel opened by hand cannot be told apart from
   one opened that way. It already scrolled there before it also lit there.
+- With a caret set, the memory window keeps the tab key: tab swaps the hex and ASCII
+  columns rather than leaving the panel, and Escape is what gives it back. That is what
+  a hex editor does with the key, and it is still a keyboard trap for anyone who does
+  not know the way out.
+- Insert and delete walk the whole word map to find the last written byte in the region,
+  once per keystroke. It is what keeps a shift over a region gigabytes wide from being a
+  loop over all of it, and it costs a pass over every word the program has ever touched.
+
 - Nothing **in the tree** drives a browser. A browser is driven by hand when a change needs
   it, per the ground rule above, but no harness is committed and nothing runs on its own, so
   everything the layout decides is a manual check that will not be repeated unless someone

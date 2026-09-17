@@ -17,7 +17,7 @@ A son of MARS (but in a different language). A modern, interactive web-based por
 - ✅ **Monaco Editor**: Professional syntax highlighting and code editing
 - ✅ **Real-time Execution**: Assemble and run MIPS programs instantly
 - ✅ **Register Viewer**: Monitor all 32 MIPS registers in real-time, with Coproc 1 and Coproc 0 tabs
-- ✅ **Memory Inspector**: View memory contents during execution
+- ✅ **Memory Inspector**: View memory contents during execution, and type over them as a hex editor
 - ✅ **Console I/O**: Output plus in-console input for supported syscalls
 - ✅ **Data Segments**: Initialize memory with `.data`, labels, strings, and numeric values
 - ✅ **Interactive Debugging**: Assemble, toggle source breakpoints, step, continue, and step back
@@ -72,6 +72,31 @@ The Keyboard and Display Simulator uses the standard MMIO addresses:
 transmitter control, and `0xffff000c` transmitter data. Receiver and
 transmitter readiness use bit 0. Reading receiver data consumes one queued
 character; writing transmitter data appends its low byte to the tool display.
+
+### Editing Registers and Memory
+Whenever the machine is stopped, which includes a program that has been assembled and
+not yet started, both windows can be typed into. Each edit is a history entry of its
+own, so it shows in the history panel and steps back like an instruction does.
+
+A register cell is double-clicked and typed over: the value reads in the radix the cell
+is showing, `0x` names hexadecimal wherever it appears, and a float cell takes a float.
+`$zero` is hardwired and stays read-only.
+
+The memory window is a hex editor rather than a grid of edit boxes. Clicking a hex digit
+or an ASCII character puts a caret on it; a hex digit typed there writes that nibble and
+a character typed in the ASCII column writes that byte, each advancing the caret. The
+arrow keys, **Home**, **End** and the page keys move it, **Tab** swaps columns, and
+**Escape** puts it away and gives the panel's keys back to the workspace.
+
+**Insert** switches the toolbar between **OVR** and **INS**. Overwriting replaces the
+byte the caret is on, and **Delete** and **Backspace** zero a byte. Inserting makes room
+instead: the rest of the section on show moves up a byte and the byte at the end of it
+falls off, and **Delete** and **Backspace** take a byte away and move the section back
+down. Memory is not a file, so a section is the region a byte can fall off the end of.
+
+Text-segment writes go past the `Self-Modifying Code` setting, which gates a running
+program rather than a hand edit: rewriting an instruction from the memory window is the
+point of the exercise.
 
 ### Supported Data Directives
 - Segments: `.data`, `.text`, `.kdata`, `.ktext`, each accepting an optional base address such as `.ktext 0x80000180`
@@ -261,7 +286,7 @@ src/
 - [x] Register, memory, call stack, symbol and history panels, dockable and saved between sessions
 - [x] Step-through debugging, breakpoints, stepping back, and rewinding to any point
 - [x] Execution history: every instruction, what it changed, and time travel through it
-- [x] Editing registers and memory by hand, undoable like anything else
+- [x] Editing registers by hand, and memory as a hex editor with a caret, an ASCII column and INS/OVR, undoable like anything else
 - [x] Cross-panel navigation: an address or register lights wherever else it appears
 - [x] Settings dialog covering the MARS options
 - [x] Autosave, files and `.zip` archives in and out, and a folder on disk as the project (Chromium)
