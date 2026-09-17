@@ -102,7 +102,3 @@ and font, printing, and external tool loading.
   it is anchored and how its Markdown is drawn are covered, but that the pointer reaches an
   injected-text span at all, and that the widget lands inside the editor wearing the
   editor's own hover chrome, are not.
-- `setHoveredAddress` is called on every mouse move over an editor, whether or not the
-  address changed, and `DockLayout` reads the store without a selector, so each of those
-  writes re-renders it. The register hover added beside it is guarded against repeating
-  itself; the address one is not.

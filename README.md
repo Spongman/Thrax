@@ -298,7 +298,7 @@ src/
 - [x] Bitmap display (24-bit RGB words, configurable base address)
 - [x] Keyboard/display MMIO (receiver/transmitter data registers)
 - [x] Cache simulation (configurable blocks, associativity, and replacement)
-- [x] Pipeline model: five-stage timeline, RAW hazards with and without forwarding, branch and jump resolved in ID, EX or MEM, and static, 1-bit and 2-bit prediction
+- [x] Pipeline model: five-stage timeline, the five stages on a chosen cycle, a hazard report, RAW hazards with and without forwarding, branch and jump resolved in ID, EX or MEM, and static, 1-bit and 2-bit prediction
 - [x] Instruction statistics and the branch history table
 - [x] MIPS X-Ray: the animated datapath, control unit, ALU control, and register bank, drawn as themed SVG
 - [x] Memory reference visualization, Mars Bot, Scavenger Hunt, and the Digital Lab Simulator
@@ -336,7 +336,7 @@ web port is documented in [docs/FEATURE_ARCHITECTURE.md](docs/FEATURE_ARCHITECTU
 - A label expression takes one label plus a constant (`arr+4`); differences of two labels are rejected
 - A text segment can be based only before it emits instructions, since pseudo-instructions expand after parsing
 - Every MARS syscall is implemented except the MIDI pair, 31 and 33, which keep their timing and play nothing; an unknown syscall number stops safely with an error
-- A run pauses after 1,000,000 instructions and can be continued; execution yields between batches so runaway code does not block the page
+- A run has no instruction limit; execution yields between batches so runaway code does not block the page, and Pause stops it
 - Sparse virtual memory covers the segments of the selected memory configuration. An address outside all of them faults, as does a load from or store into `.text` unless self-modifying code is enabled
 - The history keeps the last 100,000 instructions by default, at about 150 bytes each and no cost to the speed of a run; it can be set as high as 1,000,000. Stepping back past what it holds is not possible, and neither is replaying what came before it
 
