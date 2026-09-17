@@ -86,11 +86,34 @@ character; writing transmitter data appends its low byte to the tool display.
 - Label expressions add a constant to a label: `la $t0, arr+4`, `lw $t1, arr+4($s0)`, `.word arr+8`
 
 ### Multi-File Programs
-Each editor tab is a file, and double-clicking a tab renames it. `.include "lib.asm"`
-pulls in another open tab by name, and the toolbar's **All files** switch assembles
-every open tab into one program instead of only the active one. Files share one
-symbol table, so labels resolve across them; the active tab supplies the entry point,
-which is the `main` label when the program defines one.
+The project is the set of files in the **Files** panel, and each has a tab while it is
+open; closing a tab puts the file away without taking it out of the project, and the
+panel is where it comes back or is removed. Double-clicking a tab renames the file.
+`.include "lib.asm"` pulls in another project file by name, and the **All files** setting
+assembles every file into one program instead of only the active one, as MARS's
+"assemble all files in directory" does. Files share one symbol table, so labels
+resolve across them; the active tab supplies the entry point, which is the `main`
+label when the program defines one.
+
+### Files, Folders and Links
+The workspace autosaves to the browser as you type, so a reload picks up where you
+left off; **Save in this browser** keeps a second copy on purpose. Files come in from
+the **Open** button, the File menu, or by dropping them anywhere on the page, a `.zip`
+of them included; **Save** downloads the current file and **Download .zip** the whole
+workspace. In Chromium browsers **Open folder…** makes a folder on disk the project,
+the way a directory is MARS's: its `.asm` and `.s` files are the project, **Save**
+writes each back in place, and the folder is offered again after a reload.
+
+A workspace travels as a link too. **Copy share link** puts every file, compressed,
+into the page's own URL, so nothing is stored anywhere. **Open from URL…** (or
+`?load=<url>` on the address bar) opens a GitHub file, folder or gist, a `.zip`, or a
+plain source file from anywhere that lets a browser fetch it. **GitHub…** signs in
+with a personal access token that has the gist scope (GitHub's own sign-in cannot
+finish in a page served from GitHub Pages, so the token is pasted once, checked, and
+kept only in this browser), lists your gists to open, and publishes the workspace as a
+secret gist or updates the one it came from. While signed in, the Files panel gains a
+gist button group: start a blank workspace bound to a new gist, save to the current
+gist, save as a new gist, and delete the current gist after confirming.
 
 ## 📦 Tech Stack
 
@@ -241,6 +264,8 @@ src/
 - [x] Editing registers and memory by hand, undoable like anything else
 - [x] Cross-panel navigation: an address or register lights wherever else it appears
 - [x] Settings dialog covering the MARS options
+- [x] Autosave, files and `.zip` archives in and out, and a folder on disk as the project (Chromium)
+- [x] Share links carrying the workspace, opening from GitHub, and signing in to browse and publish gists
 - [x] Save/load programs to browser storage, and export machine code to HexText
 - [x] Keyboard shortcuts, and example programs
 

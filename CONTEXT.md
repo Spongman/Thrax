@@ -127,6 +127,26 @@ _Avoid_: plugin, panel (a panel is the UI view of a tool)
 The one description of every tool: its settings (key, defaults, validator), reset,
 attachment, and snapshot. Adding a tool means adding one entry.
 
+### Workspace
+
+**Project**:
+The files the assembler can see: every document, whether or not it has a tab. Closing
+a tab puts a file away (`hidden`) rather than out of the project; the file list is
+where it is brought back or removed for good.
+_Avoid_: open files (a file can be in the project with no tab)
+
+**Workspace snapshot**:
+The project as a document: the files, the one in front, and the multi-file setting.
+The one shape that carries a workspace out of the session and back, by whatever road:
+browser storage, autosave, a `.zip`, a share link, a gist, `?load=`. Ids are not in
+it, since they are made up per session.
+_Avoid_: saved program (the old browser-slot shape, still read)
+
+**Folder project**:
+A directory on disk made the project through the browser's folder picker, the way a
+directory is MARS's project. Saving writes each file back where it came from. The
+handle is remembered in IndexedDB and asked about again on the next visit.
+
 ### Debugging
 
 **DebugSession**:
