@@ -104,7 +104,19 @@ _Avoid_: listener, hook, callback list
 **Seek**:
 Telling a tool the machine has moved to a given instruction count, in either direction.
 A tool's numbers accumulate, so without it they climb across a step back; a tool answers
-by exchanging its state with a checkpoint it took when it was last reached.
+by clearing what it worked out and running the instructions through itself again, from
+the machine's own log (`Replay`).  It keeps no copy of its state per step: what a replay
+cannot recover, being what the machine decided rather than what it ran, it notes as it
+watches (`StepLog`).
+_Avoid_: checkpoint, snapshot (a tool takes neither)
+
+**Service**:
+Something the machine carries and does not understand: a tool's device, an open file,
+a stream of numbers.  It says what a slot held as an instruction changes it (`keep`) and
+puts one back when the machine hands it over again (`exchange`), so it rolls back with
+everything else while the core stays ignorant of what any of it means.  For state that
+is not a tally and so cannot be replayed out of the log.
+_Avoid_: subsystem snapshot, checkpoint
 
 **Tool**:
 A simulation-analysis accumulator attached at the observer seam: pipeline, cache, branch
