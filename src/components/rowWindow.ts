@@ -91,9 +91,9 @@ const sameFrame = (a: RowFrame, b: RowFrame) => a.top === b.top && a.left === b.
  */
 export function useFixedRowScroller<E extends HTMLElement = HTMLDivElement>(rowHeight: number, deps: React.DependencyList = []): {
 	/** Goes on the scroller, which must carry `clip-path: inset(0)`. */
-	ref: React.RefObject<E>
+	ref: React.RefObject<E | null>
 	/** Goes on an empty `position: fixed` span inside the scroller. */
-	originRef: React.RefObject<HTMLSpanElement>
+	originRef: React.RefObject<HTMLSpanElement | null>
 	viewport: Viewport
 	scrollTop: number
 	frame: RowFrame
