@@ -12,9 +12,8 @@
 import { isZipName, unzipFiles } from './archive'
 import { isSourceName, type WorkspaceFile } from './workspace'
 
-// The folder picker is not in the DOM typings this project compiles against.
+// The folder picker and its permissions are not in the DOM typings this project compiles against.
 interface DirectoryHandle extends FileSystemDirectoryHandle {
-	values(): AsyncIterableIterator<FileSystemHandle>
 	queryPermission(descriptor: { mode: 'read' | 'readwrite' }): Promise<PermissionState>
 	requestPermission(descriptor: { mode: 'read' | 'readwrite' }): Promise<PermissionState>
 }
