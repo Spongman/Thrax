@@ -568,13 +568,17 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 	const toolSettings = tools.loadSettings()
 
 	/** A simulator over the assembled program, or the diagnostics that stopped it. */
-	const createSimulator = (): { simulator: MipsSimulator | null, diagnostics: Diagnostic[] } => {
+	const assembleProgram = () => {
 		const { files, entries } = assemblySources()
-		const settings = get().settings
-		const { backstepLimit, delayedBranching, extendedAssembler, memoryConfiguration, selfModifyingCode, warningsAreErrors } = settings
+		const { delayedBranching, extendedAssembler, memoryConfiguration, warningsAreErrors } = get().settings
 		const memory = MEMORY_CONFIGURATIONS[memoryConfiguration]
-		const assembler = new Assembler(files, entries, { delayedBranching, extendedAssembler, warningsAreErrors, memory })
-		const { program, machineCode, diagnostics } = assembler.assemble()
+		return { memory, ...new Assembler(files, entries, { delayedBranching, extendedAssembler, warningsAreErrors, memory }).assemble() }
+	}
+
+	const createSimulator = (): { simulator: MipsSimulator | null, diagnostics: Diagnostic[] } => {
+		const settings = get().settings
+		const { backstepLimit, delayedBranching, selfModifyingCode } = settings
+		const { memory, program, machineCode, diagnostics } = assembleProgram()
 		// A program that did not assemble is not worth loading; its diagnostics stand
 		// for it, and the stale program it would have replaced is let go.
 		if (hasErrors(diagnostics)) {
@@ -808,31 +812,26 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 		pipelineSettings: toolSettings.pipeline,
 		memoryReferenceSettings: toolSettings.memoryReference,
 
+		// An edit leaves the machine alone; refreshAssembly decides what it changes.
 		setCode: (newCode) => {
-			debug.detach()
 			set((state) => ({
 				code: newCode,
 				documents: state.documents.map((document) => document.id === state.activeDocumentId
 					? { ...document, code: newCode, dirty: true }
 					: document),
-				...resetExecution(),
 			}))
 		},
 
-		// Editing a file that is not the entry point still invalidates the
-		// program, since `.include` and the all-files setting can pull it in.
 		setDocumentCode: (documentId, newCode) => {
 			const state = get()
 			if (documentId === state.activeDocumentId) {
 				state.setCode(newCode)
 				return
 			}
-			debug.detach()
 			set({
 				documents: state.documents.map((document) => document.id === documentId
 					? { ...document, code: newCode, dirty: true }
 					: document),
-				...resetExecution(),
 			})
 		},
 
@@ -1035,8 +1034,14 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 
 		// Half-written source is expected here, so the diagnostics reach the editor
 		// live while the console is left to the Assemble button and to running.
+		// Once the program has run, an edit only updates the diagnostics: the run
+		// stays until Run, Assemble or Reset replaces it.
 		refreshAssembly: () => {
 			try {
+				if ((debug.machine?.instructionCount ?? 0) > 0) {
+					set({ diagnostics: assembleProgram().diagnostics })
+					return
+				}
 				const created = createSimulator()
 				if (!created.simulator) {
 					// The machine has just been let go, so the debugger's view of it is

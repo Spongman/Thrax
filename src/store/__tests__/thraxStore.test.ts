@@ -140,6 +140,21 @@ describe('publishing memory', () => {
 		const { memory, registers } = useTHRAXStore.getState()
 		expect(memory.words.get((registers.$gp >>> 0) >>> 2)).toBe(7)
 	})
+
+	it('keeps the run when the source is edited after it', async () => {
+		useTHRAXStore.getState().setCode(STORING)
+		useTHRAXStore.getState().assemble()
+		await useTHRAXStore.getState().run()
+		const ran = useTHRAXStore.getState()
+
+		// A new machine would blank the word the run wrote, lighting every word on screen.
+		useTHRAXStore.getState().setCode(`${STORING}\tbogus\n`)
+		useTHRAXStore.getState().refreshAssembly()
+		const edited = useTHRAXStore.getState()
+		expect(edited.memory.words.get((ran.registers.$gp >>> 0) >>> 2)).toBe(7)
+		expect(edited.instructionCount).toBe(ran.instructionCount)
+		expect(edited.diagnostics.some((diagnostic) => diagnostic.severity === 'error')).toBe(true)
+	})
 })
 
 describe('sending a panel somewhere', () => {
