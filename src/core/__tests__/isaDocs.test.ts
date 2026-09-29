@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { INSTRUCTION_MNEMONICS } from '../isa'
-import { INSTRUCTION_DOCS, instructionDoc, instructionHelp, instructionSignature } from '../isaDocs'
+import { INSTRUCTION_DOCS, INSTRUCTION_NAMES, instructionDoc, instructionHelp, instructionSignature } from '../isaDocs'
 
 const mnemonics = [...INSTRUCTION_MNEMONICS].map((mnemonic) => mnemonic.toLowerCase())
 
@@ -11,6 +11,15 @@ describe('instruction docs', () => {
 
 	it('describes nothing that is not a mnemonic', () => {
 		expect(Object.keys(INSTRUCTION_DOCS).filter((key) => !mnemonics.includes(key))).toEqual([])
+	})
+
+	it('names every mnemonic it describes, in capitals that spell it', () => {
+		for (const mnemonic of Object.keys(INSTRUCTION_DOCS)) {
+			const name = INSTRUCTION_NAMES[mnemonic]
+			expect(name, mnemonic).toBeDefined()
+			expect(name.replace(/[^A-Z0-9]/g, '').toLowerCase(), mnemonic).toBe(mnemonic.replace(/\./g, ''))
+		}
+		expect(Object.keys(INSTRUCTION_NAMES).filter((key) => !(key in INSTRUCTION_DOCS))).toEqual([])
 	})
 
 	it('matches a mnemonic however it is cased', () => {
@@ -26,7 +35,7 @@ describe('instruction docs', () => {
 
 	it('shows a basic instruction with its own form', () => {
 		expect(instructionHelp('add')).toEqual([
-			'**add** basic instruction',
+			'**add** ADD (basic instruction)',
 			'Add two registers, trapping on signed overflow.',
 			'`add $t1,$t2,$t3`',
 			'Pseudo forms: `add $t1,$t2,-100` `add $t1,$t2,100000`',
@@ -36,7 +45,7 @@ describe('instruction docs', () => {
 
 	it('shows a pseudo-instruction as one', () => {
 		expect(instructionHelp('move')).toEqual([
-			'**move** pseudo-instruction',
+			'**move** MOVE (pseudo-instruction)',
 			'Copy one register into another.',
 			'`move $t1,$t2`',
 		])
