@@ -9,7 +9,7 @@ import { openPanel } from './DockLayout'
 import type { MenuAction } from './MainMenu'
 import { openFindReplace } from '../services/findReplace'
 import { supportsFolders } from '../services/localFiles'
-import { copyShareLink, downloadWorkspaceZip, openFilesFromDisk, openFolderAsProject, openWorkspaceFromUrl, saveAllDocuments, saveDocument } from '../services/workspaceActions'
+import { copyShareLink, downloadWorkspaceZip, openFilesFromDisk, openFolderAsProject, openWorkspaceFromUrl, saveAllDocuments, saveDocument, saveDocumentAs } from '../services/workspaceActions'
 import './Toolbar.css'
 
 interface ToolbarProps {
@@ -69,6 +69,7 @@ function Toolbar({ onRun, onReset }: ToolbarProps) {
 		{ id: 'url', icon: GlobeIcon, label: 'Open from URL…', run: handleOpenUrl },
 		...(supportsFolders() ? [{ id: 'folder', icon: OpenFolderIcon, label: 'Open folder…', title: 'Make a folder on this machine the project; Save writes back into it', run: () => report(openFolderAsProject()) }] : []),
 		{ id: 'save', icon: SaveIcon, label: 'Save file', title: 'Into the open folder, or as a download', run: () => report(saveDocument(activeDocumentId)) },
+		{ id: 'saveAs', icon: SaveIcon, label: 'Save file as…', title: 'Under a name you choose; the file takes that name', run: () => report(saveDocumentAs(activeDocumentId)) },
 		{ id: 'saveAll', icon: SaveAllIcon, label: 'Save all', title: 'Every file into the open folder, or the workspace as a .zip', run: () => report(saveAllDocuments()) },
 		{ id: 'sep1', label: '-', run: () => {} },
 		{ id: 'saveBrowser', icon: BrowserSaveIcon, label: 'Save in this browser', run: handleSaveToBrowser },

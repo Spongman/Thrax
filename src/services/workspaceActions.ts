@@ -10,7 +10,7 @@ import { zipWorkspace } from './archive'
 import { downloadBlob, downloadText } from './download'
 import { deleteGist, publishGist, readGitHubToken } from './github'
 import { useGitHubSession, type BoundGist } from './githubSession'
-import { connectedFolder, openFolder, pickFiles, readFiles, reconnectFolder, removeFromFolder, SOURCE_ACCEPT, writeToFolder } from './localFiles'
+import { connectedFolder, openFolder, pickFiles, readFiles, reconnectFolder, removeFromFolder, saveWithPicker, SOURCE_ACCEPT, writeToFolder } from './localFiles'
 import { loadGist, loadWorkspaceFromUrl, type LoadedWorkspace } from './remote'
 import { shareLink } from './share'
 import { baseName, type WorkspaceSnapshot } from './workspace'
@@ -71,6 +71,28 @@ export async function saveDocument(documentId: string): Promise<string | null> {
 	if (!written) downloadText(text, baseName(document.title))
 	markDocumentsSaved([document.id])
 	return written ? `Saved ${document.title} to ${connectedFolder()?.name}` : `Downloaded ${document.title}`
+}
+
+/**
+ * Saves one file under a name the user picks: the browser's save dialog where
+ * it has one, otherwise a prompt for the name and a download.  The file takes
+ * the chosen name.
+ */
+export async function saveDocumentAs(documentId: string): Promise<string | null> {
+	const { activeDocumentId, code, documents } = store()
+	const document = documents.find((candidate) => candidate.id === documentId)
+	if (!document) return null
+	const text = document.id === activeDocumentId ? code : document.code
+	const suggested = baseName(document.title)
+	let name = await saveWithPicker(suggested, text)
+	if (name === undefined) {
+		name = window.prompt('Save file as', suggested)?.trim() || null
+		if (name) downloadText(text, name)
+	}
+	if (!name) return null
+	if (name !== document.title) store().renameDocument(document.id, name)
+	store().markDocumentsSaved([document.id])
+	return `Saved ${name}`
 }
 
 /** Saves every file into the connected folder, or the whole workspace as a zip without one. */

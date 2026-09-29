@@ -167,6 +167,28 @@ export async function writeToFolder(title: string, code: string): Promise<boolea
 	return true
 }
 
+type SavePicker = (options?: { suggestedName?: string }) => Promise<FileSystemFileHandle>
+
+/**
+ * Asks the browser where to save and writes the file there.  Resolves with the
+ * name chosen, null when the dialog is dismissed, or undefined when the browser
+ * has no save dialog to offer.
+ */
+export async function saveWithPicker(suggestedName: string, code: string): Promise<string | null | undefined> {
+	const picker = (window as unknown as { showSaveFilePicker?: SavePicker }).showSaveFilePicker
+	if (!picker) return undefined
+	try {
+		const handle = await picker({ suggestedName })
+		const writable = await handle.createWritable()
+		await writable.write(code)
+		await writable.close()
+		return handle.name
+	} catch (error) {
+		if (error instanceof DOMException && error.name === 'AbortError') return null
+		throw error
+	}
+}
+
 /** Removes a file from the connected folder; a file that is not there is no error. */
 export async function removeFromFolder(title: string): Promise<boolean> {
 	if (!folder) return false
