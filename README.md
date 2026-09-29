@@ -12,26 +12,31 @@ A son of MARS (but in a different language). A modern, interactive web-based por
 ## 🚀 Features
 
 ### Core Functionality
-- ✅ **Complete MIPS Assembler**: Lexer → Parser → Machine Code Generator
-- ✅ **Full MIPS Simulator**: Execute MIPS instructions with accurate register/memory state
-- ✅ **Monaco Editor**: Professional syntax highlighting and code editing
-- ✅ **Real-time Execution**: Assemble and run MIPS programs instantly
-- ✅ **Register Viewer**: Monitor all 32 MIPS registers in real-time, with Coproc 1 and Coproc 0 tabs
-- ✅ **Memory Inspector**: View memory contents during execution, and type over them as a hex editor
-- ✅ **Console I/O**: Output plus in-console input for supported syscalls
-- ✅ **Data Segments**: Initialize memory with `.data`, labels, strings, and numeric values
-- ✅ **Interactive Debugging**: Assemble, toggle source breakpoints, step, continue, and step back
-- ✅ **Call Stack View**: Inspect active `jal` / `jalr` calls while stepping
-- ✅ **Source Workspace**: Multiple source tabs and find/replace
+- ✅ **Complete MIPS Assembler**: Lexer → Parser → Machine Code Generator, with errors reported on the line that earned them
+- ✅ **Full MIPS Simulator**: The whole MARS instruction table, coprocessors 0 and 1, delayed branching, and device interrupts
+- ✅ **Monaco Editor**: Syntax highlighting, completion offering every instruction with its docs, and a hover saying what each instruction does
+- ✅ **Source Workspace**: Multiple source tabs, find/replace, multi-file programs, and a Files panel
+- ✅ **Interactive Debugging**: Run, pause, stop, step into/over/out, step back, and source breakpoints
+- ✅ **Execution History**: Every instruction and what it changed, with time travel to any point in it
+- ✅ **Register Viewer**: All 32 registers plus Coproc 1 and Coproc 0 tabs, editable while stopped
+- ✅ **Memory Inspector**: A hex editor with a caret, an ASCII column, and INS/OVR, undoable like an instruction
+- ✅ **Call Stack and Symbol Views**: Active `jal` / `jalr` calls, and per-file symbol tables
+- ✅ **Cross-Panel Navigation**: A hovered address or register lights wherever else it appears
+- ✅ **Heat Map and Gutter Columns**: Execution counts, addresses, and code bytes beside the source
+- ✅ **Console I/O**: Output plus in-console input for the interactive syscalls
+- ✅ **Dockable Layout**: Panels dock and tab, and the layout is saved between sessions
+- ✅ **Files, Folders and Links**: Autosave, files and `.zip` archives in and out, a folder on disk as the project, share links, GitHub and gists
 - ✅ **Portable Export**: Download assembled text in HexText format
-- ✅ **Bitmap Display**: Render word-addressed 24-bit RGB framebuffer memory
-- ✅ **Keyboard/Display MMIO**: Queue keyboard input and inspect transmitter output at the standard MMIO device addresses
-- ✅ **Example Programs**: 8 ready-to-run MIPS programs
+- ✅ **MARS Tools**: Bitmap display, keyboard/display MMIO, cache simulator, pipeline model, instruction statistics, branch history, MIPS X-Ray, memory reference visualization, Mars Bot, Scavenger Hunt, and the Digital Lab Simulator
+- ✅ **Settings**: The MARS options, including the three memory configurations
+- ✅ **Example Programs**: 13 ready-to-run MIPS programs
 - ✅ **Dark Theme UI**: VS Code-inspired interface
 
 ### Supported Instruction Types
 
-**Arithmetic**: ADD, ADDI, ADDU, ADDIU, SUB, SUBU, MUL, MULT, MULTU, DIV, DIVU
+The assembler carries the MARS instruction table: 155 basic forms over 139 mnemonics, and 388 pseudo-instruction forms over 83 mnemonics, plus `bal`, `li.s` and `li.d`.
+
+**Arithmetic**: ADD, ADDU, ADDI, ADDIU, SUB, SUBU, MULT, MULTU, MUL, MADD, MADDU, MSUB, MSUBU, DIV, DIVU, CLO, CLZ
 
 **Logical**: AND, ANDI, OR, ORI, XOR, XORI, NOR
 
@@ -39,31 +44,36 @@ A son of MARS (but in a different language). A modern, interactive web-based por
 
 **Comparison**: SLT, SLTI, SLTU, SLTIU
 
-**Load/Store**: LW, LH, LHU, LB, LBU, SW, SH, SB, LUI, LA
+**Load/Store**: LW, LH, LHU, LB, LBU, SW, SH, SB, LUI, LL, SC, LWL, LWR, SWL, SWR
 
-**Jump & Branch**: BEQ, BNE, BGEZ, BGTZ, BLEZ, BLTZ, BLT, BLE, BGT, BGE, J, JAL, JR, JALR
+**Jump & Branch**: BEQ, BNE, BGEZ, BGTZ, BLEZ, BLTZ, BGEZAL, BLTZAL, J, JAL, JR, JALR
 
-**Special**: MFHI, MFLO, MTHI, MTLO, NOP, MOVE, LI, SYSCALL
+**Conditional Move**: MOVN, MOVZ, MOVF, MOVT
+
+**Traps**: TEQ, TEQI, TNE, TNEI, TGE, TGEU, TGEI, TGEIU, TLT, TLTU, TLTI, TLTIU
+
+**Special**: MFHI, MFLO, MTHI, MTLO, NOP, SYSCALL, BREAK
 
 **Coprocessor 1 (floating point)**: LWC1, SWC1, LDC1, SDC1, MFC1, MTC1, ADD/SUB/MUL/DIV/ABS/NEG/SQRT/MOV (`.s` and `.d`), CVT.S.W, CVT.S.D, CVT.D.W, CVT.D.S, CVT.W.S, CVT.W.D, ROUND/TRUNC/CEIL/FLOOR.W (`.s` and `.d`), C.EQ/C.LT/C.LE (`.s` and `.d`), BC1T, BC1F, MOVT, MOVF. Comparisons and branches use condition flag 0; double-precision operands take the even register of an even/odd pair.
 
 **Coprocessor 0 (system control)**: MFC0, MTC0, ERET. The register file exposes `$8` (vaddr), `$12` (status), `$13` (cause), and `$14` (epc), reachable by number or by the `$status`-style aliases.
 
-**Assembler pseudos**: LA, B, BAL, BEQZ, BNEZ, BLT/BLE/BGT/BGE (and unsigned variants), NOT, NEG, NEGU, ABS, SEQ/SNE/SGT/SGE/SLE (and unsigned variants), REM, REMU, L.S, L.D, S.S, S.D, LI.S, LI.D. These are expanded to base MIPS instructions before addresses and branch offsets are assigned, so they work in debugging and HexText exports.
+**Assembler pseudos**: LI, LA, MOVE, B, BAL, BEQZ, BNEZ, BLT/BLE/BGT/BGE (and unsigned variants), SUBI, SUBIU, MULU, MULO, MULOU, REM, REMU, ABS, NEG, NEGU, NOT, ROL, ROR, SEQ/SNE/SGT/SGE/SLE (and unsigned variants), ULW, USW, ULH, ULHU, USH, LD, SD, L.S, L.D, S.S, S.D, LI.S, LI.D. These are expanded to base MIPS instructions before addresses and branch offsets are assigned, so they work in debugging and HexText exports.
 
 ### Syscall Support
-- `1`: Print integer
-- `4`: Print string (null-terminated)
-- `5`: Read integer
-- `8`: Read string
+Every MARS syscall is implemented; the MIDI pair keeps its timing and plays nothing.
+- `1`, `2`, `3`, `4`, `11`: Print integer, float, double, string, or character
+- `5`, `6`, `7`, `8`, `12`: Read integer, float, double, string, or character
 - `9`: Allocate heap memory (`sbrk`)
-- `10`: Exit program
-- `11`: Print character
-- `12`: Read character
-- `17`: Exit with code
-- `2`, `3`: Print float from `$f12` or double from `$f12`/`$f13`
-- `6`, `7`: Read float or double into `$f0`
+- `10`, `17`: Exit, or exit with a code
+- `13`, `14`, `15`, `16`: Open, read, write, and close a file
+- `30`: System time in milliseconds
+- `31`, `33`: MIDI out, asynchronous and synchronous
+- `32`: Sleep
 - `34`, `35`, `36`: Print integer as hexadecimal, binary, or unsigned decimal
+- `40`, `41`, `42`, `43`, `44`: Seed a random stream, then draw an int, a bounded int, a float, or a double from it
+- `50` to `59`: Dialog input (confirm, int, float, double, string) and message output
+- `60`: Clear the console
 
 ### Memory-Mapped Keyboard and Display
 
