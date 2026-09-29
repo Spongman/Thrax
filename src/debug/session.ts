@@ -230,6 +230,10 @@ export class DebugSession {
 		return this.control((simulator) => simulator.pause(), this.simulator)
 	}
 
+	stop(): boolean {
+		return this.control((simulator) => simulator.stop(), this.simulator)
+	}
+
 	/** Moves execution to `address` without running anything. */
 	setProgramCounter(address: number): boolean {
 		return this.control((simulator) => simulator.setProgramCounter(address))

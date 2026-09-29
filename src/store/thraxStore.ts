@@ -494,6 +494,8 @@ interface THRAXStore extends CoprocessorState {
 	/** Moves execution to the given address without running anything. */
 	setProgramCounter: (address: number) => void
 	pause: () => void
+	/** Ends the run where it stands, keeping what it left for inspection. */
+	stop: () => void
 	continue: () => Promise<void>
 	toggleBreakpointLine: (file: string, line: number) => void
 	toggleBreakpointAddress: (address: number) => void
@@ -725,6 +727,12 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 	}
 
 	const paused = { isPaused: true }
+
+	/** A control that runs on its own until something stops it, lit as running meanwhile. */
+	const freeRunning = (action: () => Promise<boolean>, after?: () => Partial<THRAXStore>) => {
+		set({ isRunning: true, isPaused: false })
+		return controlledAsync(action, after)
+	}
 
 	/**
 	 * A change the user made rather than one the program made.  Only while the
@@ -1034,11 +1042,12 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 
 		// Half-written source is expected here, so the diagnostics reach the editor
 		// live while the console is left to the Assemble button and to running.
-		// Once the program has run, an edit only updates the diagnostics: the run
-		// stays until Run, Assemble or Reset replaces it.
+		// Once the program has run or been stopped, an edit only updates the
+		// diagnostics: the run stays until Run, Assemble or Reset replaces it.
 		refreshAssembly: () => {
 			try {
-				if ((debug.machine?.instructionCount ?? 0) > 0) {
+				const machine = debug.machine
+				if (machine && (machine.instructionCount > 0 || machine.halted)) {
 					set({ diagnostics: assembleProgram().diagnostics })
 					return
 				}
@@ -1187,20 +1196,19 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 		insertMemoryByte: (address, limit, value) => edited((machine) => machine.insertMemoryByte(address, limit, value)),
 		deleteMemoryByte: (address, limit) => edited((machine) => machine.deleteMemoryByte(address, limit)),
 
-		stepOver: () => controlledAsync(() => debug.stepOver(), () => paused),
+		stepOver: () => freeRunning(() => debug.stepOver(), () => paused),
 
-		stepToReturn: () => controlledAsync(() => debug.stepToReturn(), () => paused),
+		stepToReturn: () => freeRunning(() => debug.stepToReturn(), () => paused),
 
 		pause: () => controlled(() => debug.pause()),
 
-		runToAddress: (address) => {
-			set({ isRunning: true, isPaused: false })
-			return controlledAsync(() => debug.runTo(address), () => ({ isPaused: !debug.machine?.halted }))
-		},
+		stop: () => controlled(() => debug.stop()),
+
+		runToAddress: (address) => freeRunning(() => debug.runTo(address), () => ({ isPaused: !debug.machine?.halted })),
 
 		setProgramCounter: (address) => controlled(() => debug.setProgramCounter(address), paused),
 
-		continue: () => controlledAsync(() => debug.continue()),
+		continue: () => freeRunning(() => debug.continue()),
 
 		toggleBreakpointAddress: (address) => {
 			if (debug.toggleBreakpointAddress(address)) set(debug.view())

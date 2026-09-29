@@ -470,7 +470,8 @@ function SourcePane({ documentId }: SourcePaneProps) {
 					} else if (event.shiftKey) {
 						store.reset()
 						void store.run()
-					} else if (store.isPaused) void store.continue()
+					} else if (store.isRunning) store.pause()
+					else if (store.isPaused) void store.continue()
 					else void store.run()
 					break
 				case 'F7': {

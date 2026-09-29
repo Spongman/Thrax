@@ -155,6 +155,29 @@ describe('publishing memory', () => {
 		expect(edited.instructionCount).toBe(ran.instructionCount)
 		expect(edited.diagnostics.some((diagnostic) => diagnostic.severity === 'error')).toBe(true)
 	})
+
+	it('keeps a stopped program, even one stopped before it ran', () => {
+		useTHRAXStore.getState().setCode(STORING)
+		useTHRAXStore.getState().assemble()
+		useTHRAXStore.getState().stop()
+		expect(useTHRAXStore.getState()).toMatchObject({ halted: true, isRunning: false, isPaused: false })
+
+		// A fresh machine would come back unhalted.
+		useTHRAXStore.getState().setCode(`${STORING}\tnop\n`)
+		useTHRAXStore.getState().refreshAssembly()
+		expect(useTHRAXStore.getState().halted).toBe(true)
+	})
+})
+
+describe('what counts as running', () => {
+	it('lights a step over while it runs, and not after', async () => {
+		useTHRAXStore.getState().setCode('\tnop\n\tli $v0, 10\n\tsyscall\n')
+		useTHRAXStore.getState().assemble()
+		const stepping = useTHRAXStore.getState().stepOver()
+		expect(useTHRAXStore.getState().isRunning).toBe(true)
+		await stepping
+		expect(useTHRAXStore.getState()).toMatchObject({ isRunning: false, isPaused: true })
+	})
 })
 
 describe('sending a panel somewhere', () => {

@@ -1,6 +1,6 @@
 import React from 'react'
 import { DEFAULT_GUTTER_COLUMNS, RUN_SPEEDS, useTHRAXStore } from '../store/thraxStore'
-import { AddressIcon, ArchiveIcon, BrowserLoadIcon, BrowserSaveIcon, CodeBytesIcon, DisassemblyIcon, ExportIcon, FilesIcon, GitBranchIcon, GlobeIcon, HeatLinesIcon, HeatMapIcon, LinkIcon, NewFileIcon, OpenFolderIcon, PauseIcon, ResetIcon, RunIcon, SaveAllIcon, SaveIcon, StepBackIcon, StepIntoIcon, StepOutIcon, StepOverIcon } from './icons'
+import { AddressIcon, ArchiveIcon, BrowserLoadIcon, BrowserSaveIcon, CodeBytesIcon, DisassemblyIcon, ExportIcon, FilesIcon, GitBranchIcon, GlobeIcon, HeatLinesIcon, HeatMapIcon, LinkIcon, NewFileIcon, OpenFolderIcon, PauseIcon, ResetIcon, RunIcon, SaveAllIcon, SaveIcon, StepBackIcon, StepIntoIcon, StepOutIcon, StepOverIcon, StopIcon } from './icons'
 import { nextToggles } from './toggleGroup'
 import MainMenu from './MainMenu'
 import SettingsDialog from './SettingsDialog'
@@ -23,7 +23,7 @@ interface ToolbarProps {
  * the menu, and what belongs to the file sits on the right.
  */
 function Toolbar({ onRun, onReset }: ToolbarProps) {
-	const { activeDocumentId, assemble, continue: continueExecution, createDocument, exportHexText, gutterColumns, hasSavedProgram, heatMap, heatMapLines, isPaused, isRunning, loadProgram, openPanels, pause, runSpeed, saveProgram, setGutterColumns, setHeatMap, setHeatMapLines, setRunSpeed, step, stepBack, stepOver, stepToReturn } = useTHRAXStore()
+	const { activeDocumentId, assemble, continue: continueExecution, createDocument, exportHexText, gutterColumns, halted, hasMachine, hasSavedProgram, heatMap, heatMapLines, isPaused, isRunning, loadProgram, openPanels, pause, runSpeed, saveProgram, setGutterColumns, setHeatMap, setHeatMapLines, setRunSpeed, step, stepBack, stepOver, stepToReturn, stop } = useTHRAXStore()
 	const [showSettings, setShowSettings] = React.useState(false)
 	const [showGitHub, setShowGitHub] = React.useState(false)
 	const [storageMessage, setStorageMessage] = React.useState<string | null>(null)
@@ -103,11 +103,15 @@ function Toolbar({ onRun, onReset }: ToolbarProps) {
 			</button>
 
 			<div className="btn-group">
-				<button className="btn btn-icon btn-primary" onClick={() => (isPaused ? void continueExecution() : void onRun())} title={isPaused ? 'Continue (F5)' : 'Run (F5)'}>
-					<RunIcon />
+				<button
+					className={`btn btn-icon${isRunning ? ' btn-primary' : ''}`}
+					onClick={() => (isRunning ? pause() : isPaused ? void continueExecution() : void onRun())}
+					title={isRunning ? 'Pause (F5)' : isPaused ? 'Continue (F5)' : 'Run (F5)'}
+				>
+					{isRunning ? <PauseIcon /> : <RunIcon />}
 				</button>
-				<button className="btn btn-icon" onClick={pause} disabled={!isRunning} title="Pause">
-					<PauseIcon />
+				<button className="btn btn-icon" onClick={stop} disabled={!hasMachine || halted} title="Stop">
+					<StopIcon />
 				</button>
 				<button className="btn btn-icon" onClick={onReset} title="Reset (alt+F5), restart with shift+F5">
 					<ResetIcon />

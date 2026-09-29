@@ -1287,6 +1287,14 @@ export class MipsSimulator {
 		this.running = false
 	}
 
+	/** Ends a run where it stands; only a fresh run carries on from here. */
+	stop() {
+		this.running = false
+		this.paused = false
+		this.pendingInput = null
+		this.halted = true // Outside any instruction, so nothing records it.
+	}
+
 	/** Moves execution to `address` without running anything. */
 	setProgramCounter(address: number) {
 		// Moving the pc by hand leaves the path the log recorded, so what it

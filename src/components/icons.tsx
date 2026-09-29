@@ -145,6 +145,15 @@ export function PauseIcon() {
 	)
 }
 
+/** Stop: a square. */
+export function StopIcon() {
+	return (
+		<svg className="toggle-icon" viewBox="0 0 16 16" aria-hidden="true">
+			<rect x="4" y="4" width="8" height="8" rx="0.9" />
+		</svg>
+	)
+}
+
 /** Reset: a circle come almost the whole way back round. */
 export function ResetIcon() {
 	return (
