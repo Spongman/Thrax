@@ -1,8 +1,10 @@
 import React from 'react'
 import { EXAMPLES } from '../examples'
-import { ExamplesIcon, FileMenuIcon, SettingsIcon, ToolsIcon, WindowIcon, type Icon } from './icons'
+import { AboutIcon, ExamplesIcon, FileMenuIcon, SettingsIcon, ToolsIcon, WindowIcon, type Icon } from './icons'
 import { menuLabel, panelsIn, type PanelSpec } from './panels'
 import './MainMenu.css'
+
+const PROJECT_PAGE = 'https://github.com/Spongman/Thrax'
 
 /**
  * The workspace menu: everything that is not a running control.
@@ -166,6 +168,19 @@ function MainMenu({ onSettings, onLoadExample, onOpenPanel, openPanels, fileActi
 
 					{section('window', 'Window', WindowIcon, panelsIn('window').map((panel) => panelItem(panel)))}
 					{section('tools', 'Tools', ToolsIcon, panelsIn('tool').map((panel) => panelItem(panel, true)), true)}
+
+					<div className="menu-separator" />
+
+					<button
+						className="menu-item"
+						role="menuitem"
+						title={PROJECT_PAGE}
+						onMouseEnter={() => setSubmenu(null)}
+						onClick={() => { window.open(PROJECT_PAGE, '_blank', 'noopener'); close() }}
+					>
+						<AboutIcon />
+						<span className="item-name">About…</span>
+					</button>
 				</div>
 			)}
 		</div>

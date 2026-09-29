@@ -227,6 +227,17 @@ export function SettingsIcon() {
 	)
 }
 
+/** About: an i in a circle. */
+export function AboutIcon() {
+	return (
+		<svg className="toggle-icon" viewBox="0 0 16 16" aria-hidden="true">
+			<circle cx="8" cy="8" r="6.2" fill="none" stroke="currentColor" strokeWidth="1.4" />
+			<path d="M8 7.2 L8 11.4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+			<circle cx="8" cy="4.8" r="1" />
+		</svg>
+	)
+}
+
 /** The File menu: a page. */
 export function FileMenuIcon() {
 	return (
