@@ -151,7 +151,9 @@ const CallStackPanel = () => {
 const BitmapPanel = () => {
 	const memory = useTHRAXStore((state) => state.memory)
 	const dataBase = useTHRAXStore((state) => state.targetProfile?.dataBase)
-	return <div className="dock-panel"><BitmapDisplay memory={memory} defaultBase={dataBase} /></div>
+	const architecture = useTHRAXStore((state) => state.architecture)
+	// Remounting on a switch reads the new target's own stored base.
+	return <div className="dock-panel"><BitmapDisplay key={architecture} memory={memory} defaultBase={dataBase} architecture={architecture} /></div>
 }
 
 const KeyboardDisplayPanel = () => {

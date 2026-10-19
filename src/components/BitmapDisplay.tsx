@@ -10,6 +10,8 @@ interface BitmapDisplayProps {
 	memory: MemoryInspector
 	/** Where the display starts until one is chosen: the target's data base. */
 	defaultBase?: number
+	/** The architecture, whose own base address is remembered apart from every other's. */
+	architecture: string
 }
 
 const DISPLAY_SIZES = [128, 256, 512]
@@ -20,9 +22,9 @@ function parseAddress(value: string) {
 	return parsed !== null && parsed >= 0 && parsed <= 0xffffffff ? parsed >>> 0 : null
 }
 
-function BitmapDisplay({ memory, defaultBase = 0 }: BitmapDisplayProps) {
+function BitmapDisplay({ memory, defaultBase = 0, architecture }: BitmapDisplayProps) {
 	const canvasRef = useRef<HTMLCanvasElement | null>(null)
-	const [baseAddress, setBaseAddress] = useStoredState('bitmap.base', formatWord(defaultBase), (value) => typeof value === 'string')
+	const [baseAddress, setBaseAddress] = useStoredState(`bitmap.base.${architecture}`, formatWord(defaultBase), (value) => typeof value === 'string')
 	const [unitSize, setUnitSize] = useStoredState('bitmap.unit', 8, isOneOf(UNIT_SIZES))
 	const [width, setWidth] = useStoredState('bitmap.width', 256, isOneOf(DISPLAY_SIZES))
 	const [height, setHeight] = useStoredState('bitmap.height', 256, isOneOf(DISPLAY_SIZES))
