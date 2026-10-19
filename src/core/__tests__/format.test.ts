@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatHex, formatWord, formatWordDigits, parseWord } from '../format'
+import { formatHex, formatRegister, formatWord, formatWordDigits, parseWord } from '../format'
 
 describe('formatWord', () => {
 	it('renders a word as 0x-prefixed, zero-padded, uppercase hex', () => {
@@ -22,6 +22,19 @@ describe('formatHex', () => {
 	it('pads to the requested width', () => {
 		expect(formatHex(0xff, 2)).toBe('FF')
 		expect(formatHex(0x0f, 2)).toBe('0F')
+	})
+})
+
+describe('formatRegister', () => {
+	it('pads a narrow register to its own width', () => {
+		expect(formatRegister(0x5, 8)).toBe('0x05')
+		expect(formatRegister(0x1234, 16)).toBe('0x1234')
+		expect(formatRegister(1, 1)).toBe('0x1')
+		expect(formatRegister(-1, 16)).toBe('0xFFFF')
+	})
+
+	it('writes 32-bit registers as a word', () => {
+		expect(formatRegister(0x5, 32)).toBe('0x00000005')
 	})
 })
 

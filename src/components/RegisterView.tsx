@@ -3,7 +3,7 @@ import './RegisterView.css'
 import './ToggleGroup.css'
 import { RegisterFormat, type RegisterBank, type RegisterDescriptor, type Registers } from '../architectures/contracts'
 import { bitsToDouble, bitsToSingle, formatDouble, formatSingle } from '../core/ieee754'
-import { formatWord } from '../core/format'
+import { formatRegister } from '../core/format'
 import { advanceOne, isSolo, nextToggles } from './toggleGroup'
 import FloatBitsView from './FloatBitsView'
 import PanelGroup from './PanelGroup'
@@ -71,8 +71,6 @@ const MIN_NAME_WIDTH = 48
  * characters of 7.2 pay for.
  */
 const formatWidth = (format: Format) => Math.ceil(FORMAT_CHARS[format] * NAME_CHAR_WIDTH) + 2
-
-const hex = formatWord
 
 type FormatFlags = Record<Format, boolean>
 
@@ -152,6 +150,8 @@ interface RegisterEntry {
 	id: string
 	name: string
 	bits: number
+	/** The register's width, which its hex is padded to. */
+	width: number
 	editable: boolean
 	/** The register holding the high word, when this one starts a double. */
 	pairId?: string
@@ -162,7 +162,7 @@ interface RegisterEntry {
 const formatBits = (format: Format, entry: RegisterEntry) => {
 	switch (format) {
 		case '0n': return `${entry.bits >>> 0}`
-		case '0x': return hex(entry.bits)
+		case '0x': return formatRegister(entry.bits, entry.width)
 		case 'f': return formatSingle(bitsToSingle(entry.bits))
 		case 'd': return entry.highBits === undefined ? '' : formatDouble(bitsToDouble(entry.bits, entry.highBits))
 	}
@@ -345,6 +345,7 @@ function RegisterView({ registers, descriptors, banks, isAddress = NOT_AN_ADDRES
 		id: register.id,
 		name: register.name,
 		bits: registers[register.id] || 0,
+		width: register.bits,
 		editable: register.editable,
 		pairId: register.pairsWith,
 		highBits: register.pairsWith === undefined ? undefined : registers[register.pairsWith] || 0,

@@ -22,6 +22,12 @@ export function formatHex(value: number, digits: number): string {
 	return (value >>> 0).toString(16).toUpperCase().padStart(digits, '0')
 }
 
+/** A register of `bits` bits in hex, padded to its own width; 32 bits and wider as a word. */
+export function formatRegister(value: number, bits: number): string {
+	if (bits >= 32) return formatWord(value)
+	return `0x${formatHex((value >>> 0) % 2 ** bits, Math.ceil(bits / 4))}`
+}
+
 /**
  * The inverse of `formatWord`: parses a hex or decimal integer literal, or
  * returns null when `text` is not one.
