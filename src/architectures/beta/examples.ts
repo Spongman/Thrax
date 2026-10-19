@@ -62,7 +62,9 @@ const TINYOS_STUB = `MapUserAddress:
 `
 
 /** Fills in the lab's Design Problem 1: add the current process's segment base. */
-function solveTinyOs(code: string) {
+export function solveTinyOs(source: string) {
+	// A CRLF checkout must still match the stub.
+	const code = source.replace(/\r\n?/g, '\n')
 	if (!code.includes(TINYOS_STUB)) throw new Error('TinyOS MapUserAddress stub not found')
 	return code.replace(TINYOS_STUB, `MapUserAddress:
         // [Design Problem 1] solved for THRAX: add the current base.

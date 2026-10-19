@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { faultMessage, R_XP, STEP_FAULT, STEP_HALT, STEP_INTERRUPT, STEP_OK, STEP_WAIT } from '../cpu'
-import { EXAMPLES } from '../examples'
+import { EXAMPLES, solveTinyOs } from '../examples'
 import definition from '../index'
 import { BetaMachine, CLOCK_PERIOD, IRQ_CLOCK, IRQ_KEYBOARD, KEY_INTERVAL } from '../machine'
 import type { BetaRuntime } from '../runtime'
@@ -149,6 +149,10 @@ describe('TinyOS', () => {
 		expect(EXAMPLES.tinyos.code).toContain('[Design Problem 1] your code here...')
 		expect(EXAMPLES.tinyosSolved.code).not.toContain('[Design Problem 1] your code here')
 		expect(assembleUasm({ name: 'tinyos.uasm', code: EXAMPLES.tinyos.code }).diagnostics).toEqual([])
+	})
+
+	it('solves a CRLF copy of the lab version', () => {
+		expect(solveTinyOs(EXAMPLES.tinyos.code.replace(/\n/g, '\r\n'))).toBe(EXAMPLES.tinyosSolved.code)
 	})
 
 	it('assembles with clock, tty and segmentation, and lays out its segments', () => {
