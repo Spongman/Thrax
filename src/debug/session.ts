@@ -8,7 +8,7 @@
  * than reaching into the runtime itself.
  */
 
-import type { MipsSimulator } from '../core/simulator'
+import type { RunControl } from '../architectures/contracts'
 import { EMPTY_SOURCE_INDEX, type SourceIndex } from '../core/sourceIndex'
 
 /** Breakpoint state as the workspace shows it. */
@@ -45,10 +45,11 @@ export function visibleAddresses(index: SourceIndex): ReadonlySet<number> {
 }
 
 /** Builds the program a control was pressed before there was one, if it assembles. */
-export type AssembleProgram = () => MipsSimulator | null
+export type AssembleProgram<M extends RunControl> = () => M | null
 
-export class DebugSession {
-	private simulator: MipsSimulator | null = null
+/** `M` is whatever machine the caller holds; the session only needs to drive it. */
+export class DebugSession<M extends RunControl = RunControl> {
+	private simulator: M | null = null
 	private index: SourceIndex = EMPTY_SOURCE_INDEX
 	private lines = new Map<string, Set<number>>()
 	private addresses = new Set<number>()
@@ -61,15 +62,18 @@ export class DebugSession {
 	 * `assemble` is expected to call `rebind` with what it built, and to return
 	 * null when the source does not assemble.
 	 */
-	constructor(private readonly assemble: AssembleProgram = () => null) {}
+	constructor(private readonly assemble: AssembleProgram<M> = () => null) {}
 
 	/** The runtime being debugged, or null until a program assembles. */
-	get machine(): MipsSimulator | null {
+	get machine(): M | null {
 		return this.simulator
 	}
 
-	/** Takes on a freshly assembled program, carrying the breakpoints across. */
-	rebind(simulator: MipsSimulator, index: SourceIndex) {
+	/**
+	 * Takes on a freshly assembled program, carrying the breakpoints across and
+	 * adding the lines of any `requested` addresses, as the source asked.
+	 */
+	rebind(simulator: M, index: SourceIndex, requested: readonly number[] = []) {
 		this.simulator = simulator
 		this.index = index
 		this.visibleSet = visibleAddresses(index)
@@ -84,6 +88,13 @@ export class DebugSession {
 			}))
 			: lines])
 		this.lines = new Map(carried.filter(([, lines]) => lines.size > 0))
+		for (const address of requested) {
+			const at = index.lineForAddress(address)
+			if (!at) continue
+			const lines = this.lines.get(at.file) ?? new Set<number>()
+			lines.add(at.line)
+			this.lines.set(at.file, lines)
+		}
 		this.apply()
 	}
 
@@ -99,6 +110,15 @@ export class DebugSession {
 		this.lines = new Map()
 		this.addresses = new Set()
 		this.detach()
+	}
+
+	/**
+	 * Forgets the breakpoints set on bare addresses, which mean nothing to a
+	 * different CPU; line breakpoints are resolved again by the next build.
+	 */
+	forgetAddresses() {
+		this.addresses = new Set()
+		this.apply()
 	}
 
 	/** Whether the editor is showing a row per machine word. */
@@ -144,7 +164,7 @@ export class DebugSession {
 	 * worth stopping at only while the word rows show it.  A breakpoint on one
 	 * always is.
 	 */
-	private hidden(simulator: MipsSimulator, address: number): boolean {
+	private hidden(simulator: M, address: number): boolean {
 		return !this.wordRows && !this.visible().has(address) && !simulator.breakpoints.has(address)
 	}
 
@@ -157,7 +177,7 @@ export class DebugSession {
 	 * machine's history size: one press of Step should not run thousands of
 	 * instructions just because the workspace is willing to remember them.
 	 */
-	private skipping(simulator: MipsSimulator, skipped: number): boolean {
+	private skipping(simulator: M, skipped: number): boolean {
 		if (skipped >= MAX_HIDDEN_WORDS_PER_STEP) return false
 		if (simulator.halted || simulator.paused || simulator.pendingInput) return false
 		return this.hidden(simulator, simulator.pc)
@@ -168,19 +188,19 @@ export class DebugSession {
 	 * those that only make sense mid-run pass the attached program instead, and
 	 * do nothing without it.
 	 */
-	private control(action: (simulator: MipsSimulator) => void, on: MipsSimulator | null = this.required()): boolean {
+	private control(action: (simulator: M) => void, on: M | null = this.required()): boolean {
 		if (!on) return false
 		action(on)
 		return true
 	}
 
-	private async controlAsync(action: (simulator: MipsSimulator) => Promise<void>, on: MipsSimulator | null = this.required()): Promise<boolean> {
+	private async controlAsync(action: (simulator: M) => Promise<void>, on: M | null = this.required()): Promise<boolean> {
 		if (!on) return false
 		await action(on)
 		return true
 	}
 
-	private required(): MipsSimulator | null {
+	private required(): M | null {
 		return this.simulator ?? this.assemble()
 	}
 

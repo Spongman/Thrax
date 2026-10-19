@@ -1,6 +1,5 @@
 import { useEffect } from 'react'
 import { useTHRAXStore } from '../store/thraxStore'
-import { EXAMPLES } from '../examples'
 
 interface LoadExampleEvent extends Event {
 	detail: { code: string }
@@ -19,5 +18,3 @@ export function useExamples() {
 		return () => window.removeEventListener('load-example', handleLoadExample)
 	}, [setCode])
 }
-
-export { EXAMPLES }

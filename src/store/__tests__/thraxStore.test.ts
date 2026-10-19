@@ -1,5 +1,9 @@
+import { beforeAll as beforeArchitectureTests } from 'vitest'
+import { initializeArchitecture } from '../../architectures/registry'
+beforeArchitectureTests(async () => { await initializeArchitecture() })
 import { describe, expect, it } from 'vitest'
 import { useTHRAXStore } from '../thraxStore'
+import type { WordMemory } from '../../architectures/mips/machine'
 
 describe('store smoke', () => {
 	it('seeds the tool views and settings from the registry', () => {
@@ -127,7 +131,7 @@ describe('publishing memory', () => {
 
 		// Rebuilding every written word per publish cost about as much as running
 		// the whole program, so the words are handed straight over.
-		expect(second.words).toBe(first.words)
+		expect((second as WordMemory).words).toBe((first as WordMemory).words)
 		// The wrapper is what changes, since the map is written in place and a
 		// selector comparing it would never see a step happen.
 		expect(second).not.toBe(first)
@@ -138,7 +142,7 @@ describe('publishing memory', () => {
 		useTHRAXStore.getState().assemble()
 		await useTHRAXStore.getState().run()
 		const { memory, registers } = useTHRAXStore.getState()
-		expect(memory.words.get((registers.$gp >>> 0) >>> 2)).toBe(7)
+		expect(memory.word(registers.$gp)).toBe(7)
 	})
 
 	it('keeps the run when the source is edited after it', async () => {
@@ -151,7 +155,7 @@ describe('publishing memory', () => {
 		useTHRAXStore.getState().setCode(`${STORING}\tbogus\n`)
 		useTHRAXStore.getState().refreshAssembly()
 		const edited = useTHRAXStore.getState()
-		expect(edited.memory.words.get((ran.registers.$gp >>> 0) >>> 2)).toBe(7)
+		expect(edited.memory.word(ran.registers.$gp)).toBe(7)
 		expect(edited.instructionCount).toBe(ran.instructionCount)
 		expect(edited.diagnostics.some((diagnostic) => diagnostic.severity === 'error')).toBe(true)
 	})

@@ -8,7 +8,7 @@
  */
 
 import { isZipName, looksLikeZip, unzipFiles } from './archive'
-import { baseName, fromWorkspaceDocument, isSourceName, workspaceFromFiles, type WorkspaceFile, type WorkspaceSnapshot } from './workspace'
+import { baseName, DEFAULT_ARCHITECTURE, fromWorkspaceDocument, isSourceName, workspaceFromFiles, type WorkspaceFile, type WorkspaceSnapshot } from './workspace'
 
 export const LOAD_PARAMETER = 'load'
 
@@ -121,7 +121,7 @@ async function loadFile(url: string): Promise<LoadedWorkspace> {
 			// Not a workspace document; it is opened as the one file it is.
 		}
 	}
-	return { snapshot: { files: [{ title: baseName(new URL(url).pathname), code: text }], assembleAll: false }, origin: {} }
+	return { snapshot: { files: [{ title: baseName(new URL(url).pathname), code: text }], assembleAll: false, architecture: DEFAULT_ARCHITECTURE }, origin: {} }
 }
 
 export async function loadWorkspaceFromUrl(text: string, token?: string | null): Promise<LoadedWorkspace> {

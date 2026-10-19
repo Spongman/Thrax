@@ -1,3 +1,6 @@
+import { beforeAll as beforeArchitectureTests } from 'vitest'
+import { initializeArchitecture } from '../../architectures/registry'
+beforeArchitectureTests(async () => { await initializeArchitecture() })
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_MEMORY_REFERENCE_SETTINGS } from '../../tools/memoryReference'
 
@@ -33,6 +36,7 @@ data:	.word 0
  * A tool runs only while something is consuming it, so a test that reads one
  * has to open its panel first, exactly as the workspace does.
  */
+const view = (key: string) => (useTHRAXStore.getState() as unknown as Record<string, { [field: string]: unknown }>)[key]
 const open = (...ids: string[]) => useTHRAXStore.getState().setOpenPanels(ids)
 
 describe('ported tool views', () => {
@@ -40,8 +44,8 @@ describe('ported tool views', () => {
 		const state = useTHRAXStore.getState()
 		expect(state.memoryReference.counts).toHaveLength(256)
 		expect(state.memoryReferenceSettings).toEqual(DEFAULT_MEMORY_REFERENCE_SETTINGS)
-		expect(state.marsBot.segments).toEqual([])
-		expect(state.scavengerHunt.players).toHaveLength(22)
+		expect(view('marsBot').segments).toEqual([])
+		expect(view('scavengerHunt').players).toHaveLength(22)
 	})
 
 	it('publishes the memory reference readings a run takes', async () => {
@@ -69,7 +73,7 @@ describe('ported tool views', () => {
 		useTHRAXStore.getState().assemble()
 		await useTHRAXStore.getState().run()
 
-		expect(useTHRAXStore.getState().marsBot.heading).toBe(90)
+		expect(view('marsBot').heading).toBe(90)
 	})
 
 	it('round-trips the memory reference settings through the store and its key', () => {

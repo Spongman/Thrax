@@ -45,6 +45,11 @@ export function pickFiles(accept: string, multiple = true): Promise<File[]> {
 
 export const SOURCE_ACCEPT = '.asm,.s,.txt,.zip,.json'
 
+/** What the file picker offers: the usual sources and an architecture's own. */
+export function sourceAccept(definition?: { fileExtensions?: readonly string[] }): string {
+	return [SOURCE_ACCEPT, ...(definition?.fileExtensions ?? [])].join(',')
+}
+
 /** Files as picked or dropped, with each archive among them opened up. */
 export async function readFiles(files: readonly File[]): Promise<WorkspaceFile[]> {
 	const read = await Promise.all(files.map(async (file): Promise<WorkspaceFile[]> =>

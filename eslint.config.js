@@ -29,6 +29,26 @@ export default [
     },
   },
   {
+    // Shared code reaches an architecture only through the contracts and the
+    // registry; type-only imports count too.
+    files: ['src/**/*.ts', 'src/**/*.tsx'],
+    ignores: ['src/core/**', 'src/architectures/**', '**/__tests__/**', '**/*.test.*'],
+    rules: {
+      'no-restricted-imports': ['error', {
+        patterns: [
+          {
+            regex: '(^|/)core/(effectKind|types)$',
+            message: 'MIPS implementation: use the neutral contract in architectures/contracts.',
+          },
+          {
+            regex: '(^|/)architectures/(?!contracts$|registry$)[^/]+',
+            message: 'Only architectures/registry imports a concrete architecture.',
+          },
+        ],
+      }],
+    },
+  },
+  {
     files: ['**/__tests__/**'],
     languageOptions: { globals: { ...globals.node, ...globals.browser } },
   },

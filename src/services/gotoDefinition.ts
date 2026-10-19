@@ -79,10 +79,24 @@ export interface GotoDefinitionSources {
 	open: (file: string, line: number) => void
 }
 
-export function registerGotoDefinition(monaco: typeof Monaco, sources: GotoDefinitionSources): void {
-	monaco.languages.registerDefinitionProvider('mips', {
+/** How a language finds the name under the pointer, and where it is defined. */
+export interface DefinitionFinder {
+	/** The name under `column` (1-based) on `text`, or null. */
+	nameAt(text: string, column: number): string | null
+	/** Where `name` is defined in `files`, searched in order. */
+	find(files: readonly WorkspaceFile[], name: string): Definition | null
+	/** Read-only files a definition may land in that the workspace does not hold, such as a bundled library. */
+	libraries?: () => readonly WorkspaceFile[]
+}
+
+/** Labels and `.eqv`, `.macro` and `.extern` names, as written above. */
+export const SOURCE_DEFINITIONS: DefinitionFinder = { nameAt: symbolAt, find: findDefinition }
+
+/** `language` is the Monaco language id of the sources it answers for; `finder` reads them. */
+export function registerGotoDefinition(monaco: typeof Monaco, sources: GotoDefinitionSources, language: string, finder: DefinitionFinder = SOURCE_DEFINITIONS): Monaco.IDisposable {
+	const provider = monaco.languages.registerDefinitionProvider(language, {
 		provideDefinition(model, position) {
-			const name = symbolAt(model.getLineContent(position.lineNumber), position.column)
+			const name = finder.nameAt(model.getLineContent(position.lineNumber), position.column)
 			if (!name) return null
 			// The model's own text says which file it is; a match there stays in
 			// this editor.  Two files can read the same (two new ones, say), and
@@ -93,18 +107,20 @@ export function registerGotoDefinition(monaco: typeof Monaco, sources: GotoDefin
 			const same = files.filter((file) => file.code === text)
 			const own = same.find((file) => file.title === active) ?? same[0]
 			const ordered = own ? [own, ...files.filter((file) => file !== own)] : files
-			const found = findDefinition(ordered, name)
+			const found = finder.find(ordered, name)
 			if (!found) return null
 			// The definition itself is not a link to anywhere.
 			if (own && found.file === own.title && found.line === position.lineNumber && position.column >= found.column && position.column < found.endColumn) return null
 			const range = new monaco.Range(found.line, found.column, found.line, found.endColumn)
-			const target = found.file === own?.title ? model : modelFor(monaco, files.find((file) => file.title === found.file)!)
-			return { uri: target.uri, range }
+			if (found.file === own?.title) return { uri: model.uri, range }
+			const file = files.find((candidate) => candidate.title === found.file)
+				?? finder.libraries?.().find((candidate) => candidate.title === found.file)
+			return file ? { uri: modelFor(monaco, file, language).uri, range } : null
 		},
 	})
 
 	// Monaco asks the opener for any model that is not the one in front of it.
-	monaco.editor.registerEditorOpener({
+	const opener = monaco.editor.registerEditorOpener({
 		openCodeEditor(source, resource, selectionOrPosition) {
 			// Within the file in front, Monaco moves the cursor itself.
 			if (source.getModel()?.uri.toString() === resource.toString()) return false
@@ -123,6 +139,7 @@ export function registerGotoDefinition(monaco: typeof Monaco, sources: GotoDefin
 			return true
 		},
 	})
+	return { dispose() { provider.dispose(); opener.dispose() } }
 }
 
 /**
@@ -131,7 +148,7 @@ export function registerGotoDefinition(monaco: typeof Monaco, sources: GotoDefin
  * model behind a location before it asks anyone to open it, so a location has
  * to name a model that exists.
  */
-function modelFor(monaco: typeof Monaco, file: WorkspaceFile): Monaco.editor.ITextModel {
+function modelFor(monaco: typeof Monaco, file: WorkspaceFile, language: string): Monaco.editor.ITextModel {
 	const uri = definitionUri(monaco, file.title)
 	const existing = monaco.editor.getModels().find((model) => model.uri.scheme !== DEFINITION_SCHEME && model.getValue() === file.code)
 	if (existing) return existing
@@ -140,5 +157,5 @@ function modelFor(monaco: typeof Monaco, file: WorkspaceFile): Monaco.editor.ITe
 		standIn.setValue(file.code)
 		return standIn
 	}
-	return monaco.editor.createModel(file.code, 'mips', uri)
+	return monaco.editor.createModel(file.code, language, uri)
 }

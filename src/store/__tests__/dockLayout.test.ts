@@ -108,6 +108,16 @@ describe('dock layout', () => {
 		expect(reference).toBe('registers')
 	})
 
+	it('keeps a panel any architecture contributes, whichever target is active', () => {
+		storeLayout([...STORED_PANELS, 'xray', 'marsBot'])
+		const dock = fakeApi()
+		buildLayout(dock.api, new Set())
+
+		expect(dock.restored()).not.toBeNull()
+		expect(dock.ids()).toContain('xray')
+		expect(dock.ids()).toContain('marsBot')
+	})
+
 	it('starts over only when a stored layout names a panel that no longer exists', () => {
 		storeLayout([...STORED_PANELS, 'screenMagnifier'])
 		const dock = fakeApi()

@@ -1,3 +1,6 @@
+import { beforeAll as beforeArchitectureTests } from 'vitest'
+import { initializeArchitecture } from '../../architectures/registry'
+beforeArchitectureTests(async () => { await initializeArchitecture() })
 import { beforeEach, describe, expect, it } from 'vitest'
 import { sourceSignature, useTHRAXStore } from '../thraxStore'
 
@@ -27,7 +30,7 @@ const addressOf = (file: string, line: number) => state().sourceIndex.codeAddres
 beforeEach(() => {
 	state().reset()
 	state().setSetting('assembleAll', false)
-	state().setSetting('delayedBranching', false)
+	state().setTargetSetting('delayedBranching', false)
 })
 
 describe('the entry file and the tab bar', () => {

@@ -7,6 +7,8 @@
  * nothing outside it, so a workspace read back gets fresh ones.
  */
 
+import { architectureManifests } from '../architectures/registry'
+
 export interface WorkspaceFile {
 	title: string
 	code: string
@@ -17,7 +19,12 @@ export interface WorkspaceSnapshot {
 	/** Title of the file in front, when the snapshot remembers one. */
 	active?: string
 	assembleAll: boolean
+	/** Target architecture id; kept as read, even when it is not a known one. */
+	architecture: string
 }
+
+/** What a workspace saved before architectures existed targets. */
+export const DEFAULT_ARCHITECTURE = 'mips'
 
 export const WORKSPACE_FORMAT = 'thrax-workspace'
 export const WORKSPACE_VERSION = 1
@@ -29,15 +36,24 @@ export interface WorkspaceDocument {
 	savedAt?: string
 	active?: string
 	assembleAll: boolean
+	/** Absent in documents saved before architectures existed. */
+	architecture?: string
 	files: WorkspaceFile[]
 }
 
-/** File names the assembler reads; anything else in a folder or archive is left alone. */
+/** Extensions every architecture reads. */
 export const SOURCE_EXTENSIONS = ['.asm', '.s']
 
+/** File names some architecture assembles; anything else in a folder or archive is left alone. */
 export function isSourceName(name: string): boolean {
 	const lower = name.toLowerCase()
-	return SOURCE_EXTENSIONS.some((extension) => lower.endsWith(extension))
+	const extensions = [...SOURCE_EXTENSIONS, ...architectureManifests().flatMap((manifest) => manifest.fileExtensions ?? [])]
+	return extensions.some((extension) => lower.endsWith(extension))
+}
+
+/** The extension a new file takes under an architecture. */
+export function newFileExtension(definition?: { fileExtensions?: readonly string[] }): string {
+	return definition?.fileExtensions?.[0] ?? '.asm'
 }
 
 /** The last segment of a path or URL, or `fallback` when there is none. */
@@ -53,6 +69,7 @@ export function toWorkspaceDocument(snapshot: WorkspaceSnapshot): WorkspaceDocum
 		savedAt: new Date().toISOString(),
 		active: snapshot.active,
 		assembleAll: snapshot.assembleAll,
+		architecture: snapshot.architecture,
 		files: snapshot.files.map(({ title, code }) => ({ title, code })),
 	}
 }
@@ -72,7 +89,8 @@ export function fromWorkspaceDocument(value: unknown): WorkspaceSnapshot | null 
 	const active = typeof document.active === 'string' && document.files.some((file) => file.title === document.active)
 		? document.active
 		: undefined
-	return { files: document.files.map(({ title, code }) => ({ title, code })), active, assembleAll: document.assembleAll === true }
+	const architecture = typeof document.architecture === 'string' && document.architecture ? document.architecture : DEFAULT_ARCHITECTURE
+	return { files: document.files.map(({ title, code }) => ({ title, code })), active, assembleAll: document.assembleAll === true, architecture }
 }
 
 /**
@@ -95,7 +113,7 @@ export function workspaceFromFiles(files: readonly WorkspaceFile[]): WorkspaceSn
 	const sources = files.filter((file) => isSourceName(file.title))
 	const kept = sources.length > 0 ? sources : files.filter((file) => file !== manifest)
 	if (kept.length === 0) return null
-	return { files: kept, assembleAll: kept.length > 1 }
+	return { files: kept, assembleAll: kept.length > 1, architecture: DEFAULT_ARCHITECTURE }
 }
 
 /** The file inside an archive that says which file was in front. */

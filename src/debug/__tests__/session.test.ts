@@ -1,7 +1,8 @@
+import { mipsHistorySchema } from '../../architectures/mips/history/schema'
 import { describe, expect, it } from 'vitest'
-import { Assembler } from '../../core/assembler'
-import { assemble, check } from '../../core/__tests__/helpers'
-import { MipsSimulator } from '../../core/simulator'
+import { assembleMips } from '../../architectures/mips/assembler'
+import { assemble, check } from '../../architectures/mips/core/__tests__/helpers'
+import { MipsSimulator } from '../../architectures/mips/core/simulator'
 import type { SourceIndex } from '../../core/sourceIndex'
 import { DebugSession } from '../session'
 
@@ -32,7 +33,7 @@ const EDITED = `main:
 
 function build(source: string) {
 	const { program, machineCode } = assemble(source)
-	return { simulator: new MipsSimulator(machineCode, program), index: program.sourceIndex }
+	return { simulator: new MipsSimulator(machineCode, program, undefined, { historySchema: mipsHistorySchema }), index: program.sourceIndex }
 }
 
 function attach(source: string, session = new DebugSession()) {
@@ -223,8 +224,8 @@ const MULTI_FILES = [
 ]
 
 function buildFiles(files = MULTI_FILES) {
-	const { program, machineCode } = check(new Assembler(files, files.map((file) => file.name)).assemble())
-	return { simulator: new MipsSimulator(machineCode, program), index: program.sourceIndex }
+	const { program, machineCode } = check(assembleMips(files, files.map((file) => file.name)))
+	return { simulator: new MipsSimulator(machineCode, program, undefined, { historySchema: mipsHistorySchema }), index: program.sourceIndex }
 }
 
 describe('debug session over several files', () => {

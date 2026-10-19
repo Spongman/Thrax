@@ -1,8 +1,7 @@
 import * as monaco from 'monaco-editor'
 import EditorWorker from 'monaco-editor/editor/common/services/editorWebWorkerMain?worker'
 import { loader } from '@monaco-editor/react'
-import { registerMipsLanguage } from './core/mipsLanguage'
-import { registerGotoDefinition } from './services/gotoDefinition'
+import { connectEditor, initializeArchitecture } from './architectures/registry'
 import { restoreGitHubSession } from './services/githubSession'
 import { useTHRAXStore } from './store/thraxStore'
 
@@ -18,18 +17,8 @@ self.MonacoEnvironment = {
 // language registration below share one instance.
 loader.config({ monaco })
 
-// Register MIPS language on app load
-registerMipsLanguage()
-
 // A GitHub token kept from an earlier visit signs in again.
 restoreGitHubSession()
-
-// Ctrl+click on a name goes to its definition, in this file or another.
-registerGotoDefinition(monaco, {
-	files: () => useTHRAXStore.getState().workspaceSnapshot().files,
-	active: () => useTHRAXStore.getState().workspaceSnapshot().active,
-	open: (file, line) => useTHRAXStore.getState().focusSourceLine(file, line),
-})
 
 import React from 'react'
 import ReactDOM from 'react-dom/client'
@@ -40,8 +29,27 @@ const root = document.getElementById('root')
 
 if (!root) throw new Error('Unable to find the application root')
 
-ReactDOM.createRoot(root).render(
-	<React.StrictMode>
-		<App />
-	</React.StrictMode>,
-)
+async function start() {
+	// The workspace reopens on the target it was saved for.
+	await initializeArchitecture(useTHRAXStore.getState().architecture)
+	// Every activation installs its language, go-to-definition and data tips.
+	await connectEditor(monaco, {
+		files: () => useTHRAXStore.getState().workspaceSnapshot().files,
+		active: () => useTHRAXStore.getState().workspaceSnapshot().active,
+		open: (file, line) => useTHRAXStore.getState().focusSourceLine(file, line),
+		inspection: () => {
+			const { registers, memory, labels } = useTHRAXStore.getState()
+			return { registers, memory, labels }
+		},
+	})
+
+	ReactDOM.createRoot(root!).render(
+		<React.StrictMode>
+			<App />
+		</React.StrictMode>,
+	)
+}
+
+void start().catch((error: unknown) => {
+	root.textContent = `Unable to initialize architecture: ${error instanceof Error ? error.message : String(error)}`
+})

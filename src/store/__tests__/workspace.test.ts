@@ -1,5 +1,8 @@
+import { beforeAll as beforeArchitectureTests } from 'vitest'
+import { initializeArchitecture } from '../../architectures/registry'
+beforeArchitectureTests(async () => { await initializeArchitecture() })
 import { describe, expect, it, vi } from 'vitest'
-import { Assembler } from '../../core/assembler'
+import { assembleMips } from '../../architectures/mips/assembler'
 
 // The download itself needs a document; what it was handed is what matters here.
 vi.mock('../../services/hexTextExport', () => ({ downloadHexText: vi.fn() }))
@@ -20,6 +23,7 @@ Object.defineProperty(globalThis, 'window', {
 
 const { downloadHexText } = await import('../../services/hexTextExport')
 const { shownDocuments, useTHRAXStore } = await import('../thraxStore')
+const { fromWorkspaceDocument, toWorkspaceDocument } = await import('../../services/workspace')
 
 const state = () => useTHRAXStore.getState()
 const titleOf = (id: string) => state().documents.find((document) => document.id === id)?.title
@@ -44,17 +48,17 @@ describe('hex text export', () => {
 		// so its expansion is where the two option sets diverge.
 		const code = 'main:\n\tli $t0, 3\n\tli $t1, 4\n\tmulo $t2, $t0, $t1\n'
 		state().setCode(code)
-		state().setSetting('delayedBranching', true)
+		state().setTargetSetting('delayedBranching', true)
 
 		expect(state().exportHexText()).toBe(true)
 
 		const files = [{ name: 'main.asm', code }]
-		const delayed = new Assembler(files, ['main.asm'], { delayedBranching: true }).assemble().machineCode
-		const undelayed = new Assembler(files, ['main.asm'], { delayedBranching: false }).assemble().machineCode
+		const delayed = assembleMips(files, ['main.asm'], { delayedBranching: true }).machineCode
+		const undelayed = assembleMips(files, ['main.asm'], { delayedBranching: false }).machineCode
 		expect(delayed).not.toEqual(undelayed)
 		expect(vi.mocked(downloadHexText).mock.calls[0][0]).toEqual(delayed)
 
-		state().setSetting('delayedBranching', false)
+		state().setTargetSetting('delayedBranching', false)
 	})
 })
 
@@ -221,6 +225,7 @@ describe('opening files', () => {
 			files: [{ title: 'one.asm', code: '# typing\n' }, { title: 'two.asm', code: '' }],
 			active: 'one.asm',
 			assembleAll: false,
+			architecture: 'mips',
 		})
 	})
 })
@@ -255,5 +260,61 @@ describe('loading', () => {
 
 		expect(state().loadProgram()).toBe(true)
 		expect(titles()).toEqual(['shared.asm', 'shared-2.asm'])
+	})
+})
+
+describe('workspace architecture', () => {
+	const stored = (architecture?: string) => JSON.stringify({
+		format: 'thrax-workspace',
+		version: 1,
+		assembleAll: false,
+		...(architecture === undefined ? {} : { architecture }),
+		files: [{ title: 'kept.asm', code: '# kept\n' }],
+	})
+
+	it('migrates a workspace saved without an architecture to mips', () => {
+		storage.set('thrax-web.saved-program', stored())
+
+		expect(state().loadProgram()).toBe(true)
+		expect(titles()).toEqual(['kept.asm'])
+		expect(state().workspaceSnapshot().architecture).toBe('mips')
+	})
+
+	it('writes the architecture and reads the same one back', () => {
+		expect(state().saveProgram()).toBe(true)
+		expect(JSON.parse(storage.get('thrax-web.saved-program')!).architecture).toBe('mips')
+
+		expect(fromWorkspaceDocument(toWorkspaceDocument({ files: [{ title: 'a.asm', code: '' }], assembleAll: false, architecture: 'beta' })))
+			.toMatchObject({ architecture: 'beta' })
+	})
+
+	it('reports an unknown architecture and leaves the stored workspace alone', () => {
+		const raw = stored('nonesuch')
+		storage.set('thrax-web.saved-program', raw)
+		openTwoFiles('one.asm', 'two.asm')
+
+		expect(state().loadProgram()).toBe(false)
+		expect(titles()).toEqual(['one.asm', 'two.asm'])
+		expect(state().diagnostics[0]).toMatchObject({ severity: 'error' })
+		expect(state().diagnostics[0].message).toContain("'nonesuch'")
+		expect(state().console).toContain('nonesuch')
+
+		expect(state().saveProgram()).toBe(false)
+		expect(storage.get('thrax-web.saved-program')).toBe(raw)
+	})
+
+	it('does not open or overwrite an autosave naming an unknown architecture', async () => {
+		const raw = stored('nonesuch')
+		storage.set('thrax-web.autosave', raw)
+		vi.resetModules()
+		await (await import('../../architectures/registry')).initializeArchitecture()
+		const fresh = (await import('../thraxStore')).useTHRAXStore
+
+		expect(fresh.getState().documents.map((document) => document.title)).not.toContain('kept.asm')
+		expect(fresh.getState().diagnostics[0].message).toContain("'nonesuch'")
+
+		fresh.getState().setCode('# edited\n')
+		await new Promise((resolve) => setTimeout(resolve, 600))
+		expect(storage.get('thrax-web.autosave')).toBe(raw)
 	})
 })

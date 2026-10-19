@@ -4,9 +4,10 @@ import { stripCommonFolder, unzipWorkspace, zipWorkspace } from '../archive'
 import { gistBody } from '../github'
 import { gistApiUrl, gitHubContentsUrl, parseGitHubUrl, rawGitHubUrl } from '../remote'
 import { decodeWorkspace, encodeWorkspace, shareLink, workspaceFromFragment } from '../share'
-import { fromWorkspaceDocument, toWorkspaceDocument, workspaceFromFiles, type WorkspaceSnapshot } from '../workspace'
+import { fromWorkspaceDocument, isSourceName, toWorkspaceDocument, workspaceFromFiles, type WorkspaceSnapshot } from '../workspace'
 
 const WORKSPACE: WorkspaceSnapshot = {
+	architecture: 'mips',
 	files: [
 		{ title: 'main.asm', code: 'main:\n\tjal helper\n\tli $v0, 10\n\tsyscall\n' },
 		{ title: 'lib.asm', code: 'helper:\n\tjr $ra\n' },
@@ -63,6 +64,7 @@ describe('the zip archive', () => {
 		expect(unzipWorkspace(foreign)).toEqual({
 			files: [{ title: 'main.asm', code: 'main:\n' }, { title: 'lib.asm', code: 'lib:\n' }],
 			assembleAll: true,
+			architecture: 'mips',
 		})
 	})
 
@@ -115,8 +117,15 @@ describe('GitHub links', () => {
 	})
 
 	it('writes a gist a file at a time, none of them empty or nested', () => {
-		const body = gistBody({ files: [{ title: 'lib/x.asm', code: '' }, { title: 'main.asm', code: 'main:\n' }], assembleAll: false }, 'test')
+		const body = gistBody({ files: [{ title: 'lib/x.asm', code: '' }, { title: 'main.asm', code: 'main:\n' }], assembleAll: false, architecture: 'mips' }, 'test')
 		expect(body.public).toBe(false)
 		expect(body.files).toEqual({ 'lib__x.asm': { content: '\n' }, 'main.asm': { content: 'main:\n' } })
+	})
+})
+
+describe('source file names', () => {
+	it('recognises the shared extensions and each architecture own', () => {
+		for (const name of ['a.asm', 'a.S', 'a.uasm', 'dir/B.UASM']) expect(isSourceName(name)).toBe(true)
+		for (const name of ['a.txt', 'a.json', 'uasm']) expect(isSourceName(name)).toBe(false)
 	})
 })

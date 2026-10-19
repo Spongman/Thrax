@@ -1,3 +1,6 @@
+import { beforeAll as beforeArchitectureTests } from 'vitest'
+import { initializeArchitecture } from '../../architectures/registry'
+beforeArchitectureTests(async () => { await initializeArchitecture() })
 import { beforeEach, describe, expect, it } from 'vitest'
 import { useTHRAXStore } from '../thraxStore'
 
@@ -30,19 +33,19 @@ const wordsOf = (file: string, line: number) => state().codeWords.get(file)?.get
 // Settings outlive a test, so each one starts from the defaults.
 beforeEach(() => {
 	state().setSetting('assembleAll', false)
-	state().setSetting('selfModifyingCode', false)
-	state().setSetting('delayedBranching', false)
+	state().setTargetSetting('selfModifyingCode', false)
+	state().setTargetSetting('delayedBranching', false)
 })
 
 describe('self-modified code', () => {
 	it('shows the word memory holds now, not the one that was assembled', async () => {
 		openFiles([{ title: 'main.asm', code: SELF_MODIFYING }])
-		state().setSetting('selfModifyingCode', true)
+		state().setTargetSetting('selfModifyingCode', true)
 		state().assemble()
 
 		// Line 5 is the instruction the program is about to overwrite.
-		const assembled = wordsOf('main.asm', 5)[0].word
-		expect(assembled).not.toBe(0)
+		const assembled = wordsOf('main.asm', 5)[0].bytes
+		expect(assembled.some((byte) => byte !== 0)).toBe(true)
 
 		await state().run()
 		expect(state().halted).toBe(true)
@@ -51,7 +54,7 @@ describe('self-modified code', () => {
 
 		// The gutter used to read the assembled array, so it kept showing the
 		// original word however the program rewrote itself.
-		expect(wordsOf('main.asm', 5)[0].word).toBe(0)
+		expect(wordsOf('main.asm', 5)[0].bytes).toEqual([0, 0, 0, 0])
 	})
 })
 

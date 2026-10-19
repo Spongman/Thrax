@@ -1,29 +1,22 @@
 import { create } from 'zustand'
 import { HOVER_KINDS, NOTHING_HOVERED, type Hovered } from './hover'
-import { Assembler, type SourceFile } from '../core/assembler'
-import { CP0_REGISTER_COUNT, CP0_STATUS_INITIAL, FP_CONDITION_FLAG_COUNT, FP_REGISTER_COUNT } from '../core/coprocessor'
+import { ActivationSuperseded, activateArchitecture, activeArchitecture, knownArchitectures, onArchitectureActivated, peekArchitecture } from '../architectures/registry'
+import { EMPTY_HISTORY, EMPTY_MEMORY, type ArchitectureActivation, type ArchitectureDefinition, type ArchitectureServices, type AssembledProgram, type CallFrame, type CodeRow, type DataDeclaration, type Diagnostic, type HistoryFormatter, type KeyboardDisplayState, type Machine, type MachineHistory, type MachineProfile, type MemoryInspector, type PendingInput, type Registers, type SourceFile, type SourceLocation, type SymbolTables } from '../architectures/contracts'
+import type { ExecutionObserver } from '../core/observer'
 import { formatDiagnostic, hasErrors } from '../core/diagnostics'
-import { disassemble } from '../core/disassembler'
-import { parseWord } from '../core/format'
-import { DEFAULT_SETTINGS, MEMORY_CONFIGURATIONS, SETTINGS_VALIDATORS, type MemoryConfigurationValues, type ThraxSettings } from '../core/settings'
-import { MipsSimulator } from '../core/simulator'
-import { EMPTY_SOURCE_INDEX, type SourceIndex, type SourceLocation, type SourceRow } from '../core/sourceIndex'
-import { EffectStore } from '../core/effectStore'
-import { HistoryLog, moveToEntry } from '../core/historyLog'
-import type { CallFrame, CodeWord, CoprocessorState, DataEntry, Diagnostic, KeyboardDisplayState, MemoryView, PendingInput, Registers, SymbolTables } from '../core/types'
+import { DEFAULT_SETTINGS, isRecord, SETTINGS_VALIDATORS, validSettings, type TargetSettings, type ThraxSettings } from '../core/settings'
+import { EMPTY_SOURCE_INDEX, type SourceIndex, type SourceRow } from '../core/sourceIndex'
+import { moveToEntry } from '../core/historyLog'
 import { DebugSession } from '../debug/session'
 import { isFlagSet, readStoredSetting, writeStoredSetting } from '../hooks/useStoredState'
 import { downloadHexText } from '../services/hexTextExport'
-import { fromWorkspaceDocument, toWorkspaceDocument, type WorkspaceFile, type WorkspaceSnapshot } from '../services/workspace'
+import { DEFAULT_ARCHITECTURE, fromWorkspaceDocument, newFileExtension, toWorkspaceDocument, type WorkspaceFile, type WorkspaceSnapshot } from '../services/workspace'
 import type { BranchHistorySettings, BranchHistorySnapshot } from '../tools/branchHistory'
 import { effectiveCacheSettings, type CacheSettings, type CacheSnapshot } from '../tools/cache'
-import type { MarsBotSnapshot } from '../tools/marsBot'
 import type { MemoryReferenceSettings, MemoryReferenceSnapshot } from '../tools/memoryReference'
 import type { PipelineSettings, PipelineSnapshot } from '../tools/pipeline'
 import type { ProfileSnapshot } from '../tools/profile'
 import { createToolRegistry } from '../tools/registry'
-import type { ScavengerHuntSnapshot } from '../tools/scavengerHunt'
-import type { DigitalLabSim, DigitalLabState } from '../tools/digitalLab'
 import type { StatisticsSnapshot } from '../tools/statistics'
 
 /**
@@ -65,23 +58,11 @@ const HEAT_MAP_SETTING = 'source.heatmap'
 const RUN_SPEED_SETTING = 'run.speed'
 const HEAT_MAP_LINES_SETTING = 'source.heatmap.lines'
 
-/**
- * Where each IDE setting persists.  `delayedBranching` and `assembleAll` keep
- * the keys they had as toolbar toggles, so an existing choice survives.
- */
+/** Where each shared setting persists. */
 const SETTING_KEYS: { [Key in keyof ThraxSettings]: string } = {
-	delayedBranching: 'assemble.delayedBranching',
+	// Kept from when it was a toolbar toggle, so an existing choice survives.
 	assembleAll: 'assemble.allFiles',
-	extendedAssembler: 'assemble.extended',
-	warningsAreErrors: 'assemble.warningsAreErrors',
-	startAtMain: 'assemble.startAtMain',
-	bareMachine: 'assemble.bareMachine',
-	exceptionHandler: 'assemble.exceptionHandler',
-	selfModifyingCode: 'simulate.selfModifyingCode',
-	programArguments: 'simulate.programArguments',
-	programArgumentsText: 'simulate.programArgumentsText',
 	backstepLimit: 'simulate.backstepLimit',
-	memoryConfiguration: 'memory.configuration',
 	displayValuesInHex: 'display.valuesInHex',
 	displayAddressesInHex: 'display.addressesInHex',
 	hexDimming: 'display.hexDimming',
@@ -93,21 +74,10 @@ const SETTING_KEYS: { [Key in keyof ThraxSettings]: string } = {
 }
 
 /**
- * Settings the assembler or the machine reads at build time, so changing one
- * invalidates the program the way editing the source does.
+ * Shared settings the assembler reads, so changing one invalidates the program
+ * the way editing the source does.  An architecture marks its own with `rebuild`.
  */
-const ASSEMBLY_SETTINGS: ReadonlySet<keyof ThraxSettings> = new Set<keyof ThraxSettings>([
-	'delayedBranching',
-	'assembleAll',
-	'extendedAssembler',
-	'warningsAreErrors',
-	'startAtMain',
-	'bareMachine',
-	'exceptionHandler',
-	'memoryConfiguration',
-	// Read once when the simulator is built, so a change needs a fresh one.
-	'selfModifyingCode',
-])
+const ASSEMBLY_SETTINGS: ReadonlySet<keyof ThraxSettings> = new Set<keyof ThraxSettings>(['assembleAll'])
 
 const settingKeys = Object.keys(DEFAULT_SETTINGS) as Array<keyof ThraxSettings>
 
@@ -115,6 +85,27 @@ const settingKeys = Object.keys(DEFAULT_SETTINGS) as Array<keyof ThraxSettings>
 function readSettings(): ThraxSettings {
 	const stored = settingKeys.map((key) => [key, readStoredSetting(SETTING_KEYS[key], DEFAULT_SETTINGS[key], SETTINGS_VALIDATORS[key])])
 	return Object.fromEntries(stored) as ThraxSettings
+}
+
+/** Each architecture's own settings persist as one object, apart from every other's. */
+const targetSettingsKey = (id: string) => `architecture.${id}`
+
+/**
+ * An architecture's settings as they were left.  The first read since settings
+ * were per architecture carries over what the shared keys held, and keeps it
+ * under the architecture's own key from then on.
+ */
+function readTargetSettings(definition: ArchitectureDefinition): TargetSettings {
+	const { id, settings: schema } = definition
+	const stored = readStoredSetting<unknown>(targetSettingsKey(id), null, isRecord)
+	if (stored !== null) return validSettings(schema, stored)
+	const legacy: TargetSettings = {}
+	for (const { key, legacyKey, isValid } of schema.fields) {
+		if (legacyKey !== undefined) legacy[key] = readStoredSetting<unknown>(legacyKey, undefined, isValid)
+	}
+	const values = validSettings(schema, legacy)
+	if (Object.values(legacy).some((value) => value !== undefined)) writeStoredSetting(targetSettingsKey(id), values)
+	return values
 }
 
 /**
@@ -199,11 +190,23 @@ function fromSavedProgram(value: unknown): WorkspaceSnapshot | null {
 		? program.documents
 		: [{ title: 'main.asm', code: program.code }]
 	const active = documents.find((document) => document.id === program.activeDocumentId)?.title
-	return { files: documents.map(({ title, code }) => ({ title, code })), active, assembleAll: program.assembleAllFiles === true }
+	return { files: documents.map(({ title, code }) => ({ title, code })), active, assembleAll: program.assembleAllFiles === true, architecture: DEFAULT_ARCHITECTURE }
+}
+
+const isKnownArchitecture = (id: string) => knownArchitectures().includes(id)
+
+function unknownArchitectureDiagnostic(id: string): Diagnostic {
+	return {
+		severity: 'error',
+		message: `Saved workspace targets unknown architecture '${id}' (known: ${knownArchitectures().join(', ')}); it was not opened and is left unchanged in storage`,
+	}
 }
 
 function writeStoredWorkspace(key: string, snapshot: WorkspaceSnapshot): boolean {
 	try {
+		// A workspace this build cannot open is never overwritten.
+		const existing = readStoredWorkspace(key)
+		if (existing && !isKnownArchitecture(existing.architecture)) return false
 		window.localStorage.setItem(key, JSON.stringify(toWorkspaceDocument(snapshot)))
 		return true
 	} catch {
@@ -220,74 +223,7 @@ function documentsFrom(files: readonly WorkspaceFile[]): SourceDocument[] {
 		[...all, { id: newDocumentId(), title: uniqueTitle(file.title, all), code: file.code, dirty: false }], [])
 }
 
-/**
- * The program arguments field is one line of text.  Words are separated by
- * whitespace, and quoting keeps one that has spaces in it together.
- */
-export function splitProgramArguments(text: string): string[] {
-	return [...text.matchAll(/"([^"]*)"|'([^']*)'|(\S+)/g)]
-		.map((match) => match[1] ?? match[2] ?? match[3])
-}
-
-/** The registers a reset leaves behind, under the selected memory configuration. */
-function initialRegisters(memory: MemoryConfigurationValues): Registers {
-	return {
-		$zero: 0,
-		$at: 0,
-		$v0: 0,
-		$v1: 0,
-		$a0: 0,
-		$a1: 0,
-		$a2: 0,
-		$a3: 0,
-		$t0: 0,
-		$t1: 0,
-		$t2: 0,
-		$t3: 0,
-		$t4: 0,
-		$t5: 0,
-		$t6: 0,
-		$t7: 0,
-		$s0: 0,
-		$s1: 0,
-		$s2: 0,
-		$s3: 0,
-		$s4: 0,
-		$s5: 0,
-		$s6: 0,
-		$s7: 0,
-		$t8: 0,
-		$t9: 0,
-		$k0: 0,
-	$k1: 0,
-		$gp: memory.globalPointer,
-		$sp: memory.stackPointer,
-		$fp: 0,
-		$ra: 0,
-		$pc: memory.textBaseAddress,
-		$hi: 0,
-		$lo: 0,
-	}
-}
-
-function initialCoprocessorState(): CoprocessorState {
-	const cp0Registers = new Array(CP0_REGISTER_COUNT).fill(0)
-	cp0Registers[12] = CP0_STATUS_INITIAL
-	return {
-		fpRegisters: new Array(FP_REGISTER_COUNT).fill(0),
-		fpConditionFlags: new Array(FP_CONDITION_FLAG_COUNT).fill(false),
-		cp0Registers,
-	}
-}
-
-/**
- * The word at `address` as memory holds it now.  Bytes are read one at a time,
- * which keeps a display read off the observer seam and past the access checks a
- * running instruction goes through.
- */
-function liveWord(simulator: MipsSimulator, address: number): number {
-	return [0, 1, 2, 3].reduce((word, offset) => word | (simulator.readByte(address + offset) << (offset * 8)), 0) >>> 0
-}
+const NO_KEYBOARD_DISPLAY: KeyboardDisplayState = Object.freeze({ queuedInput: '', displayOutput: '' })
 
 export interface OpenFilesOptions {
 	/** The files become the whole project rather than joining it. */
@@ -295,9 +231,11 @@ export interface OpenFilesOptions {
 	/** Title of the file to bring to the front; the first opened when absent. */
 	active?: string
 	assembleAll?: boolean
+	/** The architecture the files target; switching to it when it is not the one active. */
+	architecture?: string
 }
 
-interface THRAXStore extends CoprocessorState {
+interface THRAXStore {
 	code: string
 	documents: SourceDocument[]
 	activeDocumentId: string
@@ -306,10 +244,19 @@ interface THRAXStore extends CoprocessorState {
 	 * the program starts, so switching tabs mid-run leaves it running.
 	 */
 	entryDocumentId: string
-	/** The IDE settings, as the settings dialog edits them. */
+	/** The shared IDE settings, as the settings dialog edits them. */
 	settings: ThraxSettings
+	/** The active architecture's own settings, as its definition declares them. */
+	targetSettings: TargetSettings
+	/** Id of the architecture the workspace targets, persisted with it. */
+	architecture: string
+	/** The active architecture's definition and services; null until one has loaded. */
+	target: ArchitectureActivation | null
+	/** Its layout under the current settings. */
+	targetProfile: MachineProfile | null
+	/** Every register by descriptor id, across all of the target's banks. */
 	registers: Registers
-	memory: MemoryView
+	memory: MemoryInspector
 	console: string
 	pc: number
 	halted: boolean
@@ -319,11 +266,12 @@ interface THRAXStore extends CoprocessorState {
 	/** Everything wrong with the source, as the editor marks it up. */
 	diagnostics: Diagnostic[]
 	/** Machine words of each assembled file, keyed by source line, in address order. */
-	codeWords: Map<string, Map<number, CodeWord[]>>
-	labels: Map<string, number>
-	callStack: CallFrame[]
+	codeWords: Map<string, Map<number, CodeRow[]>>
+	labels: ReadonlyMap<string, number>
+	callStack: readonly CallFrame[]
 	pendingInput: PendingInput | null
-	keyboardDisplay: KeyboardDisplayState
+	/** The memory-mapped keyboard and display; null when the machine has none. */
+	keyboardDisplay: KeyboardDisplayState | null
 	isRunning: boolean
 	isPaused: boolean
 	breakpoints: Set<number>
@@ -367,11 +315,11 @@ interface THRAXStore extends CoprocessorState {
 	selectedFrame: number | null
 	/** The file whose close is waiting on an answer, or null when none is. */
 	pendingClose: string | null
-	executionHistory: ReturnType<MipsSimulator['getExecutionHistory']>
+	executionHistory: MachineHistory
 	/** How many entries stand behind the present; the rest are ahead of it. */
 	historyCursor: number
-	/** The columns every entry's effects are read out of. */
-	historyEffects: EffectStore
+	/** How the machine's entries read; null with no machine. */
+	historyFormat: HistoryFormatter | null
 	/**
 	 * Bumped whenever the log changes.  The log is published by reference and is
 	 * written in place, so a selector comparing it would never see a change.
@@ -380,12 +328,12 @@ interface THRAXStore extends CoprocessorState {
 	/** Symbols of the assembled program, by the file that owns them. */
 	symbols: SymbolTables
 	/** Where each of those names is written, so a name can open its own line. */
-	symbolSites: Map<string, Map<string, SourceLocation>>
+	symbolSites: ReadonlyMap<string, ReadonlyMap<string, SourceLocation>>
 	/**
 	 * The runs of bytes the data directives laid out, which is what a symbol was
 	 * declared as: the symbol table reads a name's type and value from these.
 	 */
-	programData: DataEntry[]
+	programData: readonly DataDeclaration[]
 	/**
 	 * An address another panel asked the memory view to show.  It carries a
 	 * sequence number because asking for the same address twice has to move the
@@ -414,16 +362,15 @@ interface THRAXStore extends CoprocessorState {
 	/** Access count per grid cell, shown as a heat map of addresses. */
 	memoryReference: MemoryReferenceSnapshot
 	memoryReferenceSettings: MemoryReferenceSettings
-	marsBot: MarsBotSnapshot
-	scavengerHunt: ScavengerHuntSnapshot
-	digitalLab: DigitalLabState
-	/** Holds or releases a keypad key on the Digital Lab device. */
-	pressDigitalLabKey: (key: number | null) => void
+	/** Runs an action on an architecture-contributed tool, then refreshes the views. */
+	driveTool: (key: string, action: (tool: ExecutionObserver) => void) => void
 	setCode: (code: string) => void
 	/** Edits one open file, which need not be the one being assembled. */
 	setDocumentCode: (documentId: string, code: string) => void
 	/** Changes one setting; the ones the assembler reads rebuild the program. */
 	setSetting: <Key extends keyof ThraxSettings>(key: Key, value: ThraxSettings[Key]) => void
+	/** Changes one of the active architecture's settings; a value its field refuses is ignored. */
+	setTargetSetting: (key: string, value: unknown) => void
 	/** Writes the workspace to this browser's slot; `loadProgram` reads it back. */
 	saveProgram: () => boolean
 	loadProgram: () => boolean
@@ -472,13 +419,11 @@ interface THRAXStore extends CoprocessorState {
 	/** Steps back until the history entry with this id has been undone. */
 	rewindTo: (id: number) => void
 	/**
-	 * Sets a register, a coprocessor register or a byte of memory by hand.  Each
+	 * Sets a register (by descriptor id) or a byte of memory by hand.  Each
 	 * is a history entry of its own, so it shows in the panel and steps back
 	 * like anything else.
 	 */
-	setRegisterValue: (name: string, value: number) => boolean
-	setFpRegisterValue: (index: number, value: number) => boolean
-	setCp0RegisterValue: (index: number, value: number) => boolean
+	setRegisterValue: (id: string, value: number) => boolean
 	setMemoryByte: (address: number, value: number) => boolean
 	/**
 	 * Makes room for a byte, or takes one away, moving the rest of the region
@@ -513,6 +458,12 @@ interface THRAXStore extends CoprocessorState {
 	setOpenPanels: (ids: readonly string[]) => void
 	/** Assembles without reporting failures, to keep the memory view current while editing. */
 	refreshAssembly: () => void
+	/**
+	 * Targets another architecture: the open files and line breakpoints stay,
+	 * the machine and everything it ran go.  False when the load failed or a
+	 * later switch superseded it.
+	 */
+	switchArchitecture: (id: string) => Promise<boolean>
 	reset: () => void
 }
 
@@ -569,43 +520,48 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 	// were left rather than at their defaults.
 	const toolSettings = tools.loadSettings()
 
-	/** A simulator over the assembled program, or the diagnostics that stopped it. */
-	const assembleProgram = () => {
-		const { files, entries } = assemblySources()
-		const { delayedBranching, extendedAssembler, memoryConfiguration, warningsAreErrors } = get().settings
-		const memory = MEMORY_CONFIGURATIONS[memoryConfiguration]
-		return { memory, ...new Assembler(files, entries, { delayedBranching, extendedAssembler, warningsAreErrors, memory }).assemble() }
+	/** Keys of the tools the active architecture contributed. */
+	let contributed: string[] = []
+	/** Swaps the previous architecture's tools for those of `services`. */
+	const contributeTools = (services: ArchitectureServices | undefined) => {
+		const gone = Object.fromEntries(contributed.map((key) => [key, undefined]))
+		for (const key of contributed) tools.unregister(key)
+		const entries = services?.createTools?.() ?? []
+		for (const entry of entries) tools.register(entry)
+		contributed = entries.map((entry) => entry.key)
+		return { ...gone, ...tools.views() }
 	}
+	contributeTools(peekArchitecture()?.services)
 
-	const createSimulator = (): { simulator: MipsSimulator | null, diagnostics: Diagnostic[] } => {
+	/** The architecture in force; assembly is only offered once one has loaded. */
+	const services = () => activeArchitecture().services
+
+	/** The program the open files assemble to, or the diagnostics that stopped it. */
+	const assembleProgram = (): AssembledProgram => services().assemble(assemblySources(), get().targetSettings)
+
+	const createSimulator = (): { simulator: Machine | null, diagnostics: Diagnostic[] } => {
 		const settings = get().settings
-		const { backstepLimit, delayedBranching, selfModifyingCode } = settings
-		const { memory, program, machineCode, diagnostics } = assembleProgram()
+		const program = assembleProgram()
+		const { diagnostics } = program
 		// A program that did not assemble is not worth loading; its diagnostics stand
 		// for it, and the stale program it would have replaced is let go.
 		if (hasErrors(diagnostics)) {
 			debug.detach()
 			return { simulator: null, diagnostics }
 		}
-		const nextSimulator = new MipsSimulator(machineCode, program, memory, {
-			startAtMain: settings.startAtMain,
-			// The field is one line of text; the machine wants the words of it.
-			programArguments: settings.programArguments ? splitProgramArguments(settings.programArgumentsText) : undefined,
+		const nextSimulator = services().createMachine(program, get().targetSettings, {
+			speed: get().runSpeed,
+			// How far back the workspace is willing to let the program be rewound.
+			historyLimit: settings.backstepLimit,
 		})
-		nextSimulator.delayedBranching = delayedBranching
-		// Off, stores into text and fetches outside it fault.
-		nextSimulator.selfModifyingCode = selfModifyingCode
-		// How far back the workspace is willing to let the program be rewound.
-		nextSimulator.maxHistorySize = backstepLimit
-		nextSimulator.configure({ speed: get().runSpeed })
 		// A paced run is worth watching, so refresh the workspace between batches.
 		nextSimulator.onProgress = () => set({ ...simulatorView(), ...tools.views(), isRunning: true, isPaused: false })
 		// Attach first: connecting before the run exists would push the observers
 		// onto the machine being replaced, and configure them with its device port.
-		tools.attach(nextSimulator, { delayedBranching, device: nextSimulator.devicePort() })
+		tools.attach(nextSimulator, nextSimulator.toolConfig())
 		tools.setWanted(wantedTools())
 		// Breakpoints and the addresses worth stopping at outlive re-assembly.
-		debug.rebind(nextSimulator, program.sourceIndex)
+		debug.rebind(nextSimulator, program.sourceIndex, program.breakpoints)
 		return { simulator: nextSimulator, diagnostics }
 	}
 
@@ -627,15 +583,17 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 	 * The index says which words a line owns; the bytes are read live, so data
 	 * the program has written to shows what it holds now.
 	 */
-	const codeWordFor = (row: SourceRow, current: MipsSimulator): CodeWord => {
+	const codeWordFor = (row: SourceRow, memory: MemoryInspector): CodeRow => {
 		if (row.instruction === null) {
-			const bytes = Array.from({ length: row.length ?? 0 }, (_, offset) => current.readByte(row.address + offset))
-			return { address: row.address, word: null, bytes, directive: row.directive, offset: row.offset, truncated: row.truncated }
+			const bytes = Array.from({ length: row.length ?? 0 }, (_, offset) => memory.byte(row.address + offset) ?? 0)
+			return { address: row.address, instruction: false, bytes, directive: row.directive, offset: row.offset, truncated: row.truncated }
 		}
 		// Bug 13: the assembled array is what the program started as, not what it
 		// holds now, so an instruction the program overwrote read back as the original.
-		const word = liveWord(current, row.address)
-		return { address: row.address, word, bytes: [0, 1, 2, 3].map((offset) => (word >>> (24 - offset * 8)) & 0xff) }
+		// The encoding is written most significant byte first, whatever the byte order.
+		const { littleEndian, wordBytes } = memory
+		const bytes = Array.from({ length: wordBytes }, (_, offset) => memory.byte(row.address + (littleEndian ? wordBytes - 1 - offset : offset)) ?? 0)
+		return { address: row.address, instruction: true, bytes }
 	}
 
 	/**
@@ -643,45 +601,39 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 	 * editor reads its own file's words, so an included file gets the same gutter
 	 * the entry file does.
 	 */
-	const codeWordsByFile = (current: MipsSimulator) => {
-		const index = current.program.sourceIndex
-		return new Map([...index.files()].map((file) =>
-			[file, new Map([...index.lines(file)].map(([line, rows]) => [line, rows.map((row) => codeWordFor(row, current))]))]))
-	}
-
-	/** The code of every open file, keyed by the title assembly identifies it by. */
+	const codeWordsByFile = (index: SourceIndex, memory: MemoryInspector) =>
+		new Map([...index.files()].map((file) =>
+			[file, new Map([...index.lines(file)].map(([line, rows]) => [line, rows.map((row) => codeWordFor(row, memory))]))]))
 
 	const simulatorView = () => {
-		const simulator = debug.machine
-		if (!simulator) return {}
-		const state = simulator.getState()
+		const machine = debug.machine
+		if (!machine) return {}
+		const { program } = machine
+		const memory = machine.inspectMemory()
 		return {
-			registers: state.registers,
-			memory: state.memory,
-			console: state.console,
-			pc: state.pc,
-			halted: state.halted,
-			instructionCount: state.instructionCount,
+			registers: machine.registerValues(),
+			memory,
+			console: machine.console,
+			pc: machine.pc,
+			halted: machine.halted,
+			instructionCount: machine.instructionCount,
 			isRunning: false,
-			isPaused: state.paused,
-			executionHistory: simulator.getExecutionHistory(),
-			historyCursor: simulator.getHistoryCursor(),
-			historyEffects: simulator.effects,
+			isPaused: machine.paused,
+			executionHistory: machine.history,
+			historyCursor: machine.historyCursor,
+			historyFormat: machine.historyFormat,
 			historyVersion: get().historyVersion + 1,
-			symbols: simulator.program.symbols,
-			symbolSites: simulator.program.symbolSites,
-			programData: simulator.program.data,
-			breakpoints: new Set(simulator.getBreakpoints()),
-			sourceIndex: simulator.program.sourceIndex,
-			codeWords: codeWordsByFile(simulator),
-			labels: new Map(simulator.program.labels),
-			callStack: state.callStack,
+			symbols: program.symbols,
+			symbolSites: program.symbolSites,
+			programData: program.data,
+			breakpoints: new Set(machine.getBreakpoints()),
+			sourceIndex: program.sourceIndex,
+			codeWords: codeWordsByFile(program.sourceIndex, memory),
+			labels: new Map(program.labels),
+			callStack: machine.callStack,
 			selectedFrame: null,
-			pendingInput: state.pendingInput,
-			keyboardDisplay: state.keyboardDisplay,
-			fpRegisters: state.fpRegisters,
-			fpConditionFlags: state.fpConditionFlags,
-			cp0Registers: state.cp0Registers,
+			pendingInput: machine.pendingInput,
+			keyboardDisplay: machine.keyboardDisplay?.state() ?? null,
 			...tools.views(),
 		}
 	}
@@ -697,7 +649,7 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 	}
 
 	/** Builds the program a debug control was pressed before there was one. */
-	function ensureSimulator(): MipsSimulator | null {
+	function ensureSimulator(): Machine | null {
 		pinEntryToActiveDocument()
 		const created = createSimulator()
 		set({ ...debug.view(), ...report(created.diagnostics) })
@@ -719,9 +671,14 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 	}
 
 	const controlledAsync = async (action: () => Promise<boolean>, after: () => Partial<THRAXStore> = () => ({})) => {
+		const target = peekArchitecture()
 		try {
-			set((await action()) ? { ...simulatorView(), ...after() } : { isRunning: false })
+			const acted = await action()
+			// A target switched in meanwhile has already published its own view.
+			if (peekArchitecture() !== target) return
+			set(acted ? { ...simulatorView(), ...after() } : { isRunning: false })
 		} catch (error) {
+			if (peekArchitecture() !== target) return
 			set({ ...reportException(error), isRunning: false })
 		}
 	}
@@ -738,7 +695,7 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 	 * A change the user made rather than one the program made.  Only while the
 	 * machine is stopped: editing under a running program would race it.
 	 */
-	const edited = (change: (machine: MipsSimulator) => boolean): boolean => {
+	const edited = (change: (machine: Machine) => boolean): boolean => {
 		const machine = debug.machine
 		if (!machine || get().isRunning) return false
 		if (!change(machine)) return false
@@ -746,43 +703,75 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 		return true
 	}
 
+	/** The active target's layout under `settings`, or null before one has loaded. */
+	const profileFor = (settings: TargetSettings) => peekArchitecture()?.services.profile(settings) ?? null
+
+	/** Each architecture's settings once read, so switching back finds them as left. */
+	const targetSettingsCache = new Map<string, TargetSettings>()
+	const targetSettingsOf = (definition: ArchitectureDefinition) => {
+		let values = targetSettingsCache.get(definition.id)
+		if (!values) {
+			values = readTargetSettings(definition)
+			targetSettingsCache.set(definition.id, values)
+		}
+		return values
+	}
+
 	// Takes the settings rather than reading them, so a reset caused by changing
 	// the memory configuration lays out from the new one and not the old.
-	const resetExecution = (settings: ThraxSettings = get().settings) => {
-		const layout = MEMORY_CONFIGURATIONS[settings.memoryConfiguration]
+	const resetExecution = (settings: TargetSettings = get().targetSettings) => {
+		const profile = profileFor(settings)
 		return {
-			registers: initialRegisters(layout),
-			memory: { words: new Map() },
+			targetProfile: profile,
+			registers: profile?.resetRegisters ?? {},
+			memory: EMPTY_MEMORY,
 			console: '',
-			pc: layout.textBaseAddress,
+			pc: profile?.resetPc ?? 0,
 			halted: false,
 			instructionCount: 0,
 			sourceIndex: EMPTY_SOURCE_INDEX,
-			codeWords: new Map<string, Map<number, CodeWord[]>>(),
+			codeWords: new Map<string, Map<number, CodeRow[]>>(),
 			labels: new Map<string, number>(),
 			callStack: [],
 			selectedFrame: null,
 			pendingInput: null,
-			keyboardDisplay: { queuedInput: '', displayOutput: '' },
+			keyboardDisplay: NO_KEYBOARD_DISPLAY,
 			isRunning: false,
 			isPaused: false,
 			breakpoints: new Set<number>(),
-				executionHistory: new HistoryLog(),
+			executionHistory: EMPTY_HISTORY,
 			historyCursor: 0,
-			historyEffects: new EffectStore(),
+			historyFormat: null,
 			historyVersion: (get()?.historyVersion ?? 0) + 1,
 			symbols: { locals: new Map(), globals: new Map() },
 			symbolSites: new Map(),
 			programData: [],
-			...initialCoprocessorState(),
 		}
 	}
 
+	// A committed activation is the only place a target takes effect.  Nothing
+	// the old one assembled, ran or recorded can be read as the new CPU, so the
+	// machine and address breakpoints go; the files and line breakpoints stay.
+	onArchitectureActivated((activation) => {
+		debug.detach()
+		debug.forgetAddresses()
+		tools.detach()
+		const targetSettings = targetSettingsOf(activation.definition)
+		// The old target's diagnostics describe a build that is gone; the first
+		// activation keeps what startup reported.
+		const diagnostics = get().target ? { diagnostics: [] } : {}
+		set({ target: activation, architecture: activation.definition.id, targetSettings, ...resetExecution(targetSettings), ...debug.view(), ...contributeTools(activation.services), ...diagnostics })
+	})
+
 	// `get()` has nothing to return while the initial state is being built.
 	const initialSettings = readSettings()
+	const initialTarget = peekArchitecture() ?? null
+	const initialTargetSettings = initialTarget ? targetSettingsOf(initialTarget.definition) : {}
 
 	// What was open when the page was last here, or the first example when it never was.
-	const autosaved = readStoredWorkspace(AUTOSAVE_KEY)
+	const stored = readStoredWorkspace(AUTOSAVE_KEY)
+	const unopenable = stored && !isKnownArchitecture(stored.architecture) ? stored : null
+	const autosaved = unopenable ? null : stored
 	const initialDocuments = autosaved ? documentsFrom(autosaved.files) : [{ id: 'main', title: 'main.asm', code: INITIAL_CODE, dirty: false }]
 	const initialActive = initialDocuments.find((document) => document.title === autosaved?.active) ?? initialDocuments[0]
 	if (autosaved) initialSettings.assembleAll = autosaved.assembleAll
@@ -793,7 +782,10 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 		activeDocumentId: initialActive.id,
 		entryDocumentId: initialActive.id,
 		settings: initialSettings,
-		...resetExecution(initialSettings),
+		architecture: autosaved?.architecture ?? DEFAULT_ARCHITECTURE,
+		targetSettings: initialTargetSettings,
+		target: initialTarget,
+		...resetExecution(initialTargetSettings),
 		focusedMemory: null,
 		focusedSource: null,
 		focusedRegister: null,
@@ -802,7 +794,7 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 		// Nothing is assembled until something asks for it, so the panels start out
 		// with values to look at and nothing to edit.
 		hasMachine: false,
-		diagnostics: [],
+		...report(unopenable ? [unknownArchitectureDiagnostic(unopenable.architecture)] : []),
 		hovered: NOTHING_HOVERED,
 		selectedFrame: null,
 		pendingClose: null,
@@ -853,7 +845,22 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 				return
 			}
 			debug.detach()
-			set({ settings, ...resetExecution(settings) })
+			set({ settings, ...resetExecution() })
+		},
+
+		setTargetSetting: (key, value) => {
+			const { target } = get()
+			const field = target?.definition.settings.fields.find((one) => one.key === key)
+			if (!target || !field?.isValid(value)) return
+			const targetSettings = { ...get().targetSettings, [key]: value }
+			targetSettingsCache.set(target.definition.id, targetSettings)
+			writeStoredSetting(targetSettingsKey(target.definition.id), targetSettings)
+			if (!field.rebuild) {
+				set({ targetSettings })
+				return
+			}
+			debug.detach()
+			set({ targetSettings, ...resetExecution(targetSettings) })
 		},
 
 		workspaceSnapshot: () => {
@@ -863,6 +870,7 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 				files: documents.map((document) => ({ title: document.title, code: document.id === activeDocumentId ? code : document.code })),
 				active: documents.find((document) => document.id === activeDocumentId)?.title,
 				assembleAll: settings.assembleAll,
+				architecture: get().architecture,
 			}
 		},
 
@@ -876,7 +884,11 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 		loadProgram: () => {
 			const workspace = readStoredWorkspace(SAVED_PROGRAM_KEY)
 			if (!workspace) return false
-			get().openFiles(workspace.files, { replace: true, active: workspace.active, assembleAll: workspace.assembleAll })
+			if (!isKnownArchitecture(workspace.architecture)) {
+				set(report([unknownArchitectureDiagnostic(workspace.architecture)]))
+				return false
+			}
+			get().openFiles(workspace.files, { replace: true, active: workspace.active, assembleAll: workspace.assembleAll, architecture: workspace.architecture })
 			set({ hasSavedProgram: true })
 			return true
 		},
@@ -897,6 +909,7 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 			const active = documents.find((document) => document.title === wanted) ?? documents[0]
 			const settings = options.assembleAll === undefined ? state.settings : { ...state.settings, assembleAll: options.assembleAll }
 			if (settings !== state.settings) writeStoredSetting(SETTING_KEYS.assembleAll, settings.assembleAll)
+			if (options.architecture !== undefined && options.architecture !== state.architecture) void state.switchArchitecture(options.architecture)
 			debug.detach()
 			set({
 				code: active.code,
@@ -904,7 +917,7 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 				activeDocumentId: active.id,
 				entryDocumentId: active.id,
 				settings,
-				...resetExecution(settings),
+				...resetExecution(),
 			})
 		},
 
@@ -915,17 +928,14 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 
 		exportHexText: () => {
 			try {
-				const { files, entries } = assemblySources()
-				// The same options the run assembles with: delayed branching changes
-				// what a pseudo-instruction expands to, so exporting without it would
-				// hand out words the program never ran.
-				// The export has to be the program that runs, so it takes the same options.
-				const { delayedBranching, extendedAssembler, memoryConfiguration, warningsAreErrors } = get().settings
-				const memory = MEMORY_CONFIGURATIONS[memoryConfiguration]
-				const { machineCode, diagnostics } = new Assembler(files, entries, { delayedBranching, extendedAssembler, warningsAreErrors, memory }).assemble()
-				set(report(diagnostics))
-				if (hasErrors(diagnostics)) return false
-				downloadHexText(machineCode)
+				const exportWords = services().exportWords
+				if (!exportWords) return false
+				// The export has to be the program that runs, so it takes the same settings:
+				// delayed branching changes what a pseudo-instruction expands to.
+				const program = assembleProgram()
+				set(report(program.diagnostics))
+				if (hasErrors(program.diagnostics)) return false
+				downloadHexText([...exportWords(program)])
 				return true
 			} catch (error) {
 				set(reportException(error))
@@ -937,7 +947,7 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 			const id = newDocumentId()
 			const document: SourceDocument = {
 				id,
-				title: uniqueTitle('untitled.asm', get().documents),
+				title: uniqueTitle(`untitled${newFileExtension(get().target?.definition)}`, get().documents),
 				code: '',
 				dirty: false,
 			}
@@ -1022,7 +1032,7 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 			const state = get()
 			if (!state.documents.some((document) => document.id === documentId)) return
 			const documents = state.documents.filter((document) => document.id !== documentId)
-			const remainingDocuments = documents.length ? documents : [{ id: newDocumentId(), title: 'untitled.asm', code: '', dirty: false }]
+			const remainingDocuments = documents.length ? documents : [{ id: newDocumentId(), title: `untitled${newFileExtension(state.target?.definition)}`, code: '', dirty: false }]
 			const index = state.documents.findIndex((document) => document.id === documentId)
 			const activeDocument = documentId === state.activeDocumentId
 				? (neighbourOf(remainingDocuments, state.documents, index) ?? remainingDocuments[Math.max(0, index - 1)])
@@ -1112,17 +1122,17 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 			set(simulatorView())
 		},
 
-		pressDigitalLabKey: (key: number | null) => {
-			// The registry types a tool by its snapshot, which says nothing about
-			// the device methods only this one has.
-			const device = tools.instance('digitalLab') as unknown as DigitalLabSim | undefined
-			device?.pressKey(key)
+		driveTool: (key, action) => {
+			const tool = tools.instance(key)
+			if (!tool) return
+			action(tool)
 			set(tools.views())
 		},
 
 		sendKeyboardInput: (input) => {
-			if (!input || !debug.machine) return
-			debug.machine.queueKeyboardInput(input)
+			const device = debug.machine?.keyboardDisplay
+			if (!input || !device) return
+			device.queue(input)
 			set(simulatorView())
 		},
 
@@ -1164,10 +1174,10 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 		moveHistoryTo: (id: number) => controlled(() => {
 			const machine = debug.machine
 			if (!machine) return false
-			const index = machine.getExecutionHistory().indexOfId(id)
+			const index = machine.history.indexOfId(id)
 			if (index < 0) return false
 			// Behind the present it is a rewind; ahead of it, running forward again.
-			const move = moveToEntry(machine.getHistoryCursor(), index)
+			const move = moveToEntry(machine.historyCursor, index)
 			if (move.rewind) return machine.rewindTo(id)
 			for (let count = 0; count < move.steps; count++) machine.step()
 			return true
@@ -1189,12 +1199,10 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 
 		rewindTo: (id: number) => controlled(() => debug.machine?.rewindTo(id) ?? false, paused),
 
-		setRegisterValue: (name, value) => edited((machine) => machine.setRegister(name, value)),
-		setFpRegisterValue: (index, value) => edited((machine) => machine.setFpRegister(index, value)),
-		setCp0RegisterValue: (index, value) => edited((machine) => machine.setCp0Register(index, value)),
-		setMemoryByte: (address, value) => edited((machine) => machine.setMemoryByte(address, value)),
-		insertMemoryByte: (address, limit, value) => edited((machine) => machine.insertMemoryByte(address, limit, value)),
-		deleteMemoryByte: (address, limit) => edited((machine) => machine.deleteMemoryByte(address, limit)),
+		setRegisterValue: (id, value) => edited((machine) => machine.writeRegister(id, value)),
+		setMemoryByte: (address, value) => edited((machine) => machine.writeByte(address, value)),
+		insertMemoryByte: (address, limit, value) => edited((machine) => machine.insertByte(address, limit, value)),
+		deleteMemoryByte: (address, limit) => edited((machine) => machine.deleteByte(address, limit)),
 
 		stepOver: () => freeRunning(() => debug.stepOver(), () => paused),
 
@@ -1274,6 +1282,29 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 			set(debug.view())
 		},
 
+		switchArchitecture: async (id) => {
+			if (!isKnownArchitecture(id)) {
+				set(report([unknownArchitectureDiagnostic(id)]))
+				return false
+			}
+			// Choosing the target in force still overrides a load in progress.
+			const changing = peekArchitecture()?.definition.id !== id
+			// The run ends now, at an instruction boundary, rather than racing the load.
+			if (changing) debug.machine?.stop()
+			try {
+				await activateArchitecture(id)
+				// Nothing committed, but an earlier request may have stopped the machine.
+				if (!changing) set(simulatorView())
+				return true
+			} catch (error) {
+				// A later switch replaced this one, and owns what is published.
+				if (error instanceof ActivationSuperseded) return false
+				// The previous target stays, with the machine this request stopped.
+				set({ ...simulatorView(), ...reportException(error) })
+				return false
+			}
+		},
+
 		reset: () => {
 			debug.clear()
 			set({
@@ -1289,7 +1320,7 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 // The open files follow the typing into storage, a little behind it.
 let autosaveHandle: ReturnType<typeof setTimeout> | null = null
 useTHRAXStore.subscribe((state, previous) => {
-	if (state.documents === previous.documents && state.code === previous.code && state.settings.assembleAll === previous.settings.assembleAll) return
+	if (state.documents === previous.documents && state.code === previous.code && state.settings.assembleAll === previous.settings.assembleAll && state.architecture === previous.architecture) return
 	if (autosaveHandle !== null) clearTimeout(autosaveHandle)
 	autosaveHandle = setTimeout(() => {
 		autosaveHandle = null
