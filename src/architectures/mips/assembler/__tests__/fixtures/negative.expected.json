@@ -1,0 +1,350 @@
+{
+	"unexpected character": { "words": 0, "diagnostics": [
+		["error","Unexpected character: @ at line 1:11",null,1,11]
+	] },
+	"unterminated string": { "words": 0, "diagnostics": [
+		["error","Unterminated string at line 2:12",null,2,12]
+	] },
+	"empty character literal": { "words": 0, "diagnostics": [
+		["error","Empty character literal at line 1:9",null,1,9]
+	] },
+	"unterminated character literal": { "words": 0, "diagnostics": [
+		["error","Unterminated character literal at line 1:9",null,1,9]
+	] },
+	"hex without digits": { "words": 0, "diagnostics": [
+		["error","Hexadecimal literal \"0x\" has no digits at line 1:9",null,1,9]
+	] },
+	"leading zero decimal warning": { "words": 2, "diagnostics": [
+		["warning","Leading-zero literal \"0129\" is read as decimal 129; a leading zero otherwise means octal at line 1:9",null,1,9],
+		["warning","Leading-zero literal \"08\" is read as decimal 8; a leading zero otherwise means octal at line 2:9",null,2,9]
+	] },
+	"leading zero warning promoted": { "words": 1, "diagnostics": [
+		["error","Leading-zero literal \"0129\" is read as decimal 129; a leading zero otherwise means octal at line 1:9",null,1,9]
+	] },
+	"octal literal": { "words": 2, "diagnostics": [] },
+	"character escapes": { "words": 4, "diagnostics": [] },
+	"float exponent literal": { "words": 0, "diagnostics": [] },
+	"string escapes": { "words": 0, "diagnostics": [] },
+	"unexpected token": { "words": 0, "diagnostics": [
+		["error","Unexpected token \"foo\" at line 1:1",null,1,1]
+	] },
+	"label without colon use": { "words": 0, "diagnostics": [
+		["error","Unexpected token \"loop\" at line 1:1",null,1,1]
+	] },
+	"duplicate label": { "words": 0, "diagnostics": [
+		["error","Duplicate label: a at line 2:1",null,2,1]
+	] },
+	"duplicate data label": { "words": 0, "diagnostics": [
+		["error","Duplicate label: x at line 3:1",null,3,1]
+	] },
+	"instruction in data": { "words": 0, "diagnostics": [
+		["error","Instruction in .data segment at line 2:1",null,2,1]
+	] },
+	"instruction in kdata": { "words": 0, "diagnostics": [
+		["error","Instruction in .kdata segment at line 2:1",null,2,1]
+	] },
+	"data directive in text": { "words": 0, "diagnostics": [
+		["error",".word is only supported in .data at line 1:1",null,1,1]
+	] },
+	"align in text": { "words": 0, "diagnostics": [
+		["error",".align is only supported in .data at line 1:1",null,1,1]
+	] },
+	"align out of range": { "words": 0, "diagnostics": [
+		["error","Invalid alignment for .align at line 2:1",null,2,1]
+	] },
+	"align negative": { "words": 0, "diagnostics": [
+		["error","Invalid alignment for .align at line 2:1",null,2,1]
+	] },
+	"align without operand": { "words": 0, "diagnostics": [
+		["error",".align expects an immediate value at line 2:1",null,2,1]
+	] },
+	"unsupported directive": { "words": 0, "diagnostics": [
+		["error","Unsupported directive: .foo at line 1:1",null,1,1]
+	] },
+	"space negative": { "words": 0, "diagnostics": [
+		["error",".space length must be non-negative at line 2:1",null,2,1]
+	] },
+	"space label": { "words": 0, "diagnostics": [
+		["error",".space expects an immediate value at line 2:1",null,2,1]
+	] },
+	"ascii non-string": { "words": 0, "diagnostics": [
+		["error",".ascii expects string operands at line 2:1",null,2,1]
+	] },
+	"float non-number": { "words": 0, "diagnostics": [
+		["error",".float expects numeric operands at line 2:1",null,2,1]
+	] },
+	"word string": { "words": 0, "diagnostics": [
+		["error",".word expects numeric or label operands at line 2:1",null,2,1]
+	] },
+	"word non-integer": { "words": 0, "diagnostics": [
+		["error",".word expects integer operands; use .float or .double at line 2:1",null,2,1]
+	] },
+	"half and byte": { "words": 0, "diagnostics": [] },
+	"only one label": { "words": 0, "diagnostics": [
+		["error","Only one label is allowed per expression at line 1:11",null,1,11]
+	] },
+	"negated label": { "words": 0, "diagnostics": [
+		["error","A label cannot be negated at line 1:10",null,1,10]
+	] },
+	"label after minus": { "words": 0, "diagnostics": [
+		["error","A label cannot be negated at line 1:11",null,1,11]
+	] },
+	"expected number or label": { "words": 0, "diagnostics": [
+		["error","Too few operands for LI; expected: li $t1,-100 at line 1:1",null,1,1]
+	] },
+	"expression sum": { "words": 5, "diagnostics": [] },
+	"register by number": { "words": 2, "diagnostics": [] },
+	"memory missing dollar": { "words": 0, "diagnostics": [
+		["error","Expected $ in memory operand at line 1:11",null,1,11]
+	] },
+	"memory missing paren": { "words": 0, "diagnostics": [
+		["error","Expected ) at line 1:14",null,1,14]
+	] },
+	"bare memory": { "words": 2, "diagnostics": [] },
+	"bare memory number register": { "words": 1, "diagnostics": [] },
+	"register name expected": { "words": 0, "diagnostics": [
+		["error","Expected register name at line 1:6",null,1,6]
+	] },
+	"text restart": { "words": 0, "diagnostics": [
+		["error",".text cannot be restarted at a new address at line 3:1",null,3,1]
+	] },
+	"ktext restart": { "words": 0, "diagnostics": [
+		["error",".ktext cannot be restarted at a new address at line 3:1",null,3,1]
+	] },
+	"text base before code": { "words": 3, "diagnostics": [] },
+	"text address non-immediate": { "words": 0, "diagnostics": [
+		["error",".text expects an immediate value at line 1:1",null,1,1]
+	] },
+	"data address reset": { "words": 0, "diagnostics": [] },
+	"kdata layout": { "words": 0, "diagnostics": [] },
+	"set directive": { "words": 1, "diagnostics": [] },
+	"globl undefined": { "words": 0, "diagnostics": [
+		["error","Global label is not defined in this file: missing at line 1:1",null,1,1]
+	] },
+	"globl non-label": { "words": 0, "diagnostics": [
+		["error",".globl expects a label at line 1:1",null,1,1]
+	] },
+	"globl empty": { "words": 0, "diagnostics": [
+		["error",".globl expects a label at line 1:1",null,1,1]
+	] },
+	"extern": { "words": 4, "diagnostics": [] },
+	"extern errors": { "words": 0, "diagnostics": [
+		["error",".extern expects a label at line 1:1",null,1,1]
+	] },
+	"extern negative": { "words": 0, "diagnostics": [
+		["error",".extern size must be non-negative at line 1:1",null,1,1]
+	] },
+	"extern then globl": { "words": 0, "diagnostics": [
+		["error","Global label is already defined in another file: x at line 2:1",null,2,1]
+	] },
+	"global keyword": { "words": 1, "diagnostics": [] },
+	"pending label across sections": { "words": 1, "diagnostics": [] },
+	"text label across data": { "words": 2, "diagnostics": [] },
+	"end labels": { "words": 2, "diagnostics": [] },
+	"label before text base": { "words": 2, "diagnostics": [] },
+	"auto align carries": { "words": 0, "diagnostics": [] },
+	"zero size carry": { "words": 2, "diagnostics": [] },
+	"zero size carry in data": { "words": 0, "diagnostics": [] },
+	"zero ascii carry": { "words": 2, "diagnostics": [] },
+	"align zero disables": { "words": 0, "diagnostics": [] },
+	"align zero survives text": { "words": 1, "diagnostics": [] },
+	"explicit align": { "words": 0, "diagnostics": [] },
+	"space": { "words": 0, "diagnostics": [] },
+	"data label references": { "words": 0, "diagnostics": [] },
+	"undefined data label": { "words": 0, "diagnostics": [
+		["error","Undefined label: missing at line 2",null,2,null],
+		["error","Undefined label: other at line 3",null,3,null]
+	] },
+	"undefined data label twice": { "words": 0, "diagnostics": [
+		["error","Undefined label: missing at line 2",null,2,null]
+	] },
+	"label colon space": { "words": 0, "diagnostics": [
+		["error","Unexpected token \"a\" at line 1:1",null,1,1]
+	] },
+	"mnemonic as label": { "words": 4, "diagnostics": [] },
+	"label with dollar": { "words": 2, "diagnostics": [] },
+	"unknown instruction": { "words": 0, "diagnostics": [
+		["error","Too many operands for ERET; expected: eret at line 1:1",null,1,1]
+	] },
+	"too few operands": { "words": 0, "diagnostics": [
+		["error","Expected an immediate value, found the register $t1 at line 1:1",null,1,1],
+		["error","Too few operands for SLL; expected: sll $t1,$t2,10 at line 2:1",null,2,1]
+	] },
+	"too many operands": { "words": 0, "diagnostics": [
+		["error","Too many operands for NOP; expected: nop at line 1:1",null,1,1],
+		["error","Too many operands for ADD; expected: add $t1,$t2,$t3 at line 2:1",null,2,1]
+	] },
+	"shift range": { "words": 0, "diagnostics": [
+		["error","Operand 3 of SLL is out of range; expected: sll $t1,$t2,10 at line 1:1",null,1,1],
+		["error","Operand 3 of SLL is out of range; expected: sll $t1,$t2,10 at line 2:1",null,2,1]
+	] },
+	"unknown register": { "words": 0, "diagnostics": [
+		["error","Unknown register: $t9x at line 1:1",null,1,1],
+		["error","Unknown register: $q0 at line 2:1",null,2,1]
+	] },
+	"fpr expected": { "words": 0, "diagnostics": [
+		["error","Expected a floating-point register, found the register $t0 at line 1:1",null,1,1]
+	] },
+	"odd fpr": { "words": 0, "diagnostics": [
+		["error","$f1 must be an even-numbered floating-point register at line 1:1",null,1,1],
+		["error","$f3 must be an even-numbered floating-point register at line 2:1",null,2,1],
+		["error","$f1 must be an even-numbered floating-point register at line 3:1",null,3,1]
+	] },
+	"label expected": { "words": 0, "diagnostics": [
+		["error","Expected a label, found the value 5 at line 1:1",null,1,1],
+		["error","Expected a label, found the register $t2 at line 2:1",null,2,1]
+	] },
+	"immediate expected": { "words": 0, "diagnostics": [
+		["error","Expected an immediate value, found the register $t2 at line 1:1",null,1,1]
+	] },
+	"memory expected": { "words": 0, "diagnostics": [
+		["error","Expected a memory operand, found the register $t1 at line 1:1",null,1,1]
+	] },
+	"string operand": { "words": 0, "diagnostics": [
+		["error","Expected a register, found a string at line 1:1",null,1,1]
+	] },
+	"li errors": { "words": 1, "diagnostics": [
+		["error","Expected an immediate value, found the label label at line 1:1",null,1,1],
+		["error","Expected an immediate value, found the register $t0 at line 2:1",null,2,1],
+		["error","Expected an immediate value, found the register $t1 at line 3:1",null,3,1]
+	] },
+	"la errors": { "words": 0, "diagnostics": [
+		["error","Expected a memory operand, found a string at line 1:1",null,1,1],
+		["error","Too few operands for LA; expected: la $t1,($t2) at line 2:1",null,2,1]
+	] },
+	"undefined label branch": { "words": 3, "diagnostics": [
+		["error","Undefined label: nowhere at line 1:1",null,1,1],
+		["error","Undefined label: nowhere2 at line 2:1",null,2,1],
+		["error","Undefined label: nowhere at line 3:1",null,3,1]
+	] },
+	"undefined label la": { "words": 7, "diagnostics": [
+		["error","Undefined label: missing at line 1:1",null,1,1],
+		["error","Undefined label: missing at line 2:1",null,2,1],
+		["error","Undefined label: missing at line 3:1",null,3,1]
+	] },
+	"undefined in multiple": { "words": 4, "diagnostics": [
+		["error","Undefined label: missing at line 1:1",null,1,1],
+		["error","Undefined label: missing at line 2:1",null,2,1],
+		["error","Undefined label: missing at line 3:1",null,3,1]
+	] },
+	"error recovery layout": { "words": 0, "diagnostics": [
+		["error","Unexpected token \"foo\" at line 5:1",null,5,1]
+	] },
+	"extended off": { "words": 2, "diagnostics": [
+		["error","Extended (pseudo) instruction or format not permitted; it expands to: addiu $t0,$zero,5.  See Settings. at line 1:1",null,1,1],
+		["error","Extended (pseudo) instruction or format not permitted; it expands to: addu $t0,$zero,$t1.  See Settings. at line 2:1",null,2,1],
+		["error","Extended (pseudo) instruction or format not permitted; it expands to: addi $t0,$t1,5.  See Settings. at line 3:1",null,3,1],
+		["error","Extended (pseudo) instruction or format not permitted; it expands to: lui $at,x; ori $t0,$at,x.  See Settings. at line 4:1",null,4,1],
+		["error","Extended (pseudo) instruction or format not permitted; it expands to: slt $at,$t0,$t1; bne $at,$zero,x.  See Settings. at line 5:1",null,5,1],
+		["error","Extended (pseudo) instruction or format not permitted; it expands to: lui $at,x; lw $t0,x($at).  See Settings. at line 8:1",null,8,1]
+	] },
+	"extended off two operand": { "words": 0, "diagnostics": [
+		["error","Expected an immediate value, found the register $t1 at line 1:1",null,1,1],
+		["error","Extended (pseudo) instruction or format not permitted; it expands to: lui $at,1; ori $at,$at,34464; add $t0,$t0,$at.  See Settings. at line 2:1",null,2,1],
+		["error","Extended (pseudo) instruction or format not permitted; it expands to: addi $at,$zero,5; mul $t0,$t1,$at.  See Settings. at line 3:1",null,3,1]
+	] },
+	"delayed pseudo": { "words": 27, "diagnostics": [] },
+	"undelayed pseudo": { "words": 23, "diagnostics": [] },
+	"all pseudo families": { "words": 245, "diagnostics": [] },
+	"macro basic": { "words": 2, "diagnostics": [] },
+	"macro local labels": { "words": 4, "diagnostics": [] },
+	"macro overload": { "words": 2, "diagnostics": [] },
+	"macro redefinition keeps first": { "words": 1, "diagnostics": [] },
+	"macro label before invocation": { "words": 2, "diagnostics": [] },
+	"macro args negative and register": { "words": 2, "diagnostics": [] },
+	"macro mnemonic name": { "words": 0, "diagnostics": [
+		["error",".macro requires a name at line 4:1",null,4,1]
+	] },
+	"macro nested invocation": { "words": 1, "diagnostics": [] },
+	"macro too deep": { "words": 0, "diagnostics": [
+		["error","Macro expansion nested too deeply at line 4:1",null,4,1]
+	] },
+	"macro without name": { "words": 0, "diagnostics": [
+		["error",".macro requires a name at line 1:1",null,1,1]
+	] },
+	"macro bad parameter": { "words": 0, "diagnostics": [
+		["error","Macro parameters must begin with % at line 1:10",null,1,10]
+	] },
+	"nested macro": { "words": 0, "diagnostics": [
+		["error","Nested .macro at line 2:1",null,2,1]
+	] },
+	"unterminated macro": { "words": 0, "diagnostics": [
+		["error","Unterminated .macro \"m\" at line 1:8",null,1,8]
+	] },
+	"stray end_macro": { "words": 0, "diagnostics": [
+		["error",".end_macro without .macro at line 1:1",null,1,1]
+	] },
+	"macro error inside body": { "words": 0, "diagnostics": [
+		["error","Too few operands for ADD; expected: add $t1,$t2,$t3 at line 4:1",null,4,1],
+		["error","Too few operands for ADD; expected: add $t1,$t2,$t3 at line 5:1",null,5,1]
+	] },
+	"macro undefined label in body": { "words": 3, "diagnostics": [
+		["error","Undefined label: missing at line 5:1",null,5,1]
+	] },
+	"macro data body": { "words": 4, "diagnostics": [] },
+	"eqv": { "words": 2, "diagnostics": [] },
+	"eqv chain": { "words": 0, "diagnostics": [
+		["error",".eqv requires a name at line 2:1",null,2,1]
+	] },
+	"eqv chain names": { "words": 1, "diagnostics": [] },
+	"eqv errors": { "words": 0, "diagnostics": [
+		["error",".eqv requires a name at line 1:1",null,1,1]
+	] },
+	"eqv no value": { "words": 0, "diagnostics": [
+		["error",".eqv requires a replacement at line 1:6",null,1,6]
+	] },
+	"eqv in macro": { "words": 1, "diagnostics": [] },
+	"include missing": { "words": 0, "diagnostics": [
+		["error","Cannot include \"missing.asm\"; open files are: main.asm at main.asm:1:1","main.asm",1,1]
+	] },
+	"include malformed": { "words": 0, "diagnostics": [
+		["error",".include expects a file name at main.asm:1:1","main.asm",1,1]
+	] },
+	"include cycle": { "words": 0, "diagnostics": [
+		["error","Recursive include of file a.asm: a.asm -> b.asm -> a.asm at b.asm:1:1","b.asm",1,1]
+	] },
+	"include basename": { "words": 2, "diagnostics": [] },
+	"include once": { "words": 2, "diagnostics": [] },
+	"include error in included file": { "words": 3, "diagnostics": [
+		["error","Too few operands for ADD; expected: add $t1,$t2,$t3 at lib.asm:1:1","lib.asm",1,1],
+		["error","Undefined label: nowhere at lib.asm:2:1","lib.asm",2,1]
+	] },
+	"include macro": { "words": 1, "diagnostics": [] },
+	"units local names": { "words": 8, "diagnostics": [] },
+	"units global clash": { "words": 0, "diagnostics": [
+		["error","Global label is already defined in another file: f at b.asm:1:1","b.asm",1,1]
+	] },
+	"units cross reference undefined": { "words": 2, "diagnostics": [
+		["error","Undefined label: hidden at a.asm:1:1","a.asm",1,1]
+	] },
+	"units align reset": { "words": 0, "diagnostics": [] },
+	"units diagnostics order": { "words": 2, "diagnostics": [
+		["error","Too few operands for ADD; expected: add $t1,$t2,$t3 at b.asm:2:1","b.asm",2,1],
+		["error","Undefined label: nowhere at a.asm:1:1","a.asm",1,1],
+		["error","Operand 3 of SLL is out of range; expected: sll $t1,$t2,10 at a.asm:2:1","a.asm",2,1]
+	] },
+	"units entries subset": { "words": 1, "diagnostics": [] },
+	"units no entries": { "words": 0, "diagnostics": [] },
+	"units kernel and data per file": { "words": 3, "diagnostics": [
+		["error","Undefined label: k at b.asm:6","b.asm",6,null]
+	] },
+	"empty source": { "words": 0, "diagnostics": [] },
+	"comments only": { "words": 0, "diagnostics": [] },
+	"memory compact data": { "words": 6, "diagnostics": [] },
+	"memory compact text": { "words": 4, "diagnostics": [] },
+	"warnings promoted with errors": { "words": 1, "diagnostics": [
+		["error","Leading-zero literal \"09\" is read as decimal 9; a leading zero otherwise means octal at line 1:9",null,1,9],
+		["error","Too few operands for ADD; expected: add $t1,$t2,$t3 at line 2:1",null,2,1]
+	] },
+	"warning and later parse error": { "words": 0, "diagnostics": [
+		["warning","Leading-zero literal \"09\" is read as decimal 9; a leading zero otherwise means octal at line 1:9",null,1,9],
+		["error","Unsupported directive: .foo at line 2:1",null,2,1]
+	] },
+	"label offset high bit": { "words": 6, "diagnostics": [] },
+	"crlf source": { "words": 2, "diagnostics": [] },
+	"fractional data base": { "words": 2, "diagnostics": [] },
+	"unaligned text base": { "words": 2, "diagnostics": [] },
+	"negative data base": { "words": 0, "diagnostics": [] },
+	"data over text": { "words": 2, "diagnostics": [] },
+	"coincident carry": { "words": 2, "diagnostics": [] }
+}

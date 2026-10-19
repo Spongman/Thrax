@@ -19,11 +19,11 @@
  * to the instruction format, not the drawing.
  */
 import { readFileSync, writeFileSync } from 'node:fs'
-import { XRAY_DATAPATHS } from '../src/tools/xray/datapaths'
-import type { XrayDiagram } from '../src/tools/xray/datapaths'
-import { outlineOf, XRAY_DRAWINGS } from '../src/tools/xray/blocks'
-import { geometryOf } from '../src/tools/xray/geometry'
-import { arrowCorners, brush, DOT_RADIUS, TRACK_WIDTH } from '../src/tools/xray/drawing'
+import { XRAY_DATAPATHS } from '../src/architectures/mips/tools/xray/datapaths'
+import type { XrayDiagram } from '../src/architectures/mips/tools/xray/datapaths'
+import { outlineOf, XRAY_DRAWINGS } from '../src/architectures/mips/tools/xray/blocks'
+import { geometryOf } from '../src/architectures/mips/tools/xray/geometry'
+import { arrowCorners, brush, DOT_RADIUS, TRACK_WIDTH } from '../src/architectures/mips/tools/xray/drawing'
 
 /** Close enough that the difference is rounding, not an edit. */
 const MOVED = 0.75

@@ -21,8 +21,8 @@ import numpy as np
 from PIL import Image
 
 BASE = 'C:/Users/PiersH/AppData/Local/Temp/thraxorig/images/'
-SOURCE = 'src/tools/xray/datapaths.ts'
-OUT = 'src/tools/xray/junctions.ts'
+SOURCE = 'src/architectures/mips/tools/xray/datapaths.ts'
+OUT = 'src/architectures/mips/tools/xray/junctions.ts'
 
 IMAGES = [
     ('datapath', 'datapath.png'),

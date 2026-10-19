@@ -8,7 +8,7 @@ import re
 import xml.etree.ElementTree as ET
 
 BASE = 'C:/Users/PiersH/AppData/Local/Temp/thraxorig/'
-OUT = 'src/tools/xray/datapaths.ts'
+OUT = 'src/architectures/mips/tools/xray/datapaths.ts'
 
 # Name, source XML, and the size of the drawing its coordinates are in.
 DIAGRAMS = [
