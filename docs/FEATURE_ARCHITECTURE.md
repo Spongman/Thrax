@@ -1,48 +1,84 @@
 # THRAX Web Feature Architecture
 
-The original desktop application is a broad educational environment, not
-only an assembler. The web port will add its capabilities through stable
-boundaries rather than embedding simulator state in React components.
+THRAX is a workbench shared by several CPU architectures. The workspace,
+debugger, panels and tools are written once against a neutral contract; each
+architecture supplies its assembler, CPU, history schema, editor support,
+examples and any panels of its own. One architecture is active at a time.
 
 ## Layered design
 
-1. **Assembly (`src/core`)** — lexical analysis, preprocessing, directives,
-   macros, symbol resolution, source maps, diagnostics, and machine-code
-   export. The assembler returns an immutable `MipsProgram` that is useful to
-   the debugger and all export formats.
-2. **Runtime (`src/core`)** — sparse configurable memory, registers,
-   coprocessors, instruction execution, and syscall dispatch. Browser-only
-   services are adapters; they do not live in instruction execution.
-3. **Debug session (`src/debug`)** — owns a compiled runtime instance,
-   breakpoints, snapshots, execution history, call frames, and run controls.
-   It exposes immutable view models to the store.
-4. **Workspace (`src/components`, `src/store`)** — editor tabs, project files,
-   diagnostics, registers, memory windows, console/input, persistence, and
-   keyboard shortcuts. It never mutates runtime state directly.
-5. **Tools (`src/tools`)** — opt-in observers for cache/pipeline, branch
-   history, instruction statistics, bitmap and digital I/O. Tools subscribe to
-   execution events so they do not change instruction semantics.
+1. **Contract (`src/architectures/contracts.ts`)**: the only types shared code
+   uses to reach a target: register descriptors, machine profile, assembled
+   program, `Machine` (run control, inspection, history), disassembly, editor
+   integration, panel and tool contributions.
+2. **Composition (`src/architectures/registry.ts`)**: the one common-code
+   module that names concrete architectures. It loads the selected one on
+   demand and commits activations transactionally (see below).
+3. **Architectures (`src/architectures/<id>/`)**: everything specific to a
+   target. `mips/` holds the MARS assembler and simulator (`core/`), its
+   history schema, editor language, examples and the MIPS-only tools
+   (X-Ray, Mars Bot, Scavenger Hunt, Digital Lab). `beta/` holds the Beta CPU,
+   the BSim machine profile, the UASM dialect with the bundled `beta.uasm`,
+   its editor language, examples and pipeline model.
+4. **Shared engine (`src/core`)**: what no target owns: the configurable
+   assembler engine (`core/assembly`: tokens, expressions, macros, symbols,
+   layout, byte emission), diagnostics, source index, history log and buffers,
+   the execution observer seam, and settings.
+5. **Debug session (`src/debug`)**: breakpoints by line and address, stepping
+   that skips words the editor cannot show, and rebinding to each new build.
+6. **Workspace (`src/store`, `src/components`)**: files, diagnostics,
+   registers, memory, console, history and the dock layout. It never mutates
+   machine state except through the contract.
+7. **Tools (`src/tools`)**: opt-in observers (statistics, profile, cache,
+   branch history, pipeline, memory reference) that run only while a panel
+   consumes them and rewind with the history. They read instructions through
+   the target's `InstructionSet`, never a concrete decoder.
 
-## Delivery order
+## Adding an architecture
 
-| Phase | Desktop capabilities | Web deliverable |
-| --- | --- | --- |
-| 1 | Assembler and interactive debugger | Source map, diagnostics, debug session, breakpoints, forward/back stepping, memory windows |
-| 2 | Core system services and processor views | Input/output, heap, files/browser storage, CP0/FP register models, display formats |
-| 3 | IDE and command-line workflows | Files/tabs, find/replace, local persistence, project assembly, machine-code export |
-| 4 | ISA compatibility | Remaining pseudo-ops, addressing modes, delayed branching, floating point, optional self-modifying code |
-| 5 | Educational tools | Event-driven cache, pipeline, branch, bitmap, keyboard/display, statistics, visualizations |
+1. Create `src/architectures/<id>/` with a `manifest.ts` (id, display name,
+   ids of any panels it contributes) and an `index.ts` whose default export is
+   an `ArchitectureDefinition`: registers, examples, settings schema, optional
+   panels, and `createServices()`, which returns the assembler, machine
+   factory, profile, disassembly, editor installer and optional tools.
+2. Register it in `src/architectures/registry.ts`: one loader
+   (`<id>: () => import('./<id>')`) and its manifest.
+
+Nothing else changes. Shared code must not import from an architecture
+directory; types come from `contracts.ts`. Mutable state belongs to the
+services `createServices()` returns, never to the definition.
+
+## Loading and switching
+
+Each architecture is a separate chunk, fetched when first selected; the
+initial bundle holds only the manifests. Switching:
+
+1. stops the current run at an instruction boundary, including one waiting
+   for input;
+2. loads and validates the module; a newer request, including choosing the
+   active target again, supersedes it, and a superseded result is discarded
+   before its services are created;
+3. commits: the old services, machine, editor providers and tools are
+   disposed, and the workspace drops registers, memory, history, address
+   breakpoints and diagnostics;
+4. on failure keeps the previous target and reports the error; a later
+   attempt loads again.
+
+Source files, line breakpoints, settings and the dock layout survive a
+switch. Line breakpoints are resolved again by the next build. Panels a
+target does not supply stay in the layout and show as unavailable.
+
+## Performance boundaries
+
+Composition happens at activation; execution stays inside the backend's own
+batch loop with no per-instruction indirection. Observers are attached only
+while a tool is consumed. History uses typed-array columns described by each
+architecture's schema, and formatting is lazy.
 
 ## Compatibility boundary
 
 Browser security prevents a direct port of desktop file dialogs, arbitrary
-file I/O, MIDI, and Swing tools. Those features will use explicit browser
-adapters (File System Access API, downloads, Web Audio, Canvas) and retain the
-same MIPS-visible syscall semantics where practical.
-
-## Current slice
-
-The debugger foundation starts by making execution snapshots first-class. A
-snapshot captures registers, sparse memory, PC, HI/LO, console output, and the
-instruction count before each instruction. This makes backstepping reliable
-and provides the event/history data required by later tools.
+file I/O, MIDI and Swing tools. Those features use explicit browser adapters
+(File System Access API, downloads, Canvas) and keep the target-visible
+semantics where practical. The design rationale and staged plan are in
+[MULTI_ARCHITECTURE_INVESTIGATION.md](MULTI_ARCHITECTURE_INVESTIGATION.md).

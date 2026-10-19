@@ -1,10 +1,10 @@
 # THRAX - Teaching Harness for Runtime Assembly eXecution
 
-A son of MARS (but in a different language). A modern, interactive web-based port of the classic MARS MIPS simulator, built with React, Monaco Editor, and a complete MIPS execution engine implemented in TypeScript.
+A son of MARS (but in a different language). A modern, interactive web-based port of the classic MARS MIPS simulator, built with React, Monaco Editor, and execution engines implemented in TypeScript. Alongside MIPS it runs the MIT Beta under BSim rules, assembled from UASM, in the same workspace.
 
 ![THRAX](https://img.shields.io/badge/THRAX-Web%20Edition-blue)
 ![TypeScript](https://img.shields.io/badge/Language-TypeScript-3178C6)
-![React](https://img.shields.io/badge/Framework-React%2018-61dafb)
+![React](https://img.shields.io/badge/Framework-React%2019-61dafb)
 ![License](https://img.shields.io/badge/License-MIT-green)
 
 ![The THRAX workspace, running a Mandelbrot program: source, execution history, instruction statistics, memory and a bitmap display](docs/screenshot.png)
@@ -12,6 +12,7 @@ A son of MARS (but in a different language). A modern, interactive web-based por
 ## 🚀 Features
 
 ### Core Functionality
+- ✅ **Two Architectures**: MIPS (MARS) and the MIT Beta (BSim), chosen in Settings; each loads only when selected, and the files, line breakpoints and layout carry across
 - ✅ **Complete MIPS Assembler**: Lexer → Parser → Machine Code Generator, with errors reported on the line that earned them
 - ✅ **Full MIPS Simulator**: The whole MARS instruction table, coprocessors 0 and 1, delayed branching, and device interrupts
 - ✅ **Monaco Editor**: Syntax highlighting, completion offering every instruction with its docs, and a hover saying what each instruction does
@@ -28,8 +29,8 @@ A son of MARS (but in a different language). A modern, interactive web-based por
 - ✅ **Files, Folders and Links**: Autosave, files and `.zip` archives in and out, a folder on disk as the project, share links, GitHub and gists
 - ✅ **Portable Export**: Download assembled text in HexText format
 - ✅ **MARS Tools**: Bitmap display, keyboard/display MMIO, cache simulator, pipeline model, instruction statistics, branch history, MIPS X-Ray, memory reference visualization, Mars Bot, Scavenger Hunt, and the Digital Lab Simulator
-- ✅ **Settings**: The MARS options, including the three memory configurations
-- ✅ **Example Programs**: 13 ready-to-run MIPS programs
+- ✅ **Settings**: Shared display and history preferences, plus each architecture's own options, kept per architecture: the MARS options with the three memory configurations for MIPS, and memory size and the console default for Beta
+- ✅ **Example Programs**: 13 ready-to-run MIPS programs and 12 Beta programs, among them the 6.004 TinyOS lab kernel
 - ✅ **Dark Theme UI**: VS Code-inspired interface
 
 ### Supported Instruction Types
@@ -126,9 +127,35 @@ open; closing a tab puts the file away without taking it out of the project, and
 panel is where it comes back or is removed. Double-clicking a tab renames the file.
 `.include "lib.asm"` pulls in another project file by name, and the **All files** setting
 assembles every file into one program instead of only the active one, as MARS's
-"assemble all files in directory" does. Files share one symbol table, so labels
+"assemble all files in directory" does. It is offered only where the architecture
+assembles several entry files, which MIPS does; a Beta program is the active file
+and what it includes. Files share one symbol table, so labels
 resolve across them; the active tab supplies the entry point, which is the `main`
 label when the program defines one.
+
+### MIT Beta (BSim profile)
+The Beta is the 6.004 / Computation Structures 32-bit RISC: 32 registers with
+`R31` reading zero, no delay slot, and the supervisor bit in the top bit of the
+PC. Programs are UASM, with the instructions supplied as macros by a bundled
+`beta.uasm`, so `.include "beta.uasm"` works without the file being in the
+project. The full integer instruction set runs, `MUL` and `DIV` included.
+
+The machine follows BSim:
+- Memory is one flat region from address 0, 1 MB by default and 64 KB to 16 MB in Settings. Reset enters supervisor mode at `0x80000000`
+- Vector table at `0x80000000` plus: 0 reset, 4 illegal instruction (and SVC), 8 segmentation fault, 12 clock, 16 keyboard, 20 mouse. An illegal instruction in supervisor mode, a misaligned load or store, an access outside memory, and division by zero stop the run with an error
+- `HALT()` (the all-zero word) stops the machine; `RDCHAR()` reads a typed character into `R0`, carriage return as line feed, waiting while none is typed; `WRCHAR()` prints the low byte of `R0`. `RDCHAR` and `WRCHAR` need `.options tty`, or the Settings default when a program names neither `tty` nor `notty`
+- `.options clock` raises a clock interrupt every 10,000 cycles; with `tty`, typed characters raise keyboard interrupts. A request waits until the CPU is in user mode, then is taken before the next instruction, clock first: `XP` gets PC+4 and the PC the vector. Interrupts step back like instructions and are named in the history. There is no mouse, so `CLICK()` reads -1 and the mouse interrupt never comes
+- Typing: BSim keeps one typed character and each key press overwrites it; THRAX queues a submitted line and hands it over a character at a time, each once the last was read and 10,000 cycles have passed, as a typist would. A program that only polls `RDCHAR` gets typed text at once. Once a `tty` program has run in user mode, the console takes input while it runs
+- `.options segmentation`: BSim's base-and-bounds MMU. A user-mode address at or past the bounds traps to vector 8 (`XP` is the PC on a fetch, PC+4 on a load or store); otherwise the base is added. In supervisor mode `LD` and `ST` at `SEG_BASE` (-4) and `SEG_BOUNDS` (-8) reach the two registers. The editor, breakpoints and history show user-mode addresses physically
+- Not implemented, and so illegal: the `CYCLE`, `TIME`, `RANDOM`, `SEED` and `SERVER` privileged operations
+
+UASM compatibility:
+- Supported: `.include`, `.macro` in line and `{ }` block form with overloads by argument count, `.align`, `.ascii`, `.text` (zero-terminated and word-aligned), `.options` (`tty`, `clock`/`clk`, `segmentation`, `annotate`, `kalways`, `div`, `mul`, and their `no` forms), `.breakpoint`, which sets a line breakpoint each time the program is built, and `.protect` and `.unprotect`, which are accepted and recorded
+- `.segment NAME` starts a user-mode segment assembled from address 0 and placed after the last, with its own labels falling back to the kernel's; the kernel gains `NAME_base` and `NAME_bounds`. Labels show at their physical addresses, as `NAME:label` where two segments share a name
+- Symbols and the location counter: `name = expr`, `. = expr`, labels, and `.` in expressions
+- Expressions evaluate strictly left to right with no precedence, as BSim does: `+ - * / % & | << >>` and unary `- ~ +`, over decimal, `0x` hex, `0b` binary, leading-zero octal and character literals. `>>` is logical, and division or modulo by zero is an error
+- `.pcheckoff`, `.tcheckoff` and `.verify` only talk to the course's checkoff server, and are skipped
+- Beta source files use the `uasm` editor language with completion of the library macros, go-to-definition into `beta.uasm`, and data tips for registers, symbols and macros; new files are `.uasm`, and **Download HexText** writes memory from address 0 as words
 
 ### Files, Folders and Links
 The workspace autosaves to the browser as you type, so a reload picks up where you
@@ -180,14 +207,17 @@ npm run dev
 # Open browser to http://localhost:3000
 ```
 
-### Production Build
+### Scripts
 
 ```bash
-# Build for production
-npm run build
-
-# Preview production build
-npm run preview
+npm run dev          # development server on port 3000
+npm test             # the Vitest suite, once (npm run test:watch keeps it running)
+npm run typecheck    # type-check without emitting
+npm run lint         # ESLint over src
+npm run build        # type-check, then the production bundle in dist/
+npm run preview      # serve the production bundle
+npm run xray:svg     # regenerate the X-Ray drawings in docs/xray/
+npm run deploy       # build and publish dist/ to GitHub Pages
 ```
 
 ## 📝 Example Programs
@@ -230,49 +260,37 @@ done:
 
 ```
 src/
-├── core/
-│   ├── lexer.ts           # Tokenization
-│   ├── parser.ts          # AST generation
-│   ├── assembler.ts       # Machine code generation
-│   ├── simulator.ts       # Execution engine
-│   ├── mipsLanguage.ts    # Monaco syntax support
-│   └── index.ts           # Exports
-├── components/
-│   ├── Toolbar.tsx        # Run/Reset/Examples
-│   ├── RegisterView.tsx   # Register display
-│   ├── MemoryView.tsx     # Memory inspector
-│   ├── BitmapDisplay.tsx  # Memory-mapped RGB framebuffer tool
-│   ├── KeyboardDisplayTool.tsx # THRAX keyboard/display MMIO tool
-│   └── ConsoleOutput.tsx  # Program output
-├── store/
-│   └── thraxStore.ts       # Zustand state management
-├── hooks/
-│   └── useExamples.ts     # Example loader hook
+├── architectures/
+│   ├── contracts.ts       # The neutral contract shared code uses
+│   ├── registry.ts        # Loads and activates architectures; the only place that names them
+│   ├── mips/              # MARS assembler and simulator (core/), history, editor, examples, MIPS-only tools
+│   └── beta/              # Beta CPU, BSim machine, UASM dialect and beta.uasm, editor, examples
+├── core/                  # Shared assembler engine (assembly/), diagnostics, source index, history, settings
+├── debug/                 # Debug session: breakpoints and stepping
+├── tools/                 # Statistics, profile, cache, branch history, pipeline, memory reference
+├── components/            # Workspace panels, dock layout, toolbar, dialogs
+├── services/              # Files, archives, share links, GitHub
+├── store/                 # Zustand workspace state
+├── hooks/                 # Reusable React behavior
 ├── App.tsx                # Main application
-└── examples.ts            # Example programs
+└── main.tsx               # Startup: activates the saved architecture, then renders
 ```
+
+### Adding an architecture
+
+An architecture is one directory and one registry entry. Create
+`src/architectures/<id>/` with a `manifest.ts` (id, name, contributed panel ids)
+and an `index.ts` whose default export is an `ArchitectureDefinition` from
+`contracts.ts`; then add its loader and manifest to `src/architectures/registry.ts`.
+Shared code never imports an architecture directly. See
+[docs/FEATURE_ARCHITECTURE.md](docs/FEATURE_ARCHITECTURE.md).
 
 ## 🔄 Execution Pipeline
 
-1. **Lexical Analysis** (`Lexer`)
-   - Tokenizes assembly source code
-   - Recognizes instructions, registers, labels, immediates
-
-2. **Parsing** (`Parser`)
-   - Builds AST from tokens
-   - Resolves labels and addresses
-   - Validates syntax
-
-3. **Assembly** (`Assembler`)
-   - Encodes instructions to machine code
-   - Handles R-type, I-type, J-type formats
-   - Calculates branch offsets
-
-4. **Simulation** (`MipsSimulator`)
-   - Executes machine code instruction-by-instruction
-   - Manages 32 registers + special registers (HI, LO, PC) and the CP0/CP1 register files
-   - Simulates memory (4MB)
-   - Handles syscalls
+1. **Assembly**: the shared engine in `src/core/assembly` handles tokens, expressions, macros, symbols, layout and byte emission; each architecture configures it with its dialect (MARS for MIPS, UASM for Beta) and its encodings
+2. **Activation**: the selected architecture's chunk loads, and its services supply the assembler, machine, profile, disassembly and editor support
+3. **Simulation**: the machine runs in batches, yielding between them, with history recorded in typed-array columns the architecture's schema describes
+4. **Inspection**: panels read registers, memory, history and the call stack through the contract, without side effects on the machine
 
 ## 📚 Roadmap
 
@@ -315,7 +333,7 @@ src/
 - [x] A tool watches a run only while a panel wants it, and rewinds with the history
 
 ### Open 🎯
-- [ ] Trim the bundle: 4.8 MB minified, 1.26 MB gzipped, most of it Monaco
+- [ ] Trim the bundle: the initial load is 4.8 MB minified, 1.25 MB gzipped, most of it Monaco; each architecture (MIPS 175 KB, Beta 92 KB) loads only when selected
 - [ ] Take the Digital Lab's memory-mapped region from the chosen memory configuration rather than fixing it at `0xffff0000`
 - [ ] A tooltip on a gutter address, to match the "Show 0x… in memory" the expanded words below it offer
 - [ ] One mechanism for "written in place, so a selector would never see a change", rather than a version counter beside a wrapper
@@ -348,7 +366,10 @@ web port is documented in [docs/FEATURE_ARCHITECTURE.md](docs/FEATURE_ARCHITECTU
 - Every MARS syscall is implemented except the MIDI pair, 31 and 33, which keep their timing and play nothing; an unknown syscall number stops safely with an error
 - A run has no instruction limit; execution yields between batches so runaway code does not block the page, and Pause stops it
 - Sparse virtual memory covers the segments of the selected memory configuration. An address outside all of them faults, as does a load from or store into `.text` unless self-modifying code is enabled
-- The history keeps the last 100,000 instructions by default, at about 150 bytes each and no cost to the speed of a run; it can be set as high as 1,000,000. Stepping back past what it holds is not possible, and neither is replaying what came before it
+- The history keeps the last 100,000 instructions by default, at about 150 bytes each and no cost to the speed of a run; it can be set as high as 1,000,000. The limit is shared by every architecture. Stepping back past what it holds is not possible, and neither is replaying what came before it
+- Beta memory is one flat region of 64 KB to 16 MB, 1 MB by default. A program and its data must fit in it; an access past the end stops the run
+- Settings are stored per architecture (under `thrax-web.settings.architecture.<id>`); settings saved before there was more than one architecture are read as MIPS settings
+- Only one architecture is active at a time. Switching stops the run and discards registers, memory, history and address breakpoints; source files, line breakpoints and the layout are kept
 
 ## 📖 MIPS Reference
 
@@ -371,9 +392,15 @@ MIT License - Same as the original MARS simulator
 Original MARS developed by Pete Sanderson and Ken Vollmar.
 Web port developed by Spongman.
 
-The X-Ray wire graph in `src/tools/xray/datapaths.ts` is generated from MARS
+The X-Ray wire graph in `src/architectures/mips/tools/xray/datapaths.ts` is generated from MARS
 4.5's datapath XML by `scripts/generate-xray-datapaths.py`.  The drawings
 themselves are redrawn as themed SVG rather than copied.
+
+The TinyOS Beta example, `src/architectures/beta/tinyos.uasm`, is the lab kernel from
+MIT 6.004 Computation Structures (https://github.com/computation-structures/course),
+used under the Creative Commons Attribution 4.0 International License; THRAX adds a
+header. It ships twice: as handed out, with `MapUserAddress` (Design Problem 1) left
+to the student, and as "TinyOS (solved)" with it filled in so the processes run.
 
 ## 🙏 Acknowledgments
 
