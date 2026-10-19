@@ -77,7 +77,10 @@ const IRQ_NAMES: readonly [number, string][] = [[2, 'clock'], [4, 'keyboard'], [
 
 const requests = (bits: number) => IRQ_NAMES.filter(([bit]) => bits & bit).map(([, name]) => name).join(', ') || 'none'
 
-function described(applied: boolean, parts: Omit<DescribedEffect, 'applied' | 'label'>): DescribedEffect {
+/** Every value this machine records is a word. */
+type WordEffect = Omit<DescribedEffect, 'applied' | 'label'> & { value?: number, second?: number }
+
+function described(applied: boolean, parts: WordEffect): DescribedEffect {
 	const held = parts.value === undefined ? parts.text : hex(parts.value)
 	const label = held !== undefined
 		? (applied ? `${parts.subject} → ${held}` : `${parts.subject} ${held} →`)
@@ -105,7 +108,7 @@ export function betaHistoryFormatter(log: BetaHistory | null, console: BetaConso
 			for (let position = start; position < start + log.effectCountAt(index); position++) {
 				const a = log.effectA(position)
 				const b = log.effectB(position)
-				const at = (parts: Omit<DescribedEffect, 'applied' | 'label'>) => effects.push(described(applied, parts))
+				const at = (parts: WordEffect) => effects.push(described(applied, parts))
 				switch (log.effectKind(position)) {
 					case EFFECT_REGISTER: at({ subject: BETA_REGISTERS[a].name, register: BETA_REGISTERS[a].id, value: b }); break
 					case EFFECT_MEMORY: at({ subject: `[${formatWord(a >>> 0)}]`, address: a >>> 0, value: b }); break

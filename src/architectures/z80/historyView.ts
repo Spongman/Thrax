@@ -120,7 +120,7 @@ function fieldEffect(field: number, old: number, console: Z80Console): Omit<Desc
 }
 
 function described(applied: boolean, parts: Omit<DescribedEffect, 'applied' | 'label'>): DescribedEffect {
-	const held = parts.value === undefined ? parts.text : parts.text ?? hex16(parts.value)
+	const held = parts.value === undefined ? parts.text : parts.text ?? hex16(Number(parts.value))
 	const label = held !== undefined
 		? (applied ? `${parts.subject} → ${held}` : `${parts.subject} ${held} →`)
 		: parts.detail !== undefined ? `${parts.subject} ${parts.detail}` : parts.subject

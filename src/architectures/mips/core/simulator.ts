@@ -44,7 +44,7 @@ import type { HistoryBufferSchema } from '../../../core/historyBuffers'
 import { REGISTER_FILE_NAMES, REGISTER_NAMES, registerFileIndex } from './registers'
 import { DEFAULT_BACKSTEP_LIMIT } from '../../../core/settings'
 import { MEMORY_CONFIGURATIONS, type MemoryConfigurationValues } from '../memoryConfigurations'
-import type { CallFrame, DelayState, Effect, KeyboardDisplayState, MemoryView, MipsInstruction, MipsProgram, PendingInput, Registers, SimulatorState } from '../../../core/types'
+import type { CallFrame, DelayState, Effect, KeyboardDisplayState, MemoryView, MipsInstruction, MipsProgram, PendingInput, SimulatorState, WordRegisters } from '../../../core/types'
 import { yieldToHost } from '../../../core/yieldToHost'
 
 /** Cause codes for a bad address, by whether it was a load or a store. */
@@ -246,7 +246,7 @@ export class MipsSimulator {
 	program: MipsProgram
 	/** Where the segments sit; `memory` below is the sparse contents, not the map. */
 	layout: MemoryConfigurationValues
-	registers: Registers
+	registers: WordRegisters
 	memory: Map<number, number>
 	pc: number
 	hi: number = 0
@@ -440,7 +440,7 @@ export class MipsSimulator {
 		if (options.programArguments) this.loadProgramArguments(options.programArguments)
 	}
 
-	initializeRegisters(): Registers {
+	initializeRegisters(): WordRegisters {
 		return {
 			$zero: 0,
 			$at: 0,

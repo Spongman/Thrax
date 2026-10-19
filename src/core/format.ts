@@ -23,7 +23,9 @@ export function formatHex(value: number, digits: number): string {
 }
 
 /** A register of `bits` bits in hex, padded to its own width; 32 bits and wider as a word. */
-export function formatRegister(value: number, bits: number): string {
+export function formatRegister(value: number | bigint, bits: number): string {
+	// A register wider than a word holds a bigint, padded to its own width.
+	if (typeof value === 'bigint') return `0x${BigInt.asUintN(bits, value).toString(16).toUpperCase().padStart(Math.ceil(bits / 4), '0')}`
 	if (bits >= 32) return formatWord(value)
 	return `0x${formatHex((value >>> 0) % 2 ** bits, Math.ceil(bits / 4))}`
 }

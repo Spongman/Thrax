@@ -105,8 +105,8 @@ export function useFlash(kind: FlashKind, token: number | string | null): boolea
 
 /** Names whose value is not what it was, which is what a change flash lights. */
 export function movedEntries(
-	before: ReadonlyMap<string, number> | null,
-	now: ReadonlyMap<string, number>,
+	before: ReadonlyMap<string, number | bigint> | null,
+	now: ReadonlyMap<string, number | bigint>,
 ): Set<string> {
 	const moved = new Set<string>()
 	// A name that was not there before has not moved: it has only just appeared,
@@ -135,10 +135,10 @@ const NOTHING: ReadonlySet<string> = new Set()
  * value already there still clears it rather than leaving it to swallow the
  * next real change.
  */
-export function useChangedEntries(entries: ReadonlyArray<readonly [string, number]>, edits = 0): ReadonlySet<string> {
+export function useChangedEntries(entries: ReadonlyArray<readonly [string, number | bigint]>, edits = 0): ReadonlySet<string> {
 	const enabled = useTHRAXStore((state) => state.settings.highlightChanges)
 	const milliseconds = useFlashMilliseconds()
-	const previous = React.useRef<ReadonlyMap<string, number> | null>(null)
+	const previous = React.useRef<ReadonlyMap<string, number | bigint> | null>(null)
 	const lastEdits = React.useRef(edits)
 	const [changed, flash] = useFading<ReadonlySet<string>>(NOTHING)
 	// The values themselves are the dependency; the array holding them is rebuilt

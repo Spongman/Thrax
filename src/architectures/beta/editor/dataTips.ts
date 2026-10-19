@@ -69,7 +69,7 @@ export function describeUasmToken(line: string, offset: number, state: DebugInsp
 		const index = registerIndex(text)
 		if (index !== undefined) {
 			const id = `R${index}`
-			const value = state.registers[id] ?? 0
+			const value = Number(state.registers[id] ?? 0)
 			const name = index === 31 ? 'R31 (always 0)' : text.toUpperCase() === id ? id : `${id} (${text.toUpperCase()})`
 			return { ...span, register: id, contents: [`**${name}**\n\n\`${formatValue(value)}\``] }
 		}

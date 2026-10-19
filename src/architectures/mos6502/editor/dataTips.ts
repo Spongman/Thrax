@@ -74,7 +74,7 @@ export function describeMos6502Token(line: string, offset: number, state: DebugI
 		}
 		const register = REGISTERS[text.toLowerCase()]
 		if (register !== undefined && !state.labels.has(text)) {
-			const value = state.registers[register] ?? 0
+			const value = Number(state.registers[register] ?? 0)
 			return { ...span, register, contents: [`**${register}**\n\n\`${formatValue(value)}\``] }
 		}
 		const insn = INSN_BY_NAME.get(text.toUpperCase())

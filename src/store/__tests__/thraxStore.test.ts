@@ -142,7 +142,7 @@ describe('publishing memory', () => {
 		useTHRAXStore.getState().assemble()
 		await useTHRAXStore.getState().run()
 		const { memory, registers } = useTHRAXStore.getState()
-		expect(memory.word(registers.$gp)).toBe(7)
+		expect(memory.word(Number(registers.$gp))).toBe(7)
 	})
 
 	it('keeps the run when the source is edited after it', async () => {
@@ -155,7 +155,7 @@ describe('publishing memory', () => {
 		useTHRAXStore.getState().setCode(`${STORING}\tbogus\n`)
 		useTHRAXStore.getState().refreshAssembly()
 		const edited = useTHRAXStore.getState()
-		expect(edited.memory.word(ran.registers.$gp)).toBe(7)
+		expect(edited.memory.word(Number(ran.registers.$gp))).toBe(7)
 		expect(edited.instructionCount).toBe(ran.instructionCount)
 		expect(edited.diagnostics.some((diagnostic) => diagnostic.severity === 'error')).toBe(true)
 	})

@@ -63,12 +63,12 @@ export function describeZ80Token(line: string, offset: number, state: DebugInspe
 		const upper = text.toUpperCase()
 		const half = HALVES[upper]
 		if (half) {
-			const value = ((state.registers[half[0]] ?? 0) >> half[1]) & 0xFF
+			const value = (Number(state.registers[half[0]] ?? 0) >> half[1]) & 0xFF
 			return { ...span, register: half[0], contents: [`**${upper}**\n\n\`${formatByte(value)}\``] }
 		}
 		const id = REGISTERS[upper]
 		if (id !== undefined) {
-			const value = state.registers[id] ?? 0
+			const value = Number(state.registers[id] ?? 0)
 			const contents = [`**${upper}**\n\n\`${WIDE.has(id) ? formatWord(value) : formatByte(value)}\``]
 			// A pair that holds an address shows what is there.
 			if (WIDE.has(id) && id !== 'AF' && id !== 'AF2') contents.push(...memoryLine(state, value & 0xFFFF))

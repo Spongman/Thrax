@@ -1,7 +1,7 @@
 import React from 'react'
 import './RegisterView.css'
 import './ToggleGroup.css'
-import { RegisterFormat, type RegisterBank, type RegisterDescriptor, type Registers } from '../architectures/contracts'
+import { RegisterFormat, type RegisterBank, type RegisterDescriptor, type RegisterValue, type Registers } from '../architectures/contracts'
 import { bitsToDouble, bitsToSingle, formatDouble, formatSingle } from '../core/ieee754'
 import { formatRegister } from '../core/format'
 import { advanceOne, isSolo, nextToggles } from './toggleGroup'
@@ -10,7 +10,7 @@ import PanelGroup from './PanelGroup'
 import TabStrip, { type Tab } from './TabStrip'
 import HexNumber from './HexNumber'
 import EditableCell from './EditableCell'
-import { parseEditedDouble, parseEditedValue, withoutLeadingZeros } from './editValue'
+import { parseEditedDouble, parseEditedValue, parseEditedWide, withoutLeadingZeros } from './editValue'
 import { flashClass, useChangedEntries, useFlash } from './highlight'
 import { useStoredState } from '../hooks/useStoredState'
 
@@ -27,7 +27,7 @@ interface RegisterViewProps {
 	 * Writes a register's raw bits.  Absent, or returning false, leaves the cell
 	 * read-only: a hardwired register and a running program's state are not edited.
 	 */
-	onEdit?: (id: string, bits: number) => boolean
+	onEdit?: (id: string, bits: RegisterValue) => boolean
 	editable?: boolean
 	/**
 	 * A register another panel has sent the eye to.  The request counter is what
@@ -58,6 +58,8 @@ const FORMATS: Array<{ id: Format; title: string }> = [
 
 /** Widest rendering of each format, in characters: `0xffffffff`, `4294967295`. */
 const FORMAT_CHARS: Record<Format, number> = { '0n': 10, '0x': 10, 'f': 13, 'd': 18 }
+/** The same for a 64-bit register: `0xffffffffffffffff`, `18446744073709551615`. */
+const WIDE_FORMAT_CHARS: Record<Format, number> = { ...FORMAT_CHARS, '0n': 20, '0x': 18 }
 
 /** Advance of the monospace list font at 12px, which names are measured in. */
 const NAME_CHAR_WIDTH = 7.2
@@ -70,7 +72,7 @@ const MIN_NAME_WIDTH = 48
  * last digit to the ellipsis: `0x00000000` comes to 72.01px in the 72 that ten
  * characters of 7.2 pay for.
  */
-const formatWidth = (format: Format) => Math.ceil(FORMAT_CHARS[format] * NAME_CHAR_WIDTH) + 2
+const formatWidth = (format: Format, wide: boolean) => Math.ceil((wide ? WIDE_FORMAT_CHARS : FORMAT_CHARS)[format] * NAME_CHAR_WIDTH) + 2
 
 type FormatFlags = Record<Format, boolean>
 
@@ -149,8 +151,9 @@ interface RegisterEntry {
 	/** Descriptor id: what an edit, a hover and a navigation name. */
 	id: string
 	name: string
-	bits: number
-	/** The register's width, which its hex is padded to. */
+	/** A bigint for a register wider than a word. */
+	bits: RegisterValue
+	/** The register's width. */
 	width: number
 	editable: boolean
 	/** The register holding the high word, when this one starts a double. */
@@ -160,13 +163,22 @@ interface RegisterEntry {
 }
 
 const formatBits = (format: Format, entry: RegisterEntry) => {
+	const { bits } = entry
 	switch (format) {
-		case '0n': return `${entry.bits >>> 0}`
-		case '0x': return formatRegister(entry.bits, entry.width)
-		case 'f': return formatSingle(bitsToSingle(entry.bits))
-		case 'd': return entry.highBits === undefined ? '' : formatDouble(bitsToDouble(entry.bits, entry.highBits))
+		case '0n': return typeof bits === 'bigint' ? bits.toString() : `${bits >>> 0}`
+		case '0x': return formatRegister(bits, entry.width)
+		case 'f': return formatSingle(bitsToSingle(Number(bits)))
+		case 'd': return entry.highBits === undefined ? '' : formatDouble(bitsToDouble(Number(bits), entry.highBits))
 	}
 }
+
+/** The address a value names, if it is small enough to be one; unsigned either way. */
+const addressOf = (bits: RegisterValue): number | null => typeof bits === 'number' ? bits >>> 0
+	: bits <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(bits) : null
+
+/** A value typed into a cell, read as the register's width. */
+const parseEdited = (text: string, format: Format, entry: RegisterEntry): RegisterValue | null =>
+	entry.width > 32 && (format === '0n' || format === '0x') ? parseEditedWide(text, format, entry.width) : parseEditedValue(text, format)
 
 function RegisterPanel({ group, entries, flags, onToggle, selected, onSelect, onEdit, editable = false, flashed, changed, pointed, onHoverAddress, pointedRegister, onHoverRegister, isAddress }: {
 	group: RegisterGroup
@@ -176,7 +188,7 @@ function RegisterPanel({ group, entries, flags, onToggle, selected, onSelect, on
 	/** Id of the entry whose bits are being inspected, where that is offered. */
 	selected?: string
 	onSelect?: (id: string) => void
-	onEdit?: (entry: RegisterEntry, bits: number, high?: number) => boolean
+	onEdit?: (entry: RegisterEntry, bits: RegisterValue, high?: number) => boolean
 	editable?: boolean
 	/** The register a navigation has just landed on, lit until it fades. */
 	flashed?: string | null
@@ -196,7 +208,8 @@ function RegisterPanel({ group, entries, flags, onToggle, selected, onSelect, on
 	// Columns are only as wide as the names and the visible radixes need.  Some
 	// names carry what the register is for, which is wider than a `$t0`.
 	const nameWidth = Math.ceil(Math.max(MIN_NAME_WIDTH, ...entries.map((entry) => entry.name.length * NAME_CHAR_WIDTH)))
-	const columnWidth = nameWidth + 24 + formats.reduce((total, format) => total + formatWidth(format) + 8, 0)
+	const wide = entries.some((entry) => entry.width > 32)
+	const columnWidth = nameWidth + 24 + formats.reduce((total, format) => total + formatWidth(format, wide) + 8, 0)
 
 	return (
 		<PanelGroup
@@ -218,77 +231,80 @@ function RegisterPanel({ group, entries, flags, onToggle, selected, onSelect, on
 			)}
 		>
 			<div className="register-list" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${columnWidth}px, 1fr))` }}>
-				{entries.map((entry) => (
-					<div
-						key={entry.id}
-						ref={entry.id === flashed ? scrollIntoView : undefined}
-						className={[
-							'register-item',
-							onSelect ? 'register-item-selectable' : '',
-							entry.id === selected ? 'selected' : '',
-							// Navigation wins where both apply: the click that put the eye
-							// here is the more recent thing, and one colour reads better.
-							entry.id === flashed ? flashClass('navigation') : changed?.has(entry.id) ? flashClass('change') : '',
-							// A register holding the hovered address is where that address
-							// appears in this window, so it lights like the word does.
-							// Unsigned on both sides: a register holds a signed word, and the
-							// address a panel points at is unsigned, so anything at or above
-							// 0x80000000 would never match itself.
-							pointed !== null && pointed !== undefined && (entry.bits >>> 0) === pointed && isAddress(entry.bits) ? 'address-hovered' : '',
-							// Named from another window: the history points at a register
-							// by name, since the value it shows is the one from back then.
-							entry.id === pointedRegister ? 'register-hovered' : '',
-						].filter(Boolean).join(' ')}
-						style={{ gridTemplateColumns: `minmax(${nameWidth}px, auto) repeat(${formats.length}, 1fr)` }}
-						onMouseEnter={() => {
-							// Only a value that is actually an address names one; otherwise
-							// every register holding the same small number lights with it.
-							onHoverAddress?.(isAddress(entry.bits) ? entry.bits >>> 0 : null)
-							onHoverRegister?.(entry.id)
-						}}
-						onMouseLeave={() => {
-							onHoverAddress?.(null)
-							onHoverRegister?.(null)
-						}}
-						onClick={onSelect && (() => onSelect(entry.id))}
-						role={onSelect && 'button'}
-						tabIndex={onSelect && 0}
-						onKeyDown={onSelect && ((event) => {
-							if (event.key !== 'Enter' && event.key !== ' ') return
-							event.preventDefault()
-							onSelect(entry.id)
-						})}
-					>
-						<span className="reg-name">{entry.name}</span>
-						{formats.map((format) => {
-							const text = formatBits(format, entry)
-							const shown = format === '0x' ? <HexNumber text={text} /> : text
-							// A hardwired register reads the same however it is written, so
-							// offering to edit it would only mislead.
-							const writable = editable && onEdit !== undefined && entry.editable && !(format === 'd' && entry.highBits === undefined)
-							return (
-								<EditableCell
-									key={format}
-									className="reg-value"
-									text={withoutLeadingZeros(text)}
-									title={text}
-									editable={writable}
-									onCommit={(typed) => {
-										if (!onEdit) return false
-										if (format === 'd') {
-											const pair = parseEditedDouble(typed)
-											return pair !== null && onEdit(entry, pair.low, pair.high)
-										}
-										const bits = parseEditedValue(typed, format)
-										return bits !== null && onEdit(entry, bits)
-									}}
-								>
-									{shown}
-								</EditableCell>
-							)
-						})}
-					</div>
-				))}
+				{entries.map((entry) => {
+					const address = addressOf(entry.bits)
+					return (
+						<div
+							key={entry.id}
+							ref={entry.id === flashed ? scrollIntoView : undefined}
+							className={[
+								'register-item',
+								onSelect ? 'register-item-selectable' : '',
+								entry.id === selected ? 'selected' : '',
+								// Navigation wins where both apply: the click that put the eye
+								// here is the more recent thing, and one colour reads better.
+								entry.id === flashed ? flashClass('navigation') : changed?.has(entry.id) ? flashClass('change') : '',
+								// A register holding the hovered address is where that address
+								// appears in this window, so it lights like the word does.
+								// Unsigned on both sides: a register holds a signed word, and the
+								// address a panel points at is unsigned, so anything at or above
+								// 0x80000000 would never match itself.
+								pointed !== null && pointed !== undefined && address === pointed && isAddress(address) ? 'address-hovered' : '',
+								// Named from another window: the history points at a register
+								// by name, since the value it shows is the one from back then.
+								entry.id === pointedRegister ? 'register-hovered' : '',
+							].filter(Boolean).join(' ')}
+							style={{ gridTemplateColumns: `minmax(${nameWidth}px, auto) repeat(${formats.length}, 1fr)` }}
+							onMouseEnter={() => {
+								// Only a value that is actually an address names one; otherwise
+								// every register holding the same small number lights with it.
+								onHoverAddress?.(address !== null && isAddress(address) ? address : null)
+								onHoverRegister?.(entry.id)
+							}}
+							onMouseLeave={() => {
+								onHoverAddress?.(null)
+								onHoverRegister?.(null)
+							}}
+							onClick={onSelect && (() => onSelect(entry.id))}
+							role={onSelect && 'button'}
+							tabIndex={onSelect && 0}
+							onKeyDown={onSelect && ((event) => {
+								if (event.key !== 'Enter' && event.key !== ' ') return
+								event.preventDefault()
+								onSelect(entry.id)
+							})}
+						>
+							<span className="reg-name">{entry.name}</span>
+							{formats.map((format) => {
+								const text = formatBits(format, entry)
+								const shown = format === '0x' ? <HexNumber text={text} /> : text
+								// A hardwired register reads the same however it is written, so
+								// offering to edit it would only mislead.
+								const writable = editable && onEdit !== undefined && entry.editable && !(format === 'd' && entry.highBits === undefined)
+								return (
+									<EditableCell
+										key={format}
+										className="reg-value"
+										text={withoutLeadingZeros(text)}
+										title={text}
+										editable={writable}
+										onCommit={(typed) => {
+											if (!onEdit) return false
+											if (format === 'd') {
+												const pair = parseEditedDouble(typed)
+												return pair !== null && onEdit(entry, pair.low, pair.high)
+											}
+											const bits = parseEdited(typed, format, entry)
+											return bits !== null && onEdit(entry, bits)
+										}}
+									>
+										{shown}
+									</EditableCell>
+								)
+							})}
+						</div>
+					)
+				})}
 			</div>
 		</PanelGroup>
 	)
@@ -308,7 +324,7 @@ function RegisterView({ registers, descriptors, banks, isAddress = NOT_AN_ADDRES
 
 	// Every value on show, by id, so the ones that moved can be lit wherever
 	// they are, across every tab.
-	const named = React.useMemo(() => Object.entries(registers).map(([id, bits]) => [id, bits | 0] as const), [registers])
+	const named = React.useMemo(() => Object.entries(registers).map(([id, bits]) => [id, typeof bits === 'bigint' ? bits : bits | 0] as const), [registers])
 	const changed = useChangedEntries(named)
 
 	// A navigation names a register on any tab, so it opens the one the register
@@ -344,15 +360,15 @@ function RegisterView({ registers, descriptors, banks, isAddress = NOT_AN_ADDRES
 	const entryFor = (register: RegisterDescriptor): RegisterEntry => ({
 		id: register.id,
 		name: register.name,
-		bits: registers[register.id] || 0,
+		bits: registers[register.id] ?? 0,
 		width: register.bits,
 		editable: register.editable,
 		pairId: register.pairsWith,
-		highBits: register.pairsWith === undefined ? undefined : registers[register.pairsWith] || 0,
+		highBits: register.pairsWith === undefined ? undefined : Number(registers[register.pairsWith] ?? 0),
 	})
 
 	// A double is written across the pair it starts.
-	const edit = onEdit && ((entry: RegisterEntry, bits: number, high?: number) =>
+	const edit = onEdit && ((entry: RegisterEntry, bits: RegisterValue, high?: number) =>
 		onEdit(entry.id, bits) && (high === undefined || entry.pairId === undefined || onEdit(entry.pairId, high)))
 
 	const panelProps = {
@@ -417,7 +433,7 @@ function RegisterView({ registers, descriptors, banks, isAddress = NOT_AN_ADDRES
 								actions={<div className="toggle-group"><button className="toggle-button" title="Clear selection" onClick={() => setSelectedRegister(null)}>×</button></div>}
 							>
 								<FloatBitsView
-									bits={entry.bits >>> 0}
+									bits={Number(entry.bits) >>> 0}
 									highBits={double && entry.highBits !== undefined ? entry.highBits >>> 0 : undefined}
 									editable={editable}
 									onEdit={edit && ((bits, high) => edit(entry, bits, high))}

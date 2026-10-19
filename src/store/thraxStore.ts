@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { HOVER_KINDS, NOTHING_HOVERED, type Hovered } from './hover'
 import { ActivationSuperseded, activateArchitecture, activeArchitecture, knownArchitectures, onArchitectureActivated, peekArchitecture } from '../architectures/registry'
-import { EMPTY_HISTORY, EMPTY_MEMORY, type ArchitectureActivation, type ArchitectureDefinition, type ArchitectureServices, type AssembledProgram, type CallFrame, type CodeRow, type DataDeclaration, type Diagnostic, type HistoryFormatter, type KeyboardDisplayState, type Machine, type MachineHistory, type MachineProfile, type MemoryInspector, type PendingInput, type Registers, type SourceFile, type SourceLocation, type SymbolTables } from '../architectures/contracts'
+import { EMPTY_HISTORY, EMPTY_MEMORY, type ArchitectureActivation, type ArchitectureDefinition, type ArchitectureServices, type AssembledProgram, type CallFrame, type CodeRow, type DataDeclaration, type Diagnostic, type HistoryFormatter, type KeyboardDisplayState, type Machine, type MachineHistory, type MachineProfile, type MemoryInspector, type PendingInput, type RegisterValue, type Registers, type SourceFile, type SourceLocation, type SymbolTables } from '../architectures/contracts'
 import type { ExecutionObserver } from '../core/observer'
 import { formatDiagnostic, hasErrors } from '../core/diagnostics'
 import { DEFAULT_SETTINGS, isRecord, SETTINGS_VALIDATORS, validSettings, type TargetSettings, type ThraxSettings } from '../core/settings'
@@ -423,7 +423,7 @@ interface THRAXStore {
 	 * is a history entry of its own, so it shows in the panel and steps back
 	 * like anything else.
 	 */
-	setRegisterValue: (id: string, value: number) => boolean
+	setRegisterValue: (id: string, value: RegisterValue) => boolean
 	setMemoryByte: (address: number, value: number) => boolean
 	/**
 	 * Makes room for a byte, or takes one away, moving the rest of the region

@@ -82,8 +82,14 @@ export interface RegisterDescriptor {
 
 export interface RegisterBank { id: string; label: string }
 
+/**
+ * A register's bits: a number for a register of 32 bits or fewer, and for a
+ * wider one a bigint, unsigned and below 2^bits, so every bit stays exact.
+ */
+export type RegisterValue = number | bigint
+
 /** Register values by descriptor id. */
-export type Registers = Record<string, number>
+export type Registers = Record<string, RegisterValue>
 
 /* ------------------------------------------------------------------- memory */
 
@@ -249,9 +255,9 @@ export interface DescribedEffect {
 	register?: string
 	/** An address this names, when a click should go to the memory view. */
 	address?: number
-	value?: number
+	value?: RegisterValue
 	/** A second word, for registers that move together. */
-	second?: number
+	second?: RegisterValue
 	/** What is held when it is not a word. */
 	text?: string
 	/** What the effect carries rather than what it replaced. */
@@ -435,7 +441,7 @@ export interface Machine extends RunControl, Disposable {
 	/** Every register by descriptor id, as a fresh record. */
 	registerValues(): Registers
 	/** A user edit, recorded as a history entry; false when refused. */
-	writeRegister(id: string, value: number): boolean
+	writeRegister(id: string, value: RegisterValue): boolean
 	/** Side-effect-free memory reads, under a fresh identity per call. */
 	inspectMemory(): MemoryInspector
 	writeByte(address: number, value: number): boolean

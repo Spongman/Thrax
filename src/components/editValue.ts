@@ -39,6 +39,20 @@ export function parseEditedValue(text: string, format: EditFormat): number | nul
 }
 
 /**
+ * The bits a register wider than a word now holds, or null when the text is not
+ * an integer.  A negative value is its two's complement in `bits`.
+ */
+export function parseEditedWide(text: string, format: '0n' | '0x', bits: number): bigint | null {
+	const match = /^(-?)(?:0[xX]([0-9a-fA-F]+)|([0-9a-fA-F]+))$/.exec(text.trim())
+	if (!match) return null
+	const digits = match[2] ?? match[3]
+	const hexadecimal = match[2] !== undefined || format === '0x'
+	if (!hexadecimal && !/^[0-9]+$/.test(digits)) return null
+	const magnitude = BigInt(hexadecimal ? `0x${digits}` : digits)
+	return BigInt.asUintN(bits, match[1] ? -magnitude : magnitude)
+}
+
+/**
  * What an edit starts from, which is not quite what the cell shows: a hex value
  * comes without its leading zero run.  They are the digits nobody means to
  * keep, and eight of them stand between the caret and anything worth typing.

@@ -126,7 +126,7 @@ describe('Z80 in the workbench', () => {
 		state().setCode('\tnop\n\thalt\n')
 		state().assemble()
 		expect(state().setRegisterValue('FZ', 0)).toBe(true)
-		expect(state().registers.F & 0x40).toBe(0)
+		expect(Number(state().registers.F) & 0x40).toBe(0)
 		expect(state().registers.FC).toBe(1)
 	})
 

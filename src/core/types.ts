@@ -221,8 +221,11 @@ export interface HistoryEntry {
 	random?: RandomSnapshot
 }
 
+/** MIPS registers by name; every one is a word, so a number. */
+export type WordRegisters = Record<string, number>
+
 export interface SimulatorState extends CoprocessorState {
-	registers: Registers
+	registers: WordRegisters
 	memory: MemoryView
 	console: string
 	pc: number

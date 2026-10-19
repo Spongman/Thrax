@@ -12,7 +12,10 @@ import type { DescribedEffect, HistoryFormatter } from '../../contracts'
 
 const hex = (value: number) => formatWord(value >>> 0)
 
-function described(applied: boolean, parts: Omit<DescribedEffect, 'applied' | 'label'>): DescribedEffect {
+/** Every value this machine records is a word. */
+type WordEffect = Omit<DescribedEffect, 'applied' | 'label'> & { value?: number, second?: number }
+
+function described(applied: boolean, parts: WordEffect): DescribedEffect {
 	const held = parts.value === undefined ? parts.text
 		: parts.second === undefined ? hex(parts.value)
 			: `${hex(parts.value)}/${hex(parts.second)}`
@@ -23,7 +26,7 @@ function described(applied: boolean, parts: Omit<DescribedEffect, 'applied' | 'l
 }
 
 export function describeEffect(effect: Effect, applied: boolean): DescribedEffect {
-	const at = (parts: Omit<DescribedEffect, 'applied' | 'label'>) => described(applied, parts)
+	const at = (parts: WordEffect) => described(applied, parts)
 	switch (effect.kind) {
 		case KIND_REGISTER: return at({ subject: effect.name, register: effect.name, value: effect.value })
 		case KIND_FP: return at({ subject: `$f${effect.index}`, register: `$f${effect.index}`, value: effect.value })

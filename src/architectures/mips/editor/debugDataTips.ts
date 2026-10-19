@@ -18,21 +18,21 @@ function getRegisterValue(register: string, registers: Registers) {
 	const normalized = register.toLowerCase()
 	if (/^\$\d+$/.test(normalized)) {
 		const alias = REGISTER_NAMES[Number(normalized.slice(1))]
-		if (alias) return { name: alias, value: registers[alias] ?? 0 }
+		if (alias) return { name: alias, value: Number(registers[alias] ?? 0) }
 	}
-	return { name: normalized, value: registers[normalized] ?? 0 }
+	return { name: normalized, value: Number(registers[normalized] ?? 0) }
 }
 
 /** Hover contents for `$f0`-`$f31`, including the double a pair holds. */
 function getFpRegisterContents(index: number, registers: Registers): string[] {
-	const bits = registers[`$f${index}`] ?? 0
+	const bits = Number(registers[`$f${index}`] ?? 0)
 	const contents = [
 		`**$f${index}**`,
 		`single \`${formatSingle(bitsToSingle(bits))}\``,
 		`bits \`${formatWord(bits)}\``,
 	]
 	if (index % 2 === 0) {
-		contents.push(`double \`${formatDouble(bitsToDouble(bits, registers[`$f${index + 1}`] ?? 0))}\``)
+		contents.push(`double \`${formatDouble(bitsToDouble(bits, Number(registers[`$f${index + 1}`] ?? 0)))}\``)
 	}
 	return contents
 }

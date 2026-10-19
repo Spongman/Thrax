@@ -1,4 +1,4 @@
-import { formatWord } from '../core/format'
+import { formatRegister, formatWord } from '../core/format'
 import { type HexDimming } from '../core/settings'
 import { useTHRAXStore } from '../store/thraxStore'
 import './HexNumber.css'
@@ -56,14 +56,15 @@ function HexNumber({ text, mode }: { text: string, mode?: HexDimming }) {
 }
 
 /**
- * A 32-bit address or value, spelled the one way the workspace spells them.
+ * An address or value, spelled the one way the workspace spells them: a word,
+ * or a double word when it is a bigint.
  *
  * Every panel that shows a word goes through this rather than formatting one of
  * its own, so the leading-zero setting reaches all of them and a number reads
  * the same in the history as it does in the registers.
  */
-export function HexWord({ value, mode }: { value: number, mode?: HexDimming }) {
-	return <HexNumber text={formatWord(value >>> 0)} mode={mode} />
+export function HexWord({ value, mode }: { value: number | bigint, mode?: HexDimming }) {
+	return <HexNumber text={typeof value === 'bigint' ? formatRegister(value, 64) : formatWord(value >>> 0)} mode={mode} />
 }
 
 export default HexNumber

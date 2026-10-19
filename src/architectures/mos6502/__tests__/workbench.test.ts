@@ -119,7 +119,7 @@ describe('6502 in the workbench', () => {
 		expect(state().setRegisterValue('C', 1)).toBe(true)
 		expect(state().registers.X).toBe(42)
 		expect(state().registers.C).toBe(1)
-		expect(state().registers.P & 1).toBe(1)
+		expect(Number(state().registers.P) & 1).toBe(1)
 		expect(state().executionHistory.at(state().executionHistory.length - 1)?.kind).toBe('edit')
 
 		state().stepBack()
