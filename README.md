@@ -12,7 +12,7 @@ A son of MARS (but in a different language). A modern, interactive web-based por
 ## 🚀 Features
 
 ### Core Functionality
-- ✅ **Three Architectures**: MIPS (MARS), the MIT Beta (BSim) and the MOS 6502, chosen in Settings; each loads only when selected, and the files, line breakpoints and layout carry across
+- ✅ **Four Architectures**: MIPS (MARS), the MIT Beta (BSim), the MOS 6502 and the Zilog Z80, chosen in Settings; each loads only when selected, and the files, line breakpoints and layout carry across
 - ✅ **Complete MIPS Assembler**: Lexer → Parser → Machine Code Generator, with errors reported on the line that earned them
 - ✅ **Full MIPS Simulator**: The whole MARS instruction table, coprocessors 0 and 1, delayed branching, and device interrupts
 - ✅ **Monaco Editor**: Syntax highlighting, completion offering every instruction with its docs, and a hover saying what each instruction does
@@ -30,7 +30,7 @@ A son of MARS (but in a different language). A modern, interactive web-based por
 - ✅ **Portable Export**: Download assembled text in HexText format
 - ✅ **MARS Tools**: Bitmap display, keyboard/display MMIO, cache simulator, pipeline model, instruction statistics, branch history, MIPS X-Ray, memory reference visualization, Mars Bot, Scavenger Hunt, and the Digital Lab Simulator
 - ✅ **Settings**: Shared display and history preferences, plus each architecture's own options, kept per architecture: the MARS options with the three memory configurations for MIPS, and memory size and the console default for Beta
-- ✅ **Example Programs**: 13 ready-to-run MIPS programs, 12 Beta programs, among them the 6.004 TinyOS lab kernel, and 13 6502 programs
+- ✅ **Example Programs**: 13 ready-to-run MIPS programs, 12 Beta programs, among them the 6.004 TinyOS lab kernel, 13 6502 programs and 12 Z80 programs
 - ✅ **Dark Theme UI**: VS Code-inspired interface
 
 ### Supported Instruction Types
@@ -181,6 +181,31 @@ Assembly follows ca65 where it overlaps:
 - Not supported: `.if` and other conditionals, `.segment`, `.proc`/`.scope`, unnamed labels, and comparison and logical operators
 - Sources use the `ca65` editor language with data tips for registers, symbols, addresses and mnemonics; new files are `.a65`
 
+### Zilog Z80
+A Z80 on a bare board: every documented instruction with the CB, ED, DD/FD and
+DDCB/FDCB prefixes, the alternate registers, I and R (R counts each opcode
+fetch), exact flags including H, P/V and N, and the undocumented forms programs
+use: `IXH`/`IXL`/`IYH`/`IYL`, `SLL`, DDCB with a register copy, `IN F,(C)`,
+`OUT (C),0`, and flag bits 3 and 5 (except `BIT n,(HL)`, which takes them from
+H rather than MEMPTR). T-states are counted per instruction, as the Zilog manual
+gives them, and shown as the `T-states` register.
+
+The machine:
+- 64 KiB of RAM; the program starts at `$0000`. The Bitmap Display reads a 32 x 32 framebuffer at `$C000`, a byte per pixel whose low four bits pick one of 16 colours
+- Devices at `$FF00-$FF07`, and on I/O ports `$00-$07` (the low byte of the port address): `+0` write prints a character; `+1` read takes the next typed character, 0 when none; `+2` read is the status (bit 0 a character is waiting, bit 1 output ready, bit 2 the timer fired since the last read), write enables interrupts (bit 0 keyboard, bit 1 timer); `+3` write ends the program with that exit code; `+4` sets the timer period in units of 256 T-states, 0 to stop it; `+5` read takes the next typed character, waiting for one. The rest of the page is RAM
+- Interrupts: the timer, then the keyboard, are taken before an instruction while IFF1 is set, never straight after `EI`. The keyboard puts `$F7` (`RST 30h`) on the bus and the timer `$FF` (`RST 38h`): IM 0 runs that RST, IM 1 goes to `$38`, IM 2 reads the handler from `I * 256 +` that byte. NMI (to `$66`, keeping IFF2 for `RETN`) is modelled but nothing raises it. Interrupts push a call-stack frame and step back like instructions
+- `HALT` waits for an interrupt, skipping to the next timer tick or typed character; with interrupts disabled, or no enabled source that could raise one, it ends the program
+- Not modelled: MEMPTR, the `LD A,I` interrupt quirk, IM 0 bus bytes other than RST, and contention or wait states
+
+Assembly is the common subset of zasm and sjasmplus:
+- `label:` anywhere, or a name in the first column without a colon; `.local` labels hang off the label before them; `;` comments
+- Numbers: decimal, `$FF`, `#FF`, `0xFF`, `0FFh`, `%1010`, `0b1010`, `1010b`, `17o`; `'A'` characters; `$` is the current address. C operators with C precedence, comparisons and logic giving 1 or 0, and `LOW()` and `HIGH()`
+- Directives: `ORG`, `EQU`, `=`/`DEFL`, `DB`/`DEFB`/`DM`/`DEFM`/`BYTE` (strings too), `DW`/`DEFW`/`WORD`, `DS`/`DEFS`/`BLOCK` with an optional fill, `ALIGN`, `INCLUDE "file"`, `END`, and macros written `name MACRO params` or `MACRO name params` ... `ENDM`. Directives may take a leading dot
+- Macros expand as text, so a parameter can stand for a register; `.labels` inside a macro are local to each expansion, and the code maps to the line that invoked it
+- Instruction sizes follow from the operands' shapes, so layout never waits for a value; `JR` and `DJNZ` out of range, displacements past -128..127 and invalid operand combinations are reported on their line
+- Not supported: conditionals (`IF`), `PHASE`, `STRUCT`, unnamed and temporary labels, and `<`/`>` as low and high byte
+- Sources use the `z80` editor language with data tips for registers, pairs and what they point at, symbols and numbers; new files are `.z80`
+
 ### Files, Folders and Links
 The workspace autosaves to the browser as you type, so a reload picks up where you
 left off; **Save in this browser** keeps a second copy on purpose. Files come in from
@@ -289,7 +314,8 @@ src/
 │   ├── registry.ts        # Loads and activates architectures; the only place that names them
 │   ├── mips/              # MARS assembler and simulator (core/), history, editor, examples, MIPS-only tools
 │   ├── beta/              # Beta CPU, BSim machine, UASM dialect and beta.uasm, editor, examples
-│   └── mos6502/           # 6502 CPU, I/O page machine, ca65-style dialect, editor, examples
+│   ├── mos6502/           # 6502 CPU, I/O page machine, ca65-style dialect, editor, examples
+│   └── z80/               # Z80 CPU, device page machine, Zilog-syntax dialect, editor, examples
 ├── core/                  # Shared assembler engine (assembly/), diagnostics, source index, history, settings
 ├── debug/                 # Debug session: breakpoints and stepping
 ├── tools/                 # Statistics, profile, cache, branch history, pipeline, memory reference
