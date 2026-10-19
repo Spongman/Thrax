@@ -12,7 +12,7 @@ A son of MARS (but in a different language). A modern, interactive web-based por
 ## 🚀 Features
 
 ### Core Functionality
-- ✅ **Two Architectures**: MIPS (MARS) and the MIT Beta (BSim), chosen in Settings; each loads only when selected, and the files, line breakpoints and layout carry across
+- ✅ **Three Architectures**: MIPS (MARS), the MIT Beta (BSim) and the MOS 6502, chosen in Settings; each loads only when selected, and the files, line breakpoints and layout carry across
 - ✅ **Complete MIPS Assembler**: Lexer → Parser → Machine Code Generator, with errors reported on the line that earned them
 - ✅ **Full MIPS Simulator**: The whole MARS instruction table, coprocessors 0 and 1, delayed branching, and device interrupts
 - ✅ **Monaco Editor**: Syntax highlighting, completion offering every instruction with its docs, and a hover saying what each instruction does
@@ -30,7 +30,7 @@ A son of MARS (but in a different language). A modern, interactive web-based por
 - ✅ **Portable Export**: Download assembled text in HexText format
 - ✅ **MARS Tools**: Bitmap display, keyboard/display MMIO, cache simulator, pipeline model, instruction statistics, branch history, MIPS X-Ray, memory reference visualization, Mars Bot, Scavenger Hunt, and the Digital Lab Simulator
 - ✅ **Settings**: Shared display and history preferences, plus each architecture's own options, kept per architecture: the MARS options with the three memory configurations for MIPS, and memory size and the console default for Beta
-- ✅ **Example Programs**: 13 ready-to-run MIPS programs and 12 Beta programs, among them the 6.004 TinyOS lab kernel
+- ✅ **Example Programs**: 13 ready-to-run MIPS programs, 12 Beta programs, among them the 6.004 TinyOS lab kernel, and 13 6502 programs
 - ✅ **Dark Theme UI**: VS Code-inspired interface
 
 ### Supported Instruction Types
@@ -157,6 +157,30 @@ UASM compatibility:
 - `.pcheckoff`, `.tcheckoff` and `.verify` only talk to the course's checkoff server, and are skipped
 - Beta source files use the `uasm` editor language with completion of the library macros, go-to-definition into `beta.uasm`, and data tips for registers, symbols and macros; new files are `.uasm`, and **Download HexText** writes memory from address 0 as words
 
+### MOS 6502
+An NMOS 6502 on a bare board: the 151 documented opcodes in all 13 addressing
+modes, with exact flags, NMOS decimal mode (Z from the binary sum, N and V from
+the intermediate result on `ADC`; binary flags on `SBC`), the `JMP ($xxFF)`
+page-wrap bug, zero-page and stack wrapping, and cycle counts with the
+page-crossing and taken-branch penalties, shown as the `Cycles` register.
+
+The machine:
+- 64 KiB of RAM. `$0000-$00FF` zero page, `$0100-$01FF` stack, `$0200-$05FF` a 32 x 32 framebuffer for the Bitmap Display (base `0x200`, a byte per pixel whose low four bits pick one of 16 colours), code from `$0600` by default, the I/O page at `$F000`, vectors at `$FFFA` (NMI), `$FFFC` (RESET), `$FFFE` (IRQ/BRK)
+- I/O page: `$F000` write prints a character; `$F001` read takes the next typed character (CR reads as LF), waiting for one; `$F002` read is the status (bit 0 a key is ready, bit 1 the timer fired), and any write acknowledges the timer; `$F003` write halts with that exit code; `$F004` enables interrupts (bit 0 keyboard IRQ, bit 1 timer IRQ, bit 2 timer raises NMI instead); `$F005`/`$F006` set the timer period in cycles, 0 to stop it. Other addresses in the page read 0
+- The program starts at the RESET vector. When the program leaves it out, the assembler points it at the first instruction. When the IRQ vector is left out, `BRK` halts the machine
+- IRQ is a level, taken between instructions while an enabled source holds it and `I` is clear; NMI is taken before the next instruction regardless of `I`. Both take 7 cycles, push PC and P with B clear, and step back like instructions
+- The console and the Keyboard and Display tool share the keyboard queue. A program waiting at `$F001`, polling the status, or with the keyboard IRQ enabled can be typed to while it runs
+- Settings: decimal mode, on by default; off ignores `D`, as the NES 2A03 does
+- Not modelled: undocumented opcodes, which stop the run as illegal instructions; dummy reads and the double write of read-modify-write instructions; the I/O page only answers data accesses, not instruction fetches
+
+Assembly follows ca65 where it overlaps:
+- `label:`, `@local:` labels scoped to the label before them, `;` comments, `name = expr`, `name .equ expr`, `.set name, expr`, `* = expr` and `.org`
+- Numbers in decimal, `$` hex, `%` binary and `0x` hex; `'A'` characters; strings with C escapes; `*` is the location counter where an operand starts. Operators with ca65's precedence: unary `- ~ + < >` (low and high byte), then `* / & ^ << >>`, then `+ - |`
+- Operands: `#imm`, `zp`, `zp,X`, `abs,Y`, `(ind)`, `(zp,X)`, `(zp),Y`, branch targets, and `A`, which `ASL`, `LSR`, `ROL` and `ROR` also take with no operand. An operand layout already knows to be below `$100` takes the zero-page form; a forward reference takes the absolute one. `z:` and `a:` force either
+- Directives: `.byte`/`.db`/`.byt`, `.word`/`.dw`/`.addr`, `.res`/`.ds` with an optional fill, `.ascii`, `.asciiz`, `.align`, `.include`, `.macro name params` ... `.endmacro`/`.endm`, and `.breakpoint`. Macro arguments are values, and labels inside a macro are local to each expansion
+- Not supported: `.if` and other conditionals, `.segment`, `.proc`/`.scope`, unnamed labels, and comparison and logical operators
+- Sources use the `ca65` editor language with data tips for registers, symbols, addresses and mnemonics; new files are `.a65`
+
 ### Files, Folders and Links
 The workspace autosaves to the browser as you type, so a reload picks up where you
 left off; **Save in this browser** keeps a second copy on purpose. Files come in from
@@ -264,7 +288,8 @@ src/
 │   ├── contracts.ts       # The neutral contract shared code uses
 │   ├── registry.ts        # Loads and activates architectures; the only place that names them
 │   ├── mips/              # MARS assembler and simulator (core/), history, editor, examples, MIPS-only tools
-│   └── beta/              # Beta CPU, BSim machine, UASM dialect and beta.uasm, editor, examples
+│   ├── beta/              # Beta CPU, BSim machine, UASM dialect and beta.uasm, editor, examples
+│   └── mos6502/           # 6502 CPU, I/O page machine, ca65-style dialect, editor, examples
 ├── core/                  # Shared assembler engine (assembly/), diagnostics, source index, history, settings
 ├── debug/                 # Debug session: breakpoints and stepping
 ├── tools/                 # Statistics, profile, cache, branch history, pipeline, memory reference
