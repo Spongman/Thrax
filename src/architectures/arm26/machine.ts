@@ -27,6 +27,9 @@ export const FIQ_STACK = 0x6000
 /** Where programs start unless they say otherwise, as RISC OS loads applications. */
 export const TEXT_BASE = 0x8000
 
+/** Where the Bitmap Display looks first, past a program of 32 KB. */
+export const DISPLAY_BASE = 0x10000
+
 export interface Arm26MachineOptions {
 	memoryBytes: number
 	/** Entries of history to keep; 0 for none. */

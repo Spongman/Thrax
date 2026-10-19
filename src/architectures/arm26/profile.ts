@@ -2,7 +2,7 @@
 
 import type { MachineProfile, Registers } from '../contracts'
 import { MODE_SVC, PSR_F, PSR_I } from './cpu'
-import { TEXT_BASE } from './machine'
+import { DISPLAY_BASE, TEXT_BASE } from './machine'
 import { ARM26_REGISTERS } from './registers'
 
 const RESET_PSR = (MODE_SVC | PSR_I | PSR_F) >>> 0
@@ -26,7 +26,7 @@ export function arm26Profile(memoryBytes: number): MachineProfile {
 			{ id: 'vectors', label: 'vectors', start: 0, end: 0x1C, code: true },
 			{ id: 'program', label: 'program', start: TEXT_BASE, end: memoryBytes - 4, code: true },
 		]),
-		dataBase: TEXT_BASE,
+		dataBase: DISPLAY_BASE,
 		isMappedAddress: (value: number) => value >= 0 && value < memoryBytes,
 	})
 	profiles.set(memoryBytes, profile)

@@ -17,7 +17,8 @@ export function betaProfile(memoryBytes: number): MachineProfile {
 		// Reset is supervisor mode at address 0; the editor knows the address alone.
 		resetPc: 0,
 		memorySections: Object.freeze([{ id: 'memory', label: 'memory', start: 0, end: memoryBytes - 4, code: true }]),
-		dataBase: 0,
+		// Where the Bitmap Display looks first, past the code.
+		dataBase: 0x1000,
 		isMappedAddress: (value: number) => value >= 0 && value < memoryBytes,
 	})
 	profiles.set(memoryBytes, profile)
