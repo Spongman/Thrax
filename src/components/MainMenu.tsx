@@ -40,6 +40,7 @@ type Submenu = 'file' | 'examples' | 'window' | 'tools'
 function MainMenu({ onSettings, onLoadExample, onOpenPanel, openPanels, fileActions }: MainMenuProps) {
 	const [open, setOpen] = React.useState(false)
 	const definition = useTHRAXStore((state) => state.target?.definition)
+	const examples = useTHRAXStore((state) => state.targetVariant?.examples)
 	const [submenu, setSubmenu] = React.useState<Submenu | null>(null)
 	const menuRef = React.useRef<HTMLDivElement>(null)
 
@@ -154,7 +155,7 @@ function MainMenu({ onSettings, onLoadExample, onOpenPanel, openPanels, fileActi
 							</button>
 						)))}
 
-					{section('examples', 'Examples', ExamplesIcon, Object.entries(definition?.examples ?? {}).map(([key, example]) => (
+					{section('examples', 'Examples', ExamplesIcon, Object.entries(examples ?? {}).map(([key, example]) => (
 						<button
 							key={key}
 							className="menu-item menu-item-described"

@@ -535,6 +535,15 @@ export interface ArchitectureServices<Settings extends TargetSettings = TargetSe
 	createTools?(): readonly ToolContribution[]
 }
 
+/** What of a definition its settings can change. */
+export interface ArchitectureVariant {
+	/** Monaco language id its sources are edited in. */
+	language?: string
+	registers: readonly RegisterDescriptor[]
+	registerBanks?: readonly RegisterBank[]
+	examples: Readonly<Record<string, Example>>
+}
+
 /** Factories own mutable state; definitions hold only configuration. */
 export interface ArchitectureDefinition<Services = ArchitectureServices> {
 	id: string
@@ -551,7 +560,18 @@ export interface ArchitectureDefinition<Services = ArchitectureServices> {
 	/** Assembles several entry files at once, so "assemble all" is offered. */
 	multipleEntries?: boolean
 	panels?: readonly PanelContribution[]
+	/**
+	 * The language, registers and examples under `settings`, where they differ
+	 * from the definition's own; only settings that rebuild may change them.
+	 * The same settings give the same object.
+	 */
+	variant?(settings: TargetSettings): ArchitectureVariant
 	createServices(): Services & Disposable
+}
+
+/** The variant `settings` select: the definition's own fields unless it varies. */
+export function variantOf(definition: ArchitectureDefinition<unknown>, settings: TargetSettings): ArchitectureVariant {
+	return definition.variant?.(settings) ?? definition
 }
 
 export interface ArchitectureActivation<Services = ArchitectureServices> extends Disposable {

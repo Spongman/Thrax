@@ -62,19 +62,18 @@ const FilesWindow = () => (
 )
 
 const RegistersPanel = () => {
-	const { focusedRegister, hasMachine, hovered, isRunning, hover, registers, setRegisterValue, target, targetProfile } = useTHRAXStore()
+	const { focusedRegister, hasMachine, hovered, isRunning, hover, registers, setRegisterValue, targetProfile, targetVariant } = useTHRAXStore()
 	// Whenever the machine is stopped, which includes a program that has been
 	// assembled and not yet started: setting up a register before the first step
 	// is what editing one is mostly for.  A machine has to exist to be edited,
 	// though, or a cell would take the value only to refuse it.
 	const editable = !isRunning && hasMachine
-	const definition = target?.definition
 	return (
 		<div className="dock-panel">
 			<RegisterView
 				registers={registers}
-				descriptors={definition?.registers ?? NO_REGISTERS}
-				banks={definition?.registerBanks}
+				descriptors={targetVariant?.registers ?? NO_REGISTERS}
+				banks={targetVariant?.registerBanks}
 				isAddress={targetProfile?.isMappedAddress}
 				editable={editable}
 				focused={focusedRegister}

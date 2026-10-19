@@ -914,7 +914,7 @@ function SourcePane({ documentId }: SourcePaneProps) {
 			<div className="source-editor">
 				<Editor
 					height="100%"
-					language={store.target?.definition.language ?? 'plaintext'}
+					language={store.targetVariant?.language ?? 'plaintext'}
 					value={code}
 					onChange={(value) => setDocumentCode(documentId, value ?? '')}
 					theme="vs-dark"
