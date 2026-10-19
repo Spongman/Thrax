@@ -1,18 +1,21 @@
 import type * as Monaco from 'monaco-editor'
+import { ARCH_V2A } from '../a32/isa'
 import { ARMASM_EXTENSION, GNU_EXTENSIONS } from '../assembler/dialect'
-import { ARM_COMPLETIONS, ARM_LANGUAGE_ID, ARM_REGISTERS, armConfiguration, armMonarch } from './grammar'
+import { ARM_LANGUAGE_ID, armConfiguration, armGrammar } from './grammar'
 
 let registered = false
 
-export function registerArmLanguage(monaco: typeof Monaco): Monaco.IDisposable {
+/** The ARM language as the ARCH_* profile `arch` writes it. */
+export function registerArmLanguage(monaco: typeof Monaco, arch = ARCH_V2A): Monaco.IDisposable {
 	// Monaco language identities are permanent; live providers are disposable.
 	if (!registered) {
 		monaco.languages.register({ id: ARM_LANGUAGE_ID, extensions: [...GNU_EXTENSIONS, ARMASM_EXTENSION] })
 		registered = true
 	}
+	const { monarch, completions, registers } = armGrammar(arch)
 	const disposables: Monaco.IDisposable[] = [
 		monaco.languages.setLanguageConfiguration(ARM_LANGUAGE_ID, armConfiguration),
-		monaco.languages.setMonarchTokensProvider(ARM_LANGUAGE_ID, armMonarch),
+		monaco.languages.setMonarchTokensProvider(ARM_LANGUAGE_ID, monarch),
 		monaco.languages.registerCompletionItemProvider(ARM_LANGUAGE_ID, {
 			provideCompletionItems(model, position) {
 				const word = model.getWordUntilPosition(position)
@@ -20,8 +23,8 @@ export function registerArmLanguage(monaco: typeof Monaco): Monaco.IDisposable {
 				const { Keyword, Variable } = monaco.languages.CompletionItemKind
 				return {
 					suggestions: [
-						...ARM_COMPLETIONS.map((name) => ({ label: name, kind: Keyword, insertText: name, range })),
-						...ARM_REGISTERS.map((name) => ({ label: name, kind: Variable, insertText: name, range })),
+						...completions.map((name) => ({ label: name, kind: Keyword, insertText: name, range })),
+						...registers.map((name) => ({ label: name, kind: Variable, insertText: name, range })),
 					],
 				}
 			},

@@ -6,9 +6,9 @@ import { registerArmLanguage } from './language'
 
 export { ARM_LANGUAGE_ID } from './grammar'
 
-/** Language, go-to-definition and data tips for ARM sources. */
-export function installEditor(monaco: typeof Monaco, sources: GotoDefinitionSources & ArmHoverSources) {
-	const language = registerArmLanguage(monaco)
+/** Language, go-to-definition and data tips for ARM sources of the ARCH_* profile `arch`. */
+export function installEditor(monaco: typeof Monaco, sources: GotoDefinitionSources & ArmHoverSources, arch?: number) {
+	const language = registerArmLanguage(monaco, arch)
 	const definitions = registerArmDefinitions(monaco, sources)
 	const tips = registerArmDataTips(monaco, sources)
 	let disposed = false

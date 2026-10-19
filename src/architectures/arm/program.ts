@@ -4,6 +4,7 @@ import type { AssemblyImage } from '../../core/assembly/emitter'
 import { EMPTY_SOURCE_INDEX, SourceIndex, type SourceEntry } from '../../core/sourceIndex'
 import type { AssembledProgram, CodeRow, DataDeclaration, Diagnostic, Disassembly, ProgramImage, SourceLocation, SymbolTables } from '../contracts'
 import { disassembleA32 } from './a32/disassemble'
+import { ARCH_V2A } from './a32/isa'
 
 /** Data rows are a word wide, like the instructions beside them. */
 const DATA_ROW_BYTES = 4
@@ -55,6 +56,8 @@ export class ArmAssembly implements AssembledProgram {
 		readonly values: ReadonlyMap<string, number> = new Map(),
 		/** The dialect it was read in. */
 		readonly dialect = 0,
+		/** The ARCH_* profile it was assembled for. */
+		readonly arch = ARCH_V2A,
 	) {
 		this.sourceIndex = assembled ? armSourceIndex(entryFile, assembled) : EMPTY_SOURCE_INDEX
 		const symbols = (assembled?.symbols ?? []).filter((symbol) => !symbol.name.startsWith('.L'))
@@ -108,12 +111,15 @@ const hexByte = (byte: number) => `0x${(byte & 0xFF).toString(16).toUpperCase().
 /** The word a code row's bytes spell, most significant first. */
 const wordOf = (bytes: readonly number[]) => bytes.reduce((word, byte) => ((word << 8) | (byte & 0xff)) >>> 0, 0)
 
-export const armDisassembly: Disassembly = {
+/** A32 disassembly in the syntax of the ARCH_* profile `arch`. */
+export const a32Disassembly = (arch: number): Disassembly => ({
 	row: (row: CodeRow) => row.instruction
-		? disassembleA32(wordOf(row.bytes), row.address)
+		? disassembleA32(wordOf(row.bytes), row.address, arch)
 		: `${row.bytes.map(hexByte).join(', ')}${row.truncated ? ', …' : ''}`,
 	at: (memory, address) => {
 		const word = memory.word(address)
-		return word === undefined ? null : disassembleA32(word, address)
+		return word === undefined ? null : disassembleA32(word, address, arch)
 	},
-}
+})
+
+export const armDisassembly: Disassembly = a32Disassembly(ARCH_V2A)

@@ -1,8 +1,12 @@
 /**
  * A32 (32-bit ARM instruction set) constants, as the ARM Architecture
  * Reference Manual numbers them.  Shared by every ARM target that runs A32
- * code: the 26-bit ARMv2a machine now, an AArch32 one later.
+ * code: the 26-bit ARMv2a machine and ARMv8-A's AArch32 state.
  */
+
+/** Architecture profiles: which instructions decode and assemble. */
+export const ARCH_V2A = 0
+export const ARCH_V8 = 1
 
 /** Condition field, bits 31-28. */
 export const COND_EQ = 0
@@ -102,11 +106,36 @@ export const FORMAT_BRANCH = 6
 export const FORMAT_SWI = 7
 /** A coprocessor instruction; with no coprocessor attached it is undefined. */
 export const FORMAT_COPROCESSOR = 8
+// ARMv8 only from here.
+/** LDRH STRH LDRSB LDRSH LDRD STRD. */
+export const FORMAT_EXTRA_TRANSFER = 9
+/** MRS and MSR. */
+export const FORMAT_STATUS = 10
+/** BX and BLX to a register. */
+export const FORMAT_EXCHANGE = 11
+/** CLZ, REV, RBIT, the extends and the bitfield instructions. */
+export const FORMAT_MEDIA = 12
+/** SDIV and UDIV. */
+export const FORMAT_DIVIDE = 13
+/** MOVW and MOVT. */
+export const FORMAT_WIDE_MOVE = 14
+/** NOP and the other hints, PLD and the barriers: nothing to do here. */
+export const FORMAT_HINT = 15
+export const FORMAT_BREAKPOINT = 16
+/** LDREX and STREX. */
+export const FORMAT_EXCLUSIVE = 17
+/** BLX to a label, which always enters Thumb. */
+export const FORMAT_BLX_IMMEDIATE = 18
 
-export const FORMAT_NAMES: readonly string[] = Object.freeze(['Undefined', 'Data processing', 'Multiply', 'Swap', 'Load/store', 'Load/store multiple', 'Branch', 'SWI', 'Coprocessor'])
+export const FORMAT_NAMES: readonly string[] = Object.freeze([
+	'Undefined', 'Data processing', 'Multiply', 'Swap', 'Load/store', 'Load/store multiple', 'Branch', 'SWI', 'Coprocessor',
+	'Load/store halfword or doubleword', 'Status register', 'Branch and exchange', 'Media', 'Divide', 'Move wide', 'Hint', 'Breakpoint',
+	'Load/store exclusive', 'Branch with link and exchange (immediate)',
+])
 
-/** Sorts a word into its FORMAT_*, by the ARMv2a encoding map. */
-export function formatOf(word: number): number {
+/** Sorts a word into its FORMAT_*, by the encoding map of `arch`. */
+export function formatOf(word: number, arch = ARCH_V2A): number {
+	if (arch === ARCH_V8) return formatOfV8(word)
 	switch ((word >>> 25) & 7) {
 		case 0:
 			if ((word & 0x0FC000F0) === 0x00000090) return FORMAT_MULTIPLY
@@ -126,6 +155,95 @@ export function formatOf(word: number): number {
 		case 6: return FORMAT_COPROCESSOR
 		default: return word & 0x01000000 ? FORMAT_SWI : FORMAT_COPROCESSOR
 	}
+}
+
+/** The ARMv8 AArch32 map (ARM DDI 0487, F4), for the instructions this library knows. */
+function formatOfV8(word: number): number {
+	if (word >>> 28 === COND_NV) return unconditionalFormat(word)
+	switch ((word >>> 25) & 7) {
+		case 0:
+			if ((word & 0x0F900000) === 0x01000000 && (word & 0x90) !== 0x90) return miscellaneousFormat(word)
+			if ((word & 0x0F0000F0) === 0x00000090) {
+				// UMAAL (0100) is left out; 0101 and 0111 are unallocated.
+				const op = (word >>> 20) & 15
+				return op === 4 || op === 5 || op === 7 ? FORMAT_UNDEFINED : FORMAT_MULTIPLY
+			}
+			if ((word & 0x0F0000F0) === 0x01000090) {
+				// SWP is gone from ARMv8; only the word exclusives are here.
+				if ((word & 0x0FF00FFF) === 0x01900F9F || (word & 0x0FF00FF0) === 0x01800F90) return FORMAT_EXCLUSIVE
+				return FORMAT_UNDEFINED
+			}
+			if ((word & 0x90) === 0x90) {
+				// The unprivileged forms (P clear, W set) are left out.
+				if ((word & 0x01200000) === 0x00200000) return FORMAT_UNDEFINED
+				if (!(word & 0x00400000) && word & 0xF00) return FORMAT_UNDEFINED
+				return FORMAT_EXTRA_TRANSFER
+			}
+			return FORMAT_DATA
+		case 1:
+			if ((word & 0x0FB00000) === 0x03000000) return FORMAT_WIDE_MOVE
+			if ((word & 0x0FB00000) === 0x03200000) {
+				if (word & 0x000F0000) return FORMAT_STATUS
+				return (word & 0xFF) <= 5 || (word & 0xF0) === 0xF0 ? FORMAT_HINT : FORMAT_UNDEFINED
+			}
+			if ((word & 0x01900000) === 0x01000000) return FORMAT_UNDEFINED
+			return FORMAT_DATA
+		case 2: return FORMAT_TRANSFER
+		case 3: return word & 0x10 ? mediaFormat(word) : FORMAT_TRANSFER
+		case 4: return FORMAT_BLOCK
+		case 5: return FORMAT_BRANCH
+		case 6: return FORMAT_COPROCESSOR
+		default: return word & 0x01000000 ? FORMAT_SWI : FORMAT_COPROCESSOR
+	}
+}
+
+/** Where TST, TEQ, CMP and CMN have no S: MRS, MSR, BX, BLX, CLZ, BKPT. */
+function miscellaneousFormat(word: number): number {
+	const op = (word >>> 21) & 3
+	switch ((word >>> 4) & 7) {
+		case 0:
+			// The banked forms (bit 9) are left out.
+			if (word & 0x200) return FORMAT_UNDEFINED
+			if (op & 1) return (word & 0xFFF0) === 0xF000 ? FORMAT_STATUS : FORMAT_UNDEFINED
+			return (word & 0x000F0FFF) === 0x000F0000 ? FORMAT_STATUS : FORMAT_UNDEFINED
+		case 1:
+			if (op === 1 && (word & 0x000FFF00) === 0x000FFF00) return FORMAT_EXCHANGE
+			if (op === 3 && (word & 0x000F0F00) === 0x000F0F00) return FORMAT_MEDIA
+			return FORMAT_UNDEFINED
+		case 3: return op === 1 && (word & 0x000FFF00) === 0x000FFF00 ? FORMAT_EXCHANGE : FORMAT_UNDEFINED
+		case 7: return op === 1 && word >>> 28 === COND_AL ? FORMAT_BREAKPOINT : FORMAT_UNDEFINED
+		default: return FORMAT_UNDEFINED
+	}
+}
+
+/** Bits 27-25 011 with bit 4 set: extends, reversals, divides and bitfields. */
+function mediaFormat(word: number): number {
+	const op1 = (word >>> 20) & 31
+	const op2 = (word >>> 5) & 7
+	if ((op1 & 0x18) === 0x08) {
+		const low = op1 & 7
+		// SXTB SXTH UXTB UXTH and their A forms; the 16-bit pair forms are left out.
+		if (op2 === 3 && (low === 2 || low === 3 || low === 6 || low === 7) && (word & 0x300) === 0) return FORMAT_MEDIA
+		// REV REV16 RBIT REVSH.
+		if ((op2 === 1 || op2 === 5) && (low === 3 || low === 7) && (word & 0x000F0F00) === 0x000F0F00) return FORMAT_MEDIA
+		return FORMAT_UNDEFINED
+	}
+	if ((op1 === 0x11 || op1 === 0x13) && op2 === 0 && (word & 0xF000) === 0xF000) return FORMAT_DIVIDE
+	// SBFX, UBFX, then BFC and BFI.
+	if (((op1 & 0x1E) === 0x1A || (op1 & 0x1E) === 0x1E) && (op2 & 3) === 2) return FORMAT_MEDIA
+	if ((op1 & 0x1E) === 0x1C && (op2 & 3) === 0) return FORMAT_MEDIA
+	return FORMAT_UNDEFINED
+}
+
+/** Condition 1111: BLX to a label, PLD, and the barriers. */
+function unconditionalFormat(word: number): number {
+	if ((word & 0x0E000000) === 0x0A000000) return FORMAT_BLX_IMMEDIATE
+	// PLD and PLDW, immediate and register.
+	if ((word & 0x0F30F000) === 0x0510F000 || (word & 0x0F30F010) === 0x0710F000) return FORMAT_HINT
+	// CLREX, DSB, DMB, ISB.
+	const barrier = (word >>> 4) & 15
+	if (((word & 0xFFFFFF00) >>> 0) === 0xF57FF000 && (barrier === 1 || barrier === 4 || barrier === 5 || barrier === 6)) return FORMAT_HINT
+	return FORMAT_UNDEFINED
 }
 
 /** The 24-bit branch field as a signed byte offset from PC + 8. */

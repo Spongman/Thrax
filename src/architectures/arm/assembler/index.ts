@@ -4,7 +4,8 @@
  * Code assembles from `textBase`.  The data section follows the code: it is
  * placed at a probe address first, then at the first word after the code the
  * probe measured, and again if the code grew (a literal that a MOV built at
- * one address can need a pool word at another).
+ * one address can need a pool word at another).  A target with a fixed data
+ * address gives it as `dataBase` instead.
  */
 
 import { assembleStatements, defaultLimits, StatementKind, type AssemblerConfig, type AssemblyOutcome, type Statement } from '../../../core/assembly/assembler'
@@ -35,6 +36,10 @@ export interface ArmAssemblyOptions {
 	predefined?: ReadonlyMap<string, number>
 	/** The symbol whose address is the entry in GNU code, when defined; `_start` by default. */
 	entrySymbol?: string
+	/** The ARCH_* profile whose instructions are accepted; ARMv2a when absent. */
+	arch?: number
+	/** A fixed start for the data section; after the code when absent. */
+	dataBase?: number
 }
 
 export interface ArmAssemblyResult {
@@ -97,7 +102,7 @@ export function assembleArm(main: AssemblySource, options: ArmAssemblyOptions): 
 		return failed([error.diagnostic])
 	}
 
-	const parsed = parseArm(tokens, { dialect, sources, predefined: options.predefined ?? new Map() })
+	const parsed = parseArm(tokens, { dialect, sources, predefined: options.predefined ?? new Map(), arch: options.arch })
 	if (parsed.diagnostics.length) return failed(parsed.diagnostics)
 
 	let textEnd = options.textBase
@@ -120,10 +125,11 @@ export function assembleArm(main: AssemblySource, options: ArmAssemblyOptions): 
 	})
 
 	// With no data the second section is never used; anywhere will do.
-	let dataBase = parsed.usesData ? Math.floor(options.addressLimit / 2) : options.textBase
+	const fixed = options.dataBase !== undefined
+	let dataBase = options.dataBase ?? (parsed.usesData ? Math.floor(options.addressLimit / 2) : options.textBase)
 	let outcome = assembleStatements(statements, config(dataBase))
 	// A failed layout leaves textEnd alone, which ends the rounds; an overlap moves it on.
-	for (let round = 0; parsed.usesData && round < MAX_ROUNDS; round++) {
+	for (let round = 0; parsed.usesData && !fixed && round < MAX_ROUNDS; round++) {
 		const placed = (textEnd + 3) & ~3
 		if (round > 0 && placed <= dataBase) break
 		dataBase = placed
@@ -131,7 +137,8 @@ export function assembleArm(main: AssemblySource, options: ArmAssemblyOptions): 
 	}
 	if (!outcome.image) return failed(outcome.diagnostics)
 	if (parsed.usesData && textEnd > dataBase) {
-		return failed([new AssemblyError(`The code grew past the data section at 0x${dataBase.toString(16)}; layout did not settle`).diagnostic])
+		const message = fixed ? `The code runs past the data section at 0x${dataBase.toString(16)}` : `The code grew past the data section at 0x${dataBase.toString(16)}; layout did not settle`
+		return failed([new AssemblyError(message).diagnostic])
 	}
 
 	const values = valuesOf(outcome)

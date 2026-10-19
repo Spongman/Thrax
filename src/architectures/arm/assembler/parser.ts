@@ -25,6 +25,7 @@ import type { AssemblySource } from '../../../core/assembly/sources'
 import { TokenCursor, TokenKind, makeToken, positionOf, type Position, type Token } from '../../../core/assembly/tokens'
 import { AssemblyError } from '../../../core/diagnostics'
 import type { Diagnostic } from '../../../core/types'
+import { ARCH_V2A } from '../a32/isa'
 import { DIALECT_ARMASM } from './dialect'
 import { parseInstruction, parseMnemonic, type InstructionScope } from './instructions'
 import { LiteralPool } from './pool'
@@ -66,6 +67,8 @@ export interface ArmParseOptions {
 	sources: ReadonlyMap<string, AssemblySource>
 	/** Names defined before the program, such as SWI numbers. */
 	predefined: ReadonlyMap<string, number>
+	/** The ARCH_* profile; ARMv2a when absent. */
+	arch?: number
 }
 
 /** What the hooks record as the engine runs. */
@@ -142,6 +145,7 @@ class Parser {
 		this.armasm = options.dialect === DIALECT_ARMASM
 		this.syntax = this.armasm ? armasmExpressionSyntax : gnuExpressionSyntax
 		this.scope = {
+			arch: options.arch ?? ARCH_V2A,
 			syntax: this.syntax,
 			pool: () => this.pools[this.section],
 			swiNames: options.predefined,
@@ -351,7 +355,7 @@ class Parser {
 		}
 		const head = cursor.next()
 		if (head.kind !== Identifier) {
-			const hint = label && isKeyword(label.text) ? `; '${label.text}' in column 1 is read as a label, so indent instructions` : ''
+			const hint = label && isKeyword(label.text, this.scope.arch) ? `; '${label.text}' in column 1 is read as a label, so indent instructions` : ''
 			throw new AssemblyError(`Unexpected '${head.text}'${hint}`, positionOf(head))
 		}
 		const name = head.text.toUpperCase()
@@ -361,7 +365,7 @@ class Parser {
 		}
 		if (label) this.label(label.text, label, name === 'DCD' || name === 'DCW')
 		if (ARMASM_DIRECTIVES.has(name)) return this.armasmDirective(name, head, cursor)
-		if (!parseMnemonic(head.text) && label && isKeyword(label.text)) {
+		if (!parseMnemonic(head.text, this.scope.arch) && label && isKeyword(label.text, this.scope.arch)) {
 			throw new AssemblyError(`'${label.text}' in column 1 is read as a label; indent instructions and directives`, positionOf(label))
 		}
 		this.instruction(head, cursor)
@@ -627,8 +631,8 @@ class Parser {
 }
 
 /** Whether `text` reads as a mnemonic or directive, for the column-1 hint. */
-function isKeyword(text: string): boolean {
-	return parseMnemonic(text) !== null || ARMASM_DIRECTIVES.has(text.toUpperCase())
+function isKeyword(text: string, arch: number): boolean {
+	return parseMnemonic(text, arch) !== null || ARMASM_DIRECTIVES.has(text.toUpperCase())
 }
 
 /** A Newline token, for splicing streams. */
