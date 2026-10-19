@@ -1,7 +1,7 @@
 import type { SourceLocation } from '../../architectures/contracts'
 import { AssemblyError } from '../diagnostics'
 import type { Diagnostic } from '../types'
-import { ByteEmitter, type AssemblyImage, type Provenance } from './emitter'
+import { ByteEmitter, type AssemblyImage, type MappingKind, type Provenance } from './emitter'
 import { evaluate, type Arithmetic, type EvaluationScope, type Expr } from './expressions'
 import { MacroTable, location, type ExpansionFrame, type MacroDefinition } from './macroEngine'
 import { SymbolScope } from './symbols'
@@ -67,11 +67,18 @@ export interface AlignStatement {
 
 export interface FragmentStatement {
 	kind: 11
-	size: number
-	/** Called while emitting; returns exactly `size` bytes. */
-	encode(context: HookContext): ArrayLike<number>
-	/** Shared by the fragment's bytes; null leaves them unmapped. */
-	provenance: Provenance | null
+	/**
+	 * Bytes it takes, or how to choose them from what layout knows, as a
+	 * forward reference leaves a value unknown; emission keeps layout's choice.
+	 */
+	size: number | ((context: HookContext) => number)
+	/** Called while emitting; returns exactly the `size` chosen. */
+	encode(context: HookContext, size: number): ArrayLike<number>
+	/**
+	 * Shared by the fragment's bytes; null leaves them unmapped.  A kind maps
+	 * each execution apart, at the line a macro was invoked from.
+	 */
+	provenance: Provenance | MappingKind | null
 	at: Position
 }
 
@@ -175,6 +182,9 @@ class Engine implements EvaluationScope, HookContext {
 	private expansions = 0
 	private readonly labelTrace: number[] = []
 	private labelIndex = 0
+	/** Sizes layout chose for fragments that choose their own, in execution order. */
+	private readonly sizeTrace: number[] = []
+	private sizeIndex = 0
 	private readonly labels = new Map<string, number>()
 	private readonly diagnostics: Diagnostic[] = []
 
@@ -232,6 +242,7 @@ class Engine implements EvaluationScope, HookContext {
 		this.movable = []
 		this.expansions = 0
 		this.labelIndex = 0
+		this.sizeIndex = 0
 		for (const statement of statements) {
 			this.at = statement.at
 			this.located = null
@@ -322,16 +333,30 @@ class Engine implements EvaluationScope, HookContext {
 		}
 	}
 
+	private fragmentSize(statement: FragmentStatement): number {
+		const { size } = statement
+		if (typeof size === 'number') return size
+		if (this.emitting) return this.sizeTrace[this.sizeIndex++] ?? size(this)
+		const chosen = size(this)
+		if (!Number.isSafeInteger(chosen) || chosen < 0) throw new RangeError(`Fragment chose ${chosen} bytes`)
+		this.sizeTrace.push(chosen)
+		return chosen
+	}
+
 	private fragment(statement: FragmentStatement) {
-		const { size, at } = statement
+		const { at } = statement
+		const size = this.fragmentSize(statement)
 		this.reserve(size, at)
 		if (!this.emitting) {
 			this.dot += size
 			return
 		}
+		const provenance = typeof statement.provenance === 'string'
+			? this.instruction ?? { kind: statement.provenance, source: this.source, expansion: this.frames.slice() }
+			: statement.provenance
 		let bytes: ArrayLike<number>
 		try {
-			bytes = statement.encode(this)
+			bytes = statement.encode(this, size)
 		} catch (error) {
 			// Later labels must not move because this fragment failed.
 			this.dot += size
@@ -342,9 +367,9 @@ class Engine implements EvaluationScope, HookContext {
 		const layer = this.layers[this.section]
 		const address = this.wrap(this.dot)
 		if (address + size <= (this.config.addressModulus ?? Infinity)) {
-			emitter.emitBytes(address, bytes, statement.provenance, layer)
+			emitter.emitBytes(address, bytes, provenance, layer)
 		} else {
-			for (let index = 0; index < size; index++) emitter.emit(this.wrap(this.dot + index), bytes[index], statement.provenance, layer)
+			for (let index = 0; index < size; index++) emitter.emit(this.wrap(this.dot + index), bytes[index], provenance, layer)
 		}
 		this.dot += size
 		if (emitter.count > this.config.limits.maxBytes) {

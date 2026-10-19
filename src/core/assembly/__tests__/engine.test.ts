@@ -235,6 +235,51 @@ describe('sections, scopes and fragments', () => {
 	})
 })
 
+describe('fragments that choose their size', () => {
+	const { Fragment } = StatementKind
+	/** One byte where `target` is known in layout and below 256, else two, as a zero-page operand. */
+	const short = (target: string, line: Position): Statement => ({
+		kind: Fragment, at: line, provenance: 'instruction',
+		size: (context) => {
+			const value = context.value(expr(target), false)
+			return value !== undefined && value < 256 ? 1 : 2
+		},
+		encode: (context, size) => {
+			const value = context.value(expr(target), true)!
+			return size === 1 ? [value] : [value & 0xFF, value >> 8]
+		},
+	})
+
+	it('keeps the size layout chose once a forward reference resolves', () => {
+		const program: Statement[] = [
+			{ kind: Label, name: 'back', at: line(1) },
+			short('back', line(2)),
+			short('ahead', line(3)),
+			{ kind: Label, name: 'ahead', at: line(4) },
+		]
+		const { image, diagnostics, symbols } = assembleStatements(program, config())
+		expect(diagnostics).toEqual([])
+		// `ahead` is 3, small enough for one byte, but layout could not know that.
+		expect(symbols.lookup('ahead')).toBe(3)
+		expect([...image!.sections[0].bytes]).toEqual([0, 3, 0])
+	})
+
+	it('maps each execution of a kind apart, at the invoking line', () => {
+		const macro = { name: 'twice', parameters: [], body: [short('1', line(9))], at: line(8) }
+		const program: Statement[] = [
+			{ kind: Define, macro, at: line(8) },
+			{ kind: Invoke, name: 'twice', args: [], at: line(1) },
+			{ kind: Invoke, name: 'twice', args: [], at: line(2) },
+		]
+		const { image, diagnostics } = assembleStatements(program, config())
+		expect(diagnostics).toEqual([])
+		expect(image!.sourceMappings.map(({ address, byteLength, kind, source }) => [address, byteLength, kind, source.line])).toEqual([
+			[0, 1, 'instruction', 1],
+			[1, 1, 'instruction', 2],
+		])
+	})
+})
+
 describe('macro table policy', () => {
 	const body: Statement[] = []
 	it('can keep the first of two same-arity definitions and allow repeated parameters', () => {
