@@ -1,0 +1,139 @@
+// Beta instruction set for UASM.
+// Written for THRAX from the Beta ISA specification (computationstructures.org
+// notes/pdfs/beta.pdf) and the BSim documentation. Macro names, argument order
+// and defaults follow the 6.004 course library, so course programs assemble
+// unchanged. Destinations are last; omitted registers default to R31.
+
+// Data: little-endian. WORD and LONG are 32-bit synonyms, as in the course library.
+.macro SHORT(x) x%0x100 (x>>8)%0x100
+.macro LONG(x) SHORT(x) SHORT(x>>16)
+.macro WORD(x) LONG(x)
+.macro STORAGE(NWORDS) . = .+(4*NWORDS)
+.macro RESERVE(N) . = .+(4*N)
+
+// Registers
+r0 = 0   r1 = 1   r2 = 2   r3 = 3   r4 = 4   r5 = 5   r6 = 6   r7 = 7
+r8 = 8   r9 = 9   r10 = 10 r11 = 11 r12 = 12 r13 = 13 r14 = 14 r15 = 15
+r16 = 16 r17 = 17 r18 = 18 r19 = 19 r20 = 20 r21 = 21 r22 = 22 r23 = 23
+r24 = 24 r25 = 25 r26 = 26 r27 = 27 r28 = 28 r29 = 29 r30 = 30 r31 = 31
+R0 = 0   R1 = 1   R2 = 2   R3 = 3   R4 = 4   R5 = 5   R6 = 6   R7 = 7
+R8 = 8   R9 = 9   R10 = 10 R11 = 11 R12 = 12 R13 = 13 R14 = 14 R15 = 15
+R16 = 16 R17 = 17 R18 = 18 R19 = 19 R20 = 20 R21 = 21 R22 = 22 R23 = 23
+R24 = 24 R25 = 25 R26 = 26 R27 = 27 R28 = 28 R29 = 29 R30 = 30 R31 = 31
+
+// Software conventions (beta.pdf section 7.1)
+bp = 27  lp = 28  sp = 29  xp = 30
+BP = 27  LP = 28  SP = 29  XP = 30
+
+// Instruction formats (beta.pdf section 3):
+//   opcode[31:26] Rc[25:21] Ra[20:16] Rb[15:11]
+//   opcode[31:26] Rc[25:21] Ra[20:16] literal[15:0]
+// THRAX maps every word emitted through betaop or betaopc as one instruction.
+.macro betaop(OP,RA,RB,RC) {
+	.align 4
+	LONG((OP<<26)+((RC%0x20)<<21)+((RA%0x20)<<16)+((RB%0x20)<<11))
+}
+.macro betaopc(OP,RA,CC,RC) {
+	.align 4
+	LONG((OP<<26)+((RC%0x20)<<21)+((RA%0x20)<<16)+(CC%0x10000))
+}
+.macro BETAOP(OP,RA,RB,RC) betaop(OP,RA,RB,RC)
+.macro BETAOPC(OP,RA,CC,RC) betaopc(OP,RA,CC,RC)
+
+// literal = (target - current instruction)/4 - 1, a word offset from PC+4.
+.macro BETABR(OP,RA,RC,LABEL) betaopc(OP,RA,((LABEL-.)>>2)-1,RC)
+
+// Operate instructions
+.macro ADD(RA,RB,RC)    betaop(0x20,RA,RB,RC)
+.macro SUB(RA,RB,RC)    betaop(0x21,RA,RB,RC)
+.macro MUL(RA,RB,RC)    betaop(0x22,RA,RB,RC)
+.macro DIV(RA,RB,RC)    betaop(0x23,RA,RB,RC)
+.macro CMPEQ(RA,RB,RC)  betaop(0x24,RA,RB,RC)
+.macro CMPLT(RA,RB,RC)  betaop(0x25,RA,RB,RC)
+.macro CMPLE(RA,RB,RC)  betaop(0x26,RA,RB,RC)
+.macro AND(RA,RB,RC)    betaop(0x28,RA,RB,RC)
+.macro OR(RA,RB,RC)     betaop(0x29,RA,RB,RC)
+.macro XOR(RA,RB,RC)    betaop(0x2A,RA,RB,RC)
+.macro XNOR(RA,RB,RC)   betaop(0x2B,RA,RB,RC)
+.macro SHL(RA,RB,RC)    betaop(0x2C,RA,RB,RC)
+.macro SHR(RA,RB,RC)    betaop(0x2D,RA,RB,RC)
+.macro SRA(RA,RB,RC)    betaop(0x2E,RA,RB,RC)
+
+.macro ADDC(RA,C,RC)    betaopc(0x30,RA,C,RC)
+.macro SUBC(RA,C,RC)    betaopc(0x31,RA,C,RC)
+.macro MULC(RA,C,RC)    betaopc(0x32,RA,C,RC)
+.macro DIVC(RA,C,RC)    betaopc(0x33,RA,C,RC)
+.macro CMPEQC(RA,C,RC)  betaopc(0x34,RA,C,RC)
+.macro CMPLTC(RA,C,RC)  betaopc(0x35,RA,C,RC)
+.macro CMPLEC(RA,C,RC)  betaopc(0x36,RA,C,RC)
+.macro ANDC(RA,C,RC)    betaopc(0x38,RA,C,RC)
+.macro ORC(RA,C,RC)     betaopc(0x39,RA,C,RC)
+.macro XORC(RA,C,RC)    betaopc(0x3A,RA,C,RC)
+.macro XNORC(RA,C,RC)   betaopc(0x3B,RA,C,RC)
+.macro SHLC(RA,C,RC)    betaopc(0x3C,RA,C,RC)
+.macro SHRC(RA,C,RC)    betaopc(0x3D,RA,C,RC)
+.macro SRAC(RA,C,RC)    betaopc(0x3E,RA,C,RC)
+
+// Memory and control transfer
+.macro LD(RA,CC,RC)     betaopc(0x18,RA,CC,RC)
+.macro LD(CC,RC)        betaopc(0x18,R31,CC,RC)
+.macro ST(RC,CC,RA)     betaopc(0x19,RA,CC,RC)
+.macro ST(RC,CC)        betaopc(0x19,R31,CC,RC)
+.macro JMP(RA,RC)       betaopc(0x1B,RA,0,RC)
+.macro JMP(RA)          betaopc(0x1B,RA,0,R31)
+.macro BEQ(RA,LABEL,RC) BETABR(0x1C,RA,RC,LABEL)
+.macro BEQ(RA,LABEL)    BETABR(0x1C,RA,R31,LABEL)
+.macro BNE(RA,LABEL,RC) BETABR(0x1D,RA,RC,LABEL)
+.macro BNE(RA,LABEL)    BETABR(0x1D,RA,R31,LABEL)
+.macro LDR(LABEL,RC)    BETABR(0x1F,R31,RC,LABEL)
+
+// Convenience macros (beta.pdf section 7.2, BSim documentation)
+.macro BF(RA,LABEL,RC)  BEQ(RA,LABEL,RC)
+.macro BF(RA,LABEL)     BEQ(RA,LABEL)
+.macro BT(RA,LABEL,RC)  BNE(RA,LABEL,RC)
+.macro BT(RA,LABEL)     BNE(RA,LABEL)
+.macro BR(LABEL,RC)     BEQ(R31,LABEL,RC)
+.macro BR(LABEL)        BR(LABEL,R31)
+.macro MOVE(RA,RC)      ADD(RA,R31,RC)
+.macro CMOVE(CC,RC)     ADDC(R31,CC,RC)
+
+// The stack grows upward; SP addresses the first free word.
+.macro PUSH(RA)         ADDC(SP,4,SP) ST(RA,-4,SP)
+.macro POP(RC)          LD(SP,-4,RC) ADDC(SP,-4,SP)
+.macro ALLOCATE(N)      ADDC(SP,4*N,SP)
+.macro DEALLOCATE(N)    SUBC(SP,4*N,SP)
+
+.macro CALL(LABEL)      BR(LABEL,LP)
+.macro CALL(LABEL,N)    BR(LABEL,LP) DEALLOCATE(N)
+.macro RTN()            JMP(LP)
+.macro XRTN()           JMP(XP)
+.macro GETFRAME(OFFSET,REG) LD(BP,OFFSET,REG)
+.macro PUTFRAME(REG,OFFSET) ST(REG,OFFSET,BP)
+
+// Privileged operations use opcode 0; the function code is in the literal.
+// Their effects belong to the machine profile, not to the assembler.
+.macro PRIV_OP(FNCODE)  betaopc(0x00,0,FNCODE,0)
+.macro HALT()           PRIV_OP(0)
+.macro RDCHAR()         PRIV_OP(1)
+.macro WRCHAR()         PRIV_OP(2)
+.macro CYCLE()          PRIV_OP(3)
+.macro TIME()           PRIV_OP(4)
+.macro CLICK()          PRIV_OP(5)
+.macro RANDOM()         PRIV_OP(6)
+.macro SEED()           PRIV_OP(7)
+.macro SERVER()         PRIV_OP(8)
+.macro SVC(CODE)        betaopc(0x01,0,CODE,0)
+
+// Exception vectors and the supervisor bit, as in the course beta.uasm and BSim
+VEC_RESET = 0
+VEC_II = 4
+VEC_SEGFAULT = 8
+VEC_CLK = 12
+VEC_KBD = 16
+VEC_MOUSE = 20
+PC_SUPERVISOR = 0x80000000
+PC_MASK = 0x7fffffff
+
+// BSim MMU registers, read and written by LD and ST in supervisor mode under .options segmentation
+SEG_BASE = -4
+SEG_BOUNDS = -8
