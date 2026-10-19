@@ -30,7 +30,7 @@ A son of MARS (but in a different language). A modern, interactive web-based por
 - ✅ **Portable Export**: Download assembled text in HexText format
 - ✅ **MARS Tools**: Bitmap display, keyboard/display MMIO, cache simulator, pipeline model, instruction statistics, branch history, MIPS X-Ray, memory reference visualization, Mars Bot, Scavenger Hunt, and the Digital Lab Simulator
 - ✅ **Settings**: Shared display and history preferences, plus each architecture's own options, kept per architecture: the MARS options with the three memory configurations for MIPS, and memory size and the console default for Beta
-- ✅ **Example Programs**: 13 ready-to-run MIPS programs, 12 Beta programs, among them the 6.004 TinyOS lab kernel, 13 6502 programs and 12 Z80 programs
+- ✅ **Example Programs**: 13 ready-to-run MIPS programs, 12 Beta programs, among them the 6.004 TinyOS lab kernel, 13 6502 programs, 12 Z80 programs and 13 AArch64 programs
 - ✅ **Dark Theme UI**: VS Code-inspired interface
 
 ### Supported Instruction Types
@@ -206,6 +206,33 @@ Assembly is the common subset of zasm and sjasmplus:
 - Not supported: conditionals (`IF`), `PHASE`, `STRUCT`, unnamed and temporary labels, and `<`/`>` as low and high byte
 - Sources use the `z80` editor language with data tips for registers, pairs and what they point at, symbols and numbers; new files are `.z80`
 
+### ARMv8-A (AArch64)
+AArch64 user programs at EL0, as Linux runs them, with no MMU: X0-X30, SP and
+the PC as exact 64-bit values (the Registers panel shows them in full, with a
+W tab for the 32-bit views), and NZCV. The integer A64 instruction set: add and
+subtract with immediates, shifted and extended registers, carry, logical
+(bitmask) immediates, move wide, bitfields and extract, multiply, multiply-long
+and divide, conditional select and compare, every branch, and loads and stores
+of every width with sign extension, pre- and post-index, register offsets,
+pairs, unscaled offsets and literals. `svc`, `hlt`, `brk` and `nop` complete it.
+Floating point and SIMD are not supported. An execution-state setting selects
+AArch64; AArch32 is to follow.
+
+The machine:
+- Memory from `0x00400000`: code there, `.data` at `0x00420000`, the program break after the data, and SP starting at the top. The size is a setting (1, 4 or 16 MB); anything outside it faults. Unaligned data accesses are allowed and SP alignment is not checked
+- System calls by `svc #0` with the number in X8 and the result in X0: `read` (63) from fd 0, waiting for typed input; `write` (64) to fd 1 and 2; `exit` (93) and `exit_group` (94); `brk` (214). Other numbers stop the program with an error
+- MARS's keyboard and display registers answer 32-bit accesses at `0xFFFF0000` for the Keyboard and Display tool; the Bitmap Display reads words from `.data`
+- `bl`/`blr` and `ret` keep the call stack; every effect, 64-bit values included, steps back exactly
+
+Assembly is GNU as for AArch64 (`.s`/`.S`):
+- `//` and `/* */` comments, `;` between statements, `name:` and numeric `1:` labels referred to as `1b`/`1f`; the program starts at `_start`, else `main`
+- Registers `x0`-`x30`, `w0`-`w30`, `sp`, `wsp`, `xzr`, `wzr`, `lr`, `fp`; `#` before immediates is optional; `:lo12:` with `adrp`; `ldr x0, =value` becomes a `mov` where one encodes the value, else loads from a literal pool placed at `.ltorg`/`.pool` or the end of the section
+- The preferred aliases: `mov`, `mvn`, `neg`, `cmp`, `cmn`, `tst`, `lsl`/`lsr`/`asr`/`ror`, `ubfx`/`sbfx`/`ubfiz`/`sbfiz`/`bfi`/`bfxil`/`bfc`, `sxtb`/`uxth`..., `cset`/`csetm`/`cinc`/`cinv`/`cneg`, `mul`/`mneg`/`smull`/`umull`; `b.eq` or `beq`. The disassembly prints them too
+- Directives: `.text`, `.data`, `.bss`, `.rodata`, `.section`, `.byte`, `.hword`, `.word`, `.quad` (and their GNU synonyms), `.ascii`, `.asciz`, `.string`, `.align`/`.p2align`, `.balign`, `.space`/`.skip`/`.zero`, `.fill`, `.equ`/`.set`/`=`, `.global`, `.include`, `.macro`/`.endm` with `\param`, defaults and `\@`, `.rept`/`.endr`, `.inst`, `.end`; object-file directives such as `.type` and `.cfi_*` are accepted and ignored
+- Literals are exact to 64 bits; arithmetic on symbols is exact within 2^53
+- Not supported: conditionals (`.if`), `.irp`, sections other than text and data, and relocations other than `:lo12:`
+- Sources use the `aarch64` editor language with data tips for X and W registers, effective addresses, symbols and numbers; new files are `.s`
+
 ### Files, Folders and Links
 The workspace autosaves to the browser as you type, so a reload picks up where you
 left off; **Save in this browser** keeps a second copy on purpose. Files come in from
@@ -315,7 +342,8 @@ src/
 │   ├── mips/              # MARS assembler and simulator (core/), history, editor, examples, MIPS-only tools
 │   ├── beta/              # Beta CPU, BSim machine, UASM dialect and beta.uasm, editor, examples
 │   ├── mos6502/           # 6502 CPU, I/O page machine, ca65-style dialect, editor, examples
-│   └── z80/               # Z80 CPU, device page machine, Zilog-syntax dialect, editor, examples
+│   ├── z80/               # Z80 CPU, device page machine, Zilog-syntax dialect, editor, examples
+│   └── armv8/             # ARMv8-A: execution states; a64/ holds the A64 assembler, CPU and Linux machine
 ├── core/                  # Shared assembler engine (assembly/), diagnostics, source index, history, settings
 ├── debug/                 # Debug session: breakpoints and stepping
 ├── tools/                 # Statistics, profile, cache, branch history, pipeline, memory reference
