@@ -29,5 +29,6 @@ describe('MIPS known-output corpus', () => {
 		if (process.env.THRAX_CORPUS_OUT) writeFileSync(process.env.THRAX_CORPUS_OUT, outputs.join('\n'))
 		expect(failures.slice(0, 20)).toEqual([])
 		expect(failures).toHaveLength(0)
-	})
+	// About 4 s alone, so the default 5 s fails under a loaded full run.
+	}, 30_000)
 })
