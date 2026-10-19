@@ -1,10 +1,16 @@
 /**
  * ARMv8-A: programs in the execution state the settings choose, assembled
- * and run by that state. AArch64 is the one implemented: GNU as A64 source on
- * the shared engine, run at EL0 under Linux system calls.
+ * and run by that state. AArch64 runs GNU as A64 source on the shared engine;
+ * AArch32 runs A32 source in GNU as or armasm syntax through the shared ARM
+ * library. Both run in user mode under Linux system calls.
  */
 
-import type { ArchitectureDefinition, ArchitectureServices, Disposable, Machine } from '../contracts'
+import { ARCH_V8 } from '../arm/a32/isa'
+import { ARM_LANGUAGE_ID } from '../arm/editor/grammar'
+import type { ArchitectureDefinition, ArchitectureServices, ArchitectureVariant, Disposable, Machine } from '../contracts'
+import { A32_EXAMPLES } from './a32/examples'
+import { A32_REGISTER_BANKS, A32_REGISTERS } from './a32/registers'
+import { createA32State } from './a32/state'
 import { A64_REGISTER_BANKS, A64_REGISTERS } from './a64/registers'
 import { createA64State } from './a64/state'
 import { A64_LANGUAGE_ID } from './editor/grammar'
@@ -16,17 +22,22 @@ import { ARMV8_SETTINGS, DEFAULT_ARMV8_SETTINGS, type Armv8Settings } from './se
 /** Each execution state the setting can name, made fresh per activation. */
 const STATES: Readonly<Record<string, () => ExecutionState>> = {
 	aarch64: createA64State,
+	aarch32: createA32State,
+}
+
+/** What each state edits, shows and offers; an unknown one falls back to AArch64. */
+const VARIANTS: Readonly<Record<string, ArchitectureVariant>> = {
+	aarch64: Object.freeze({ language: A64_LANGUAGE_ID, registers: A64_REGISTERS, registerBanks: A64_REGISTER_BANKS, examples: EXAMPLES }),
+	aarch32: Object.freeze({ language: ARM_LANGUAGE_ID, registers: A32_REGISTERS, registerBanks: A32_REGISTER_BANKS, examples: A32_EXAMPLES }),
 }
 
 const definition: ArchitectureDefinition<ArchitectureServices<Armv8Settings>> = {
 	id: manifest.id,
 	name: manifest.name,
-	language: A64_LANGUAGE_ID,
+	...VARIANTS.aarch64,
 	fileExtensions: manifest.fileExtensions,
-	registers: A64_REGISTERS,
-	registerBanks: A64_REGISTER_BANKS,
-	examples: EXAMPLES,
 	settings: ARMV8_SETTINGS,
+	variant: ({ executionState }) => VARIANTS[executionState as string] ?? VARIANTS.aarch64,
 	createServices(): ArchitectureServices<Armv8Settings> {
 		const states = new Map<string, ExecutionState>()
 		let machine: Machine | undefined
@@ -64,17 +75,20 @@ const definition: ArchitectureDefinition<ArchitectureServices<Armv8Settings>> = 
 			},
 			profile: (settings) => stateFor(settings).profile(settings),
 			describeToken: (text, column, inspection) => current().describeToken(text, column, inspection),
+			// Both languages, so a file reads right whichever state is chosen.
 			async installEditor(monaco, host) {
 				check()
-				const { installEditor } = await import('./editor')
+				const [a64Editor, armEditor] = await Promise.all([import('./editor'), import('../arm/editor')])
 				check()
-				const contribution = installEditor(monaco, {
+				const sources = {
 					files: () => host.files(),
 					active: () => host.active(),
-					open: (file, line) => host.open(file, line),
+					open: (file: string, line: number) => host.open(file, line),
 					inspection: () => host.inspection(),
 					values: () => current().values(),
-				})
+				}
+				const parts = [a64Editor.installEditor(monaco, sources), armEditor.installEditor(monaco, sources, ARCH_V8)]
+				const contribution = { dispose: () => parts.splice(0).reverse().forEach((part) => part.dispose()) }
 				contributions.push(contribution)
 				return contribution
 			},

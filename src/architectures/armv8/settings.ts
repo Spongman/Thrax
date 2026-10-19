@@ -3,9 +3,10 @@
 import { defineSettings } from '../../core/settings'
 import { DEFAULT_MEMORY_BYTES, MEMORY_SIZES } from './a64/layout'
 
-/** Execution states this target can run; AArch32 is to follow. */
+/** Execution states this target can run. */
 export const EXECUTION_STATES: readonly { value: string, label: string }[] = [
 	{ value: 'aarch64', label: 'AArch64 (A64)' },
+	{ value: 'aarch32', label: 'AArch32 (A32)' },
 ]
 
 export type Armv8Settings = {
@@ -28,7 +29,7 @@ export const ARMV8_SETTINGS = defineSettings<Armv8Settings>({
 			control: { kind: 'choice', options: EXECUTION_STATES },
 			isValid: (value) => EXECUTION_STATES.some((state) => state.value === value),
 			label: 'Execution state',
-			hint: 'The instruction set programs are written in and run as',
+			hint: 'The instruction set programs are written in and run as: A64, or A32 (no Thumb, VFP or NEON)',
 		},
 		{
 			key: 'memoryBytes', group: 'Simulator', rebuild: true,
