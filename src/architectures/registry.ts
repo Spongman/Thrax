@@ -4,6 +4,7 @@ import type { ArchitectureActivation, ArchitectureDefinition, ArchitectureServic
 import { manifest as betaManifest } from './beta/manifest'
 import { manifest as mipsManifest } from './mips/manifest'
 import { manifest as mos6502Manifest } from './mos6502/manifest'
+import { manifest as z80Manifest } from './z80/manifest'
 
 /** A later request replaced this one before it could commit. */
 export class ActivationSuperseded extends Error {
@@ -29,12 +30,14 @@ const loaders: Record<string, Loader<ArchitectureServices>> = {
 	mips: () => import('./mips'),
 	beta: () => import('./beta'),
 	mos6502: () => import('./mos6502'),
+	z80: () => import('./z80'),
 }
 
 const manifests: Readonly<Record<string, ArchitectureManifest>> = {
 	mips: mipsManifest,
 	beta: betaManifest,
 	mos6502: mos6502Manifest,
+	z80: z80Manifest,
 }
 
 /** Ids of every architecture the catalog can load. */
