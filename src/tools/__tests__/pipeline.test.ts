@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { decode } from '../../core/decoder'
-import { PipelineModel, registerEffects, type PipelineSettings } from '../pipeline'
-import { build, withExit, words } from '../../core/__tests__/helpers'
+import { decode } from '../../architectures/mips/core/decoder'
+import { PipelineModel, type PipelineSettings } from '../pipeline'
+import { registerEffects } from '../../architectures/mips/instructions'
+import { build, toolMachine, withExit, words } from '../../architectures/mips/core/__tests__/helpers'
 
 const SETTINGS: PipelineSettings = {
 	dataHazards: 'forwarding',
@@ -15,7 +16,7 @@ const SETTINGS: PipelineSettings = {
 async function analyse(body: string, settings: Partial<PipelineSettings> = {}, delaySlots = false) {
 	const simulator = build(withExit(body))
 	const model = new PipelineModel({ ...SETTINGS, ...settings })
-	model.delaySlots = delaySlots
+	model.onConfigure(toolMachine({ delayedBranching: delaySlots }))
 	simulator.observers.push(model)
 	await simulator.run()
 	return model.snapshot()

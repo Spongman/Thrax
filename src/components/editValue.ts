@@ -7,7 +7,7 @@
  * hands back the bit pattern, which is what the machine stores.
  */
 
-import { doubleToBits, singleToBits } from '../core/coprocessor'
+import { doubleToBits, singleToBits } from '../core/ieee754'
 
 /** How a cell is being shown, which is how what is typed into it is read. */
 export type EditFormat = '0n' | '0x' | 'f' | 'd'

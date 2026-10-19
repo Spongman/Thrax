@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { DataEntry, MemoryView } from '../../core/types'
+import type { DataEntry } from '../../core/types'
+import { WordMemory } from '../../architectures/mips/machine'
 import { dataRuns, runAt, valueOf } from '../symbolValue'
 
 /**
@@ -21,9 +22,7 @@ const entries: DataEntry[] = [
 const runs = dataRuns(entries)
 
 /** Memory holds words, so a value is written as the word it sits in. */
-const memoryOf = (words: Array<[number, number]>): MemoryView => ({
-	words: new Map(words.map(([address, value]) => [address >>> 2, value])),
-})
+const memoryOf = (words: Array<[number, number]>) => new WordMemory(new Map(words.map(([address, value]) => [address >>> 2, value])))
 
 describe('what a symbol was declared as', () => {
 	it('finds the run an address falls in', () => {

@@ -1,14 +1,12 @@
 import React from 'react'
 import './SymbolTableView.css'
 import './ToggleGroup.css'
-import type { DataEntry, SymbolTables } from '../core/types'
+import type { DataDeclaration, MemoryInspector, SourceLocation, SymbolTables } from '../architectures/contracts'
 import { formatWord } from '../core/format'
 import HexNumber from './HexNumber'
 import FilterInput from './FilterInput'
 import { useHover, useHovered } from '../store/hover'
 import { dataRuns, runAt, valueOf } from './symbolValue'
-import type { MemoryView } from '../core/types'
-import type { SourceLocation } from '../core/sourceIndex'
 import { useTHRAXStore } from '../store/thraxStore'
 import { isFlagSet, useStoredState } from '../hooks/useStoredState'
 import { nextToggles } from './toggleGroup'
@@ -70,7 +68,7 @@ export function symbolSections(rows: SymbolRow[]): Array<{ file: string | null, 
  * there.  A global has left its unit's table behind, so every unit is asked;
  * two units cannot both define one global, which is what makes that safe.
  */
-export function symbolSite(sites: Map<string, Map<string, SourceLocation>>, row: SymbolRow): SourceLocation | null {
+export function symbolSite(sites: ReadonlyMap<string, ReadonlyMap<string, SourceLocation>>, row: SymbolRow): SourceLocation | null {
 	if (row.file !== null) return sites.get(row.file)?.get(row.name) ?? null
 	for (const unit of sites.values()) {
 		const site = unit.get(row.name)
@@ -89,9 +87,9 @@ interface SymbolTableViewProps {
 	/** Says what is under the pointer here: a symbol is its address as well. */
 	onHover?: (values: { address?: number | null, symbol?: string | null }) => void
 	/** The runs the data directives laid out, which say what a name was declared as. */
-	data?: readonly DataEntry[]
+	data?: readonly DataDeclaration[]
 	/** Memory as it stands, so the value shown is the value now rather than at load. */
-	memory?: MemoryView
+	memory?: MemoryInspector
 	/** Where a symbol is written, or null where nothing says. */
 	sourceOf?: (row: SymbolRow) => SourceLocation | null
 	/** Asks the editor to show a line, which is what a name here points at. */

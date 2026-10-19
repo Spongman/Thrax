@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useRef } from 'react'
-import { parseWord } from '../core/format'
-import type { MemoryView } from '../core/types'
+import { formatWord, parseWord } from '../core/format'
+import type { MemoryInspector } from '../architectures/contracts'
 import { isOneOf, useStoredState } from '../hooks/useStoredState'
 import PanelGroup from './PanelGroup'
 import './BitmapDisplay.css'
 
 interface BitmapDisplayProps {
-	memory: MemoryView
+	memory: MemoryInspector
+	/** Where the display starts until one is chosen: the target's data base. */
+	defaultBase?: number
 }
 
 const DISPLAY_SIZES = [128, 256, 512]
@@ -17,9 +19,9 @@ function parseAddress(value: string) {
 	return parsed !== null && parsed >= 0 && parsed <= 0xffffffff ? parsed >>> 0 : null
 }
 
-function BitmapDisplay({ memory }: BitmapDisplayProps) {
+function BitmapDisplay({ memory, defaultBase = 0 }: BitmapDisplayProps) {
 	const canvasRef = useRef<HTMLCanvasElement | null>(null)
-	const [baseAddress, setBaseAddress] = useStoredState('bitmap.base', '0x10010000', (value) => typeof value === 'string')
+	const [baseAddress, setBaseAddress] = useStoredState('bitmap.base', formatWord(defaultBase), (value) => typeof value === 'string')
 	const [unitSize, setUnitSize] = useStoredState('bitmap.unit', 8, isOneOf(UNIT_SIZES))
 	const [width, setWidth] = useStoredState('bitmap.width', 256, isOneOf(DISPLAY_SIZES))
 	const [height, setHeight] = useStoredState('bitmap.height', 256, isOneOf(DISPLAY_SIZES))
@@ -39,7 +41,7 @@ function BitmapDisplay({ memory }: BitmapDisplayProps) {
 		for (let row = 0; row < rows; row += 1) {
 			for (let column = 0; column < columns; column += 1) {
 				const address = (parsedBaseAddress + ((row * columns + column) * 4)) >>> 0
-				const color = memory.words.get(address >>> 2)
+				const color = memory.word(address)
 				if (color === undefined || color === 0) continue
 				context.fillStyle = `#${(color & 0x00ffffff).toString(16).padStart(6, '0')}`
 				context.fillRect(column * unitSize, row * unitSize, unitSize, unitSize)

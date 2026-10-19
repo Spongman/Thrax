@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { ExecutionObserver, MachineConfig } from '../../core/observer'
-import { build, withExit } from '../../core/__tests__/helpers'
+import { build, toolMachine, withExit } from '../../architectures/mips/core/__tests__/helpers'
 import { DEFAULT_MEMORY_REFERENCE_SETTINGS } from '../memoryReference'
 import { PipelineModel } from '../pipeline'
 import { ToolRegistry, createToolRegistry, type Tool } from '../registry'
@@ -72,7 +72,7 @@ const fakeSimulator = () => ({ observers: [] as ExecutionObserver[] })
 /** Every tool of the real registry, for the tests that assert on all of them. */
 const EVERY_TOOL = new Set([
 	'statistics', 'profile', 'cache', 'branchHistory', 'pipeline',
-	'memoryReference', 'marsBot', 'digitalLab', 'scavengerHunt',
+	'memoryReference',
 ])
 
 describe('tool registry', () => {
@@ -160,7 +160,7 @@ describe('tool registry', () => {
 		const registry = createToolRegistry()
 		const simulator = build(withExit('li $t0, 2\nloop:\naddi $t0, $t0, -1\nsw $t0, 0($sp)\nlw $t1, 0($sp)\nbne $t0, $zero, loop'))
 		registry.setWanted(EVERY_TOOL)
-		registry.attach(simulator, { delayedBranching: false })
+		registry.attach(simulator, toolMachine())
 		await simulator.run()
 
 		const ran = registry.views()
@@ -198,9 +198,6 @@ describe('tool registry', () => {
 		// The store and read both land in the first cell of the default grid.
 		expect(ran.memoryReference.counts[0]).toBe(2)
 		expect(ran.memoryReference.max).toBe(2)
-		// The MMIO tools saw a run that never touched their registers.
-		expect(ran.marsBot.segments).toEqual([])
-		expect(ran.scavengerHunt.gameOn).toBe(false)
 
 		registry.resetAll()
 		const cleared = registry.views()

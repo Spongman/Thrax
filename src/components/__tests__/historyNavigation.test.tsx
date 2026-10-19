@@ -2,9 +2,10 @@ import { describe, expect, it } from 'vitest'
 import { Kind } from '../../core/effectKind'
 import { renderToStaticMarkup } from 'react-dom/server'
 import HistoryView from '../HistoryView'
-import { EffectStore } from '../../core/effectStore'
-import { HistoryLog } from '../../core/historyLog'
-import type { HistoryEntry } from '../../core/types'
+import { historyFormatter } from '../../architectures/mips/history/format'
+import type { EffectStore } from '../../architectures/mips/core/effectStore'
+import type { MipsHistory } from '../../architectures/mips/core/history'
+import { historyWith } from '../../architectures/mips/core/__tests__/historyFixture'
 
 /**
  * A history row is the way into every other panel: the address and the source
@@ -14,33 +15,11 @@ import type { HistoryEntry } from '../../core/types'
  * worth catching.
  */
 
-function log(effects: EffectStore, push: (store: EffectStore) => void): { entries: HistoryLog, entry: HistoryEntry } {
-	const start = effects.beginRun()
-	push(effects)
-	const { count } = effects.endRun()
-	const entry: HistoryEntry = {
-		id: 1,
-		instructionCount: 0,
-		address: 0x00400000,
-		word: 0,
-		instruction: null,
-		kind: 'instruction',
-		pc: 0x00400000,
-		delayState: 'none',
-		delayedTarget: 0,
-		effectStart: start,
-		effectCount: count,
-	}
-	const entries = new HistoryLog()
-	entries.push(entry)
-	return { entries, entry }
-}
-
-const draw = (entries: HistoryLog, effects: EffectStore, cursor: number, sourceOf: () => { file: string, line: number } | null) =>
+const draw = (entries: MipsHistory, effects: EffectStore, cursor: number, sourceOf: () => { file: string, line: number } | null) =>
 	renderToStaticMarkup(
 		<HistoryView
 			entries={entries}
-			effects={effects}
+			format={historyFormatter(effects)}
 			cursor={cursor}
 			version={1}
 			sourceOf={sourceOf}
@@ -62,9 +41,8 @@ const render = (
 	sourceOf: () => { file: string, line: number } | null = () => ({ file: 'main.asm', line: 7 }),
 	cursor = 1,
 ) => {
-	const effects = new EffectStore()
-	const { entries } = log(effects, push)
-	return draw(entries, effects, cursor, sourceOf)
+	const history = historyWith(0x00400000, push)
+	return draw(history, history.effects, cursor, sourceOf)
 }
 
 describe('a history row', () => {
@@ -146,7 +124,9 @@ describe('the scroller that sizes the window of rows', () => {
 		// measuring this element.  While it was mounted alongside the first entry
 		// rather than with the panel, nothing measured it: the height stayed at
 		// nothing and the rows filled only the top of however tall the panel was.
-		const markup = draw(new HistoryLog(), new EffectStore(), 0, () => null)
+		const empty = historyWith(0)
+		empty.truncate(0)
+		const markup = draw(empty, empty.effects, 0, () => null)
 		expect(markup).toContain('history-scroll')
 		expect(markup).toContain('Step or run a program')
 	})

@@ -1,16 +1,23 @@
-import { Op, opFor } from '../../core/ops'
+import { Op, opFor } from '../../architectures/mips/core/ops'
 import { describe, expect, it } from 'vitest'
 import { BranchHistoryTable } from '../branchHistory'
 import { CacheSimulator } from '../cache'
 import { DEFAULT_PIPELINE_SETTINGS, PipelineModel } from '../pipeline'
 import { ExecutionProfile, HEAT_LEVELS, heatLevel } from '../profile'
-import { InstructionStatistics, categoryOf } from '../statistics'
-import { build, withExit } from '../../core/__tests__/helpers'
+import { InstructionStatistics } from '../statistics'
+import { InstructionCategory } from '../../architectures/contracts'
+import { categoryOf as mipsCategoryOf } from '../../architectures/mips/instructions'
+import { build, toolMachine, withExit } from '../../architectures/mips/core/__tests__/helpers'
+
+/** The snapshot key a category is counted under. */
+const KEYS = Object.fromEntries(Object.entries(InstructionCategory).map(([name, category]) => [category, name.toLowerCase()]))
+const categoryOf = (op: number) => KEYS[mipsCategoryOf(op)]
 
 describe('instruction statistics', () => {
 	it('sorts every executed instruction into one category', async () => {
 		const simulator = build(withExit('li $t0, 1\nlw $t1, 0($sp)\nsw $t1, 4($sp)\nj next\nnext:\nbeq $t0, $t0, done\ndone:'))
 		const statistics = new InstructionStatistics()
+		statistics.onConfigure(toolMachine())
 		simulator.observers.push(statistics)
 		await simulator.run()
 
@@ -26,6 +33,7 @@ describe('instruction statistics', () => {
 	it('counts each mnemonic and ranks the commonest first', async () => {
 		const simulator = build(withExit('li $t0, 3\nloop:\naddi $t0, $t0, -1\nbne $t0, $zero, loop'))
 		const statistics = new InstructionStatistics()
+		statistics.onConfigure(toolMachine())
 		simulator.observers.push(statistics)
 		await simulator.run()
 
@@ -198,6 +206,7 @@ describe('pipeline profile', () => {
 	it('attributes stalls and mispredictions to the instruction that caused them', async () => {
 		const simulator = build(withExit('li $t0, 2\nloop:\naddi $t0, $t0, -1\nbne $t0, $zero, loop'))
 		const pipeline = new PipelineModel({ ...DEFAULT_PIPELINE_SETTINGS, dataHazards: 'none' })
+		pipeline.onConfigure(toolMachine())
 		simulator.observers.push(pipeline)
 		await simulator.run()
 

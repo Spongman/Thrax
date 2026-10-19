@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { Kind } from '../../core/effectKind'
-import { describeEffect, rowEffects } from '../HistoryView'
+import { describeEffect, rowEffects } from '../../architectures/mips/history/format'
 import { symbolRows, symbolSections } from '../SymbolTableView'
 import { parseEditedDouble, parseEditedValue } from '../editValue'
-import { EffectStore } from '../../core/effectStore'
-import type { Effect, HistoryEntry, SymbolTables } from '../../core/types'
+import { historyWith } from '../../architectures/mips/core/__tests__/historyFixture'
+import type { Effect, SymbolTables } from '../../core/types'
 
 describe('what a history row says about an effect', () => {
 	const register: Effect = { kind: Kind.REGISTER, name: '$t0', value: 5 }
@@ -50,24 +50,8 @@ describe('what a history row says about an effect', () => {
 	})
 
 	it('gives a row one chip per effect, read back out of the columns', () => {
-		const effects = new EffectStore()
-		const start = effects.beginRun()
-		effects.push(Kind.REGISTER, 8, 5)
-		const { count } = effects.endRun()
-		const entry: HistoryEntry = {
-			id: 1,
-			instructionCount: 0,
-			address: 0,
-			word: null,
-			instruction: null,
-			kind: 'instruction',
-			pc: 0,
-			delayState: 'none',
-			delayedTarget: 0,
-			effectStart: start,
-			effectCount: count,
-		}
-		expect(rowEffects(entry, effects, false).map((chip) => chip.label)).toEqual(['$t0 0x00000005 →'])
+		const history = historyWith(0, (effects) => effects.push(Kind.REGISTER, 8, 5), null)
+		expect(rowEffects(history.at(0)!, history.effects, false).map((chip) => chip.label)).toEqual(['$t0 0x00000005 →'])
 	})
 })
 

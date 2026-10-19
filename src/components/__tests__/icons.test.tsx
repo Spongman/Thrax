@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { EXAMPLES } from '../../examples'
+import { EXAMPLES } from '../../architectures/mips/examples'
 import { PANELS } from '../panels'
 import * as icons from '../icons'
 import type { Icon } from '../icons'

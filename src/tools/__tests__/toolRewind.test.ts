@@ -1,8 +1,10 @@
+import { mipsHistorySchema } from '../../architectures/mips/history/schema'
 import { describe, expect, it } from 'vitest'
-import { Assembler } from '../../core/assembler'
+import { assembleMips } from '../../architectures/mips/assembler'
 import { firstError } from '../../core/diagnostics'
+import { toolMachine } from '../../architectures/mips/core/__tests__/helpers'
 import type { MachineConfig } from '../../core/observer'
-import { MipsSimulator } from '../../core/simulator'
+import { MipsSimulator } from '../../architectures/mips/core/simulator'
 import { BranchHistoryTable } from '../branchHistory'
 import { CacheSimulator } from '../cache'
 import { PipelineModel } from '../pipeline'
@@ -30,9 +32,9 @@ loop:	sw $t0, 0($t1)
 const LONG_PROGRAM = PROGRAM.replace('li $t0, 20', 'li $t0, 1500')
 
 function build(source = PROGRAM) {
-	const { program, machineCode, diagnostics } = new Assembler(source).assemble()
+	const { program, machineCode, diagnostics } = assembleMips(source)
 	expect(firstError(diagnostics)?.message).toBeUndefined()
-	const simulator = new MipsSimulator(machineCode, program)
+	const simulator = new MipsSimulator(machineCode, program, undefined, { historySchema: mipsHistorySchema })
 	const tools = {
 		statistics: new InstructionStatistics(),
 		cache: new CacheSimulator(),
@@ -44,10 +46,7 @@ function build(source = PROGRAM) {
 	// What the registry tells a tool as it attaches: the pipeline rewinds by
 	// replaying the machine's log, so it has to be given one.
 	for (const tool of Object.values(tools)) {
-		(tool as { onConfigure?: (machine: MachineConfig) => void }).onConfigure?.({
-			delayedBranching: false,
-			history: simulator.executionHistory,
-		})
+		(tool as { onConfigure?: (machine: MachineConfig) => void }).onConfigure?.(toolMachine({ history: simulator.executionHistory }))
 	}
 	simulator.observers.push(...Object.values(tools))
 	return { simulator, tools }

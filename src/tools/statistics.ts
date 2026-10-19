@@ -5,14 +5,14 @@
  * to the total.
  */
 
-import type { Decoded } from '../core/decoder'
+import { InstructionCategory, type InstructionSet } from '../architectures/contracts'
 import type { ExecutionObserver, MachineConfig } from '../core/observer'
-import { OP_NAMES } from '../core/ops'
 import { Replay, type Replayable } from './replay'
 
-export type InstructionCategory = 'alu' | 'jump' | 'branch' | 'memory' | 'coprocessor' | 'trap' | 'other'
+export type CategoryKey = 'alu' | 'jump' | 'branch' | 'memory' | 'coprocessor' | 'trap' | 'other'
 
-export const CATEGORY_LABELS: Record<InstructionCategory, string> = {
+/** Labels by key, in the order of the neutral categories they count. */
+export const CATEGORY_LABELS: Record<CategoryKey, string> = {
 	alu: 'ALU',
 	jump: 'Jump',
 	branch: 'Branch',
@@ -22,102 +22,36 @@ export const CATEGORY_LABELS: Record<InstructionCategory, string> = {
 	other: 'Other',
 }
 
-// bgezal/bltzal branch-and-link like bltz/bgez, just also setting $ra
-//.
-const JUMPS = new Set(['j', 'jal', 'jr', 'jalr'])
-const BRANCHES = new Set(['beq', 'bne', 'bgez', 'bgtz', 'blez', 'bltz', 'bc1t', 'bc1f', 'bgezal', 'bltzal'])
-// The unaligned halves and the load-linked/store-conditional pair are memory
-// accesses like the rest; without them they fell through to 'other'.
-const MEMORY = new Set([
-	'lw', 'lh', 'lhu', 'lb', 'lbu', 'sw', 'sh', 'sb', 'lwc1', 'ldc1', 'swc1', 'sdc1',
-	'lwl', 'lwr', 'swl', 'swr', 'll', 'sc',
-])
-// clo/clz (bit counting) and madd/maddu/msub/msubu (multiply-accumulate) are plain
-// integer arithmetic, alongside the existing mult/div family they extend
-//. movn/movz are a GPR-to-GPR
-// conditional move with no FPU or CP0 involvement, so they must be listed here ahead
-// of the 'MOV' prefix catch-all below, which would otherwise claim them as coprocessor
-// work alongside movn.s/movz.s.
-const ALU = new Set([
-	'add', 'addu', 'addi', 'addiu', 'sub', 'subu', 'mul', 'mult', 'multu', 'div', 'divu',
-	'and', 'andi', 'or', 'ori', 'xor', 'xori', 'nor',
-	'sll', 'srl', 'sra', 'sllv', 'srlv', 'srav',
-	'slt', 'sltu', 'slti', 'sltiu', 'lui',
-	'mfhi', 'mflo', 'mthi', 'mtlo',
-	'clo', 'clz', 'madd', 'maddu', 'msub', 'msubu',
-	'movn', 'movz',
-])
-// A trap is neither ALU (it commits no result register), memory, nor coprocessor
-// work: it compares two operands like slt and conditionally raises an exception
-// instead.  So traps get a category of their own rather than a catch-all.
-const TRAPS = new Set(['teq', 'teqi', 'tge', 'tgeu', 'tgei', 'tgeiu', 'tlt', 'tltu', 'tlti', 'tltiu', 'tne', 'tnei'])
-
-function classify(op: string): InstructionCategory {
-	if (JUMPS.has(op)) return 'jump'
-	if (BRANCHES.has(op)) return 'branch'
-	if (MEMORY.has(op)) return 'memory'
-	if (ALU.has(op)) return 'alu'
-	if (TRAPS.has(op)) return 'trap'
-	// Everything the FPU and CP0 do, including the dotted mnemonics: movn.s/movz.s and
-	// movf.s/movt.s/movf.d/movt.d (FP-register conditional moves) land here too.
-	if (op.includes('.') || op.startsWith('mfc') || op.startsWith('mtc') || op.startsWith('mov') || op === 'eret') {
-		return 'coprocessor'
-	}
-	return 'other'
-}
-
-/**
- * Which category each op falls in, worked out once from its mnemonic.  The
- * classification reads names; an instruction being counted has a number, and
- * an array index is the whole of the lookup.
- */
-const CATEGORY_BY_OP: readonly InstructionCategory[] = OP_NAMES.map(classify)
-
-export function categoryOf(op: number): InstructionCategory {
-	return CATEGORY_BY_OP[op] ?? 'other'
-}
-
-/**
- * The three encodings an instruction word can have: R has three register
- * fields and a function code, I an immediate, and J a 26-bit target.
- */
-export type InstructionFormat = 'R' | 'I' | 'J'
-
-export const FORMAT_LABELS: Record<InstructionFormat, string> = {
-	R: 'R-format',
-	I: 'I-format',
-	J: 'J-format',
-}
+/** Snapshot key of each `InstructionCategory`, indexed by it. */
+const CATEGORY_KEYS: readonly CategoryKey[] = (() => {
+	const keys: CategoryKey[] = []
+	keys[InstructionCategory.ALU] = 'alu'
+	keys[InstructionCategory.JUMP] = 'jump'
+	keys[InstructionCategory.BRANCH] = 'branch'
+	keys[InstructionCategory.MEMORY] = 'memory'
+	keys[InstructionCategory.COPROCESSOR] = 'coprocessor'
+	keys[InstructionCategory.TRAP] = 'trap'
+	keys[InstructionCategory.OTHER] = 'other'
+	return keys
+})()
 
 export interface StatisticsSnapshot {
 	total: number
-	byCategory: Record<InstructionCategory, number>
-	/** Counts by encoding, which is what the machine word looks like. */
-	byFormat: Record<InstructionFormat, number>
+	byCategory: Record<CategoryKey, number>
+	/** Counts by encoding class, as the architecture names them. */
+	byEncoding: Array<{ label: string; count: number }>
 	/** Executed counts per mnemonic, most frequent first. */
 	byMnemonic: Array<{ op: string; count: number }>
 }
 
-/**
- * Which encoding a word uses, read off the word itself rather than the
- * mnemonic: the opcode alone decides it, with 0 and 0x1c naming the two
- * R-format groups and 2 and 3 the only jumps that carry a target.
- */
-export function formatOf(word: number): InstructionFormat {
-	const opcode = (word >>> 26) & 0x3f
-	if (opcode === 0 || opcode === 0x1c) return 'R'
-	if (opcode === 2 || opcode === 3) return 'J'
-	// The coprocessor opcodes hold a format field where an immediate would be,
-	// and their operands are registers, so they are R-format words.
-	if (opcode === 0x10 || opcode === 0x11) return 'R'
-	return 'I'
-}
-
 export class InstructionStatistics implements ExecutionObserver, Replayable {
 	private total = 0
-	private categories = new Map<InstructionCategory, number>()
+	/** Counts indexed by `InstructionCategory` and by encoding class. */
+	private categories = new Array<number>(CATEGORY_KEYS.length).fill(0)
+	private encodings: number[] = []
 	private mnemonics = new Map<string, number>()
-	private formats = new Map<InstructionFormat, number>()
+	/** How the architecture classifies what it hands over. */
+	private instructions: InstructionSet | null = null
 	/**
 	 * Every count here is a tally of the instructions that ran, and the machine
 	 * keeps those, so stepping back means counting them again rather than
@@ -130,35 +64,36 @@ export class InstructionStatistics implements ExecutionObserver, Replayable {
 	}
 
 	onConfigure(machine: MachineConfig) {
+		this.instructions = machine.instructions ?? null
 		this.replay.configure(machine)
 	}
 
-	replayStep(address: number, decoded: Decoded, instructionCount: number) {
-		this.count(address, decoded, instructionCount)
+	replayStep(address: number, instruction: unknown, instructionCount: number) {
+		this.count(instruction)
 	}
 
-	onInstruction(address: number, decoded: Decoded, instructionCount = 0) {
+	onInstruction(address: number, instruction: unknown, instructionCount = 0) {
 		this.replay.watch(instructionCount)
-		this.count(address, decoded, instructionCount)
+		this.count(instruction)
 	}
 
 	/** One instruction counted, live or replayed. */
-	private count(_address: number, decoded: Decoded, _instructionCount: number) {
+	private count(instruction: unknown) {
 		this.total += 1
-		const category = categoryOf(decoded.op)
-		this.categories.set(category, (this.categories.get(category) ?? 0) + 1)
-		const mnemonic = OP_NAMES[decoded.op]
-		this.mnemonics.set(mnemonic, (this.mnemonics.get(mnemonic) ?? 0) + 1)
-		const encoding = formatOf(decoded.word)
-		this.formats.set(encoding, (this.formats.get(encoding) ?? 0) + 1)
+		// Nothing to classify with leaves only the total.
+		if (!this.instructions) return
+		const info = this.instructions.describe(instruction)
+		this.categories[info.category] += 1
+		this.encodings[info.encoding] = (this.encodings[info.encoding] ?? 0) + 1
+		this.mnemonics.set(info.mnemonic, (this.mnemonics.get(info.mnemonic) ?? 0) + 1)
 	}
 
 	/** Everything worked out from the instructions, which a replay redoes. */
 	clear() {
 		this.total = 0
-		this.categories.clear()
+		this.categories.fill(0)
+		this.encodings = []
 		this.mnemonics.clear()
-		this.formats.clear()
 	}
 
 	reset() {
@@ -172,18 +107,13 @@ export class InstructionStatistics implements ExecutionObserver, Replayable {
 
 	snapshot(): StatisticsSnapshot {
 		this.replay.settle()
-		const byCategory = {} as Record<InstructionCategory, number>
-		for (const category of Object.keys(CATEGORY_LABELS) as InstructionCategory[]) {
-			byCategory[category] = this.categories.get(category) ?? 0
-		}
-		const byFormat = { R: 0, I: 0, J: 0 } as Record<InstructionFormat, number>
-		for (const encoding of Object.keys(FORMAT_LABELS) as InstructionFormat[]) {
-			byFormat[encoding] = this.formats.get(encoding) ?? 0
-		}
+		const byCategory = {} as Record<CategoryKey, number>
+		CATEGORY_KEYS.forEach((key, category) => { byCategory[key] = this.categories[category] })
+		const labels = this.instructions?.encodings ?? []
 		return {
 			total: this.total,
 			byCategory,
-			byFormat,
+			byEncoding: labels.map((label, encoding) => ({ label, count: this.encodings[encoding] ?? 0 })),
 			byMnemonic: [...this.mnemonics.entries()]
 				.map(([op, count]) => ({ op, count }))
 				.sort((left, right) => right.count - left.count || left.op.localeCompare(right.op)),

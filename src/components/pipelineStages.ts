@@ -1,20 +1,14 @@
 /**
  * Reading a pipeline schedule two ways: across an instruction, which is the
- * timeline, and across a cycle, which is the five stages of the machine at one
+ * timeline, and across a cycle, which is the stages of the machine at one
  * moment.  Both come from the same window of rows, so a cycle picked in one is
  * the cycle shown in the other.
  */
 
-import { REGISTER_NAMES } from '../core/registers'
 import type { PipelineRow } from '../tools/pipeline'
 
-/** The stage cells, in the order a row's cycles are recorded. */
-export const STAGE_KINDS = ['if', 'id', 'ex', 'mem', 'wb'] as const
-export const STAGE_LABELS = ['IF', 'ID', 'EX', 'MEM', 'WB'] as const
-export const STAGE_NAMES = ['Instruction fetch', 'Instruction decode', 'Execute', 'Memory access', 'Write back'] as const
-
 export interface StagePosition {
-	/** Index into STAGE_KINDS. */
+	/** Index into the model's stages. */
 	stage: number
 	/** Held in the stage rather than working in it, waiting on what is ahead. */
 	stalled: boolean
@@ -26,12 +20,12 @@ export interface StagePosition {
  * between are the bubble a hazard opened up.
  */
 export function stageAt(row: PipelineRow, cycle: number): StagePosition | null {
-	const [fetch, decode, execute, memory, write] = row.cycles
-	if (cycle === write) return { stage: 4, stalled: false }
-	if (cycle === memory) return { stage: 3, stalled: false }
-	if (cycle === execute) return { stage: 2, stalled: false }
-	if (cycle >= decode && cycle < execute) return { stage: 1, stalled: cycle > decode }
-	if (cycle >= fetch && cycle < decode) return { stage: 0, stalled: cycle > fetch }
+	const { cycles } = row
+	const last = cycles.length - 1
+	if (cycle === cycles[last]) return { stage: last, stalled: false }
+	for (let stage = last - 1; stage >= 0; stage--) {
+		if (cycle >= cycles[stage] && cycle < cycles[stage + 1]) return { stage, stalled: cycle > cycles[stage] }
+	}
 	return null
 }
 
@@ -44,8 +38,8 @@ export interface StageOccupant {
  * The instruction in each stage on `cycle`, or null for a stage standing empty.
  * The machine issues in order, so one stage holds at most one instruction.
  */
-export function stageOccupants(rows: readonly PipelineRow[], cycle: number): Array<StageOccupant | null> {
-	const occupants: Array<StageOccupant | null> = [null, null, null, null, null]
+export function stageOccupants(rows: readonly PipelineRow[], cycle: number, stageCount = rows[0]?.cycles.length ?? 0): Array<StageOccupant | null> {
+	const occupants = new Array<StageOccupant | null>(stageCount).fill(null)
 	for (const row of rows) {
 		const position = stageAt(row, cycle)
 		if (position && !occupants[position.stage]) occupants[position.stage] = { row, stalled: position.stalled }
@@ -97,12 +91,12 @@ export function hazardCounts(rows: readonly PipelineRow[]): Record<HazardKind, n
 	return counts
 }
 
-export const registerName = (register: number) => REGISTER_NAMES[register] ?? `$${register}`
+export const registerName = (register: number, names: readonly string[]) => names[register] ?? `r${register}`
 
 /** One line of the hazard report. */
-export function describeHazard(hazard: Hazard): string {
+export function describeHazard(hazard: Hazard, names: readonly string[]): string {
 	if (hazard.kind === 'control') return 'Control: the branch or jump before it redirected the front end'
-	const register = hazard.register === null ? 'an earlier result' : registerName(hazard.register)
+	const register = hazard.register === null ? 'an earlier result' : registerName(hazard.register, names)
 	return hazard.kind === 'load-use'
 		? `Load-use: waiting on ${register}, which a load has not yet returned`
 		: `RAW: waiting on ${register}, which is still being computed`

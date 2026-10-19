@@ -1,9 +1,11 @@
+import { historyFormatter } from '../../architectures/mips/history/format'
+import { WordMemory } from '../../architectures/mips/machine'
+import { mipsProfile } from '../../architectures/mips/profile'
+import { MIPS_REGISTER_BANKS, MIPS_REGISTERS } from '../../architectures/mips/registers'
 import { describe, expect, it } from 'vitest'
 import { Kind } from '../../core/effectKind'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { EffectStore } from '../../core/effectStore'
-import { HistoryLog } from '../../core/historyLog'
-import type { HistoryEntry } from '../../core/types'
+import { historyWith } from '../../architectures/mips/core/__tests__/historyFixture'
 import HistoryView from '../HistoryView'
 import MemoryView from '../MemoryView'
 import RegisterView from '../RegisterView'
@@ -18,13 +20,13 @@ import SymbolTableView from '../SymbolTableView'
 
 const ADDRESS = 0x00400004
 
-const memory = () => ({
-	words: new Map([
-		[0x00400000 >>> 2, 0x21080001],
-		// A word whose value is the hovered address, not just the word at it.
-		[ADDRESS >>> 2, ADDRESS],
-	]),
-})
+const memory = () => new WordMemory(new Map([
+	[0x00400000 >>> 2, 0x21080001],
+	// A word whose value is the hovered address, not just the word at it.
+	[ADDRESS >>> 2, ADDRESS],
+]))
+
+const layout = mipsProfile('default')
 
 // Most of a register file is zero, which is why an address hover has to mean an
 // address: thirty registers share that value.
@@ -40,7 +42,7 @@ const symbols = () => ({
 describe('the address under the pointer', () => {
 	it('lights the word at it, and any word holding it, in memory', () => {
 		const markup = renderToStaticMarkup(
-			<MemoryView memory={memory()} pc={null} returnAddresses={new Set()} focusAddress={null}
+			<MemoryView memory={memory()} sections={layout.memorySections} pc={null} returnAddresses={new Set()} focusAddress={null}
 				hoveredAddress={ADDRESS} onHoverAddress={() => {}} onEditByte={() => true} />
 		)
 		expect(markup).toContain('address-hovered')
@@ -50,7 +52,7 @@ describe('the address under the pointer', () => {
 		// Zero is in most of the file and is not a mapped address, so pointing at
 		// it must light nothing: the whole file lighting up says nothing at all.
 		const markup = renderToStaticMarkup(
-			<RegisterView registers={registers()} fpRegisters={[]} fpConditionFlags={[]} cp0Registers={[]}
+			<RegisterView registers={registers()} descriptors={MIPS_REGISTERS} banks={MIPS_REGISTER_BANKS} isAddress={layout.isMappedAddress}
 				hoveredAddress={0} onHoverAddress={() => {}} />
 		)
 		expect(markup).not.toContain('address-hovered')
@@ -58,7 +60,7 @@ describe('the address under the pointer', () => {
 
 	it('lights a register holding it', () => {
 		const markup = renderToStaticMarkup(
-			<RegisterView registers={registers()} fpRegisters={[]} fpConditionFlags={[]} cp0Registers={[]}
+			<RegisterView registers={registers()} descriptors={MIPS_REGISTERS} banks={MIPS_REGISTER_BANKS} isAddress={layout.isMappedAddress}
 				hoveredAddress={ADDRESS} onHoverAddress={() => {}} />
 		)
 		expect(markup).toContain('address-hovered')
@@ -66,7 +68,7 @@ describe('the address under the pointer', () => {
 
 	it('leaves a register holding something else alone', () => {
 		const markup = renderToStaticMarkup(
-			<RegisterView registers={registers()} fpRegisters={[]} fpConditionFlags={[]} cp0Registers={[]}
+			<RegisterView registers={registers()} descriptors={MIPS_REGISTERS} banks={MIPS_REGISTER_BANKS} isAddress={layout.isMappedAddress}
 				hoveredAddress={0x7fffeffc} onHoverAddress={() => {}} />
 		)
 		expect(markup).not.toContain('address-hovered')
@@ -90,19 +92,12 @@ describe('the address under the pointer', () => {
 	})
 
 	it('lights the history rows that ran it', () => {
-		const effects = new EffectStore()
-		const start = effects.beginRun()
-		effects.push(Kind.MEMORY, ADDRESS >>> 2, 0, [1])
-		const { count } = effects.endRun()
-		const entry: HistoryEntry = {
-			id: 1, instructionCount: 0, address: ADDRESS, word: 0, instruction: null,
-			kind: 'instruction', pc: ADDRESS, delayState: 'none', delayedTarget: 0,
-			effectStart: start, effectCount: count,
-		}
-		const entries = new HistoryLog()
-		entries.push(entry)
+		const entries = historyWith(ADDRESS, (effects) => {
+			effects.push(Kind.MEMORY, ADDRESS >>> 2, 0, [1])
+		})
+		const effects = entries.effects
 		const markup = renderToStaticMarkup(
-			<HistoryView entries={entries} effects={effects} cursor={1} version={1}
+			<HistoryView entries={entries} format={historyFormatter(effects)} cursor={1} version={1}
 				sourceOf={() => null} selectedId={null} onSelect={() => {}} onSetNow={() => {}}
 				onSelectAddress={() => {}} onSelectSource={() => {}} onSelectRegister={() => {}}
 				onHoverAddress={() => {}} hoveredAddress={ADDRESS}
@@ -118,7 +113,7 @@ describe('the register under the pointer', () => {
 		// The history points at a register by name: the value on the chip is the
 		// one from back then, so only the name can be matched against the file.
 		const markup = renderToStaticMarkup(
-			<RegisterView registers={registers()} fpRegisters={[]} fpConditionFlags={[]} cp0Registers={[]}
+			<RegisterView registers={registers()} descriptors={MIPS_REGISTERS} banks={MIPS_REGISTER_BANKS} isAddress={layout.isMappedAddress}
 				hoveredRegister="$t0" onHoverRegister={() => {}} />
 		)
 		expect(markup.match(/register-hovered/g)?.length).toBe(1)
@@ -129,27 +124,20 @@ describe('the register under the pointer', () => {
 		// An FPU register is named the same way but lives on another tab, so the
 		// integer file has nothing of its to light.
 		const markup = renderToStaticMarkup(
-			<RegisterView registers={registers()} fpRegisters={[]} fpConditionFlags={[]} cp0Registers={[]}
+			<RegisterView registers={registers()} descriptors={MIPS_REGISTERS} banks={MIPS_REGISTER_BANKS} isAddress={layout.isMappedAddress}
 				hoveredRegister="$f3" onHoverRegister={() => {}} />
 		)
 		expect(markup).not.toContain('register-hovered')
 	})
 
 	it('lights the history chips that name it', () => {
-		const effects = new EffectStore()
-		const start = effects.beginRun()
-		effects.push(Kind.REGISTER, 8, 5)
-		effects.push(Kind.REGISTER, 9, 5)
-		const { count } = effects.endRun()
-		const entry: HistoryEntry = {
-			id: 1, instructionCount: 0, address: ADDRESS, word: 0, instruction: null,
-			kind: 'instruction', pc: ADDRESS, delayState: 'none', delayedTarget: 0,
-			effectStart: start, effectCount: count,
-		}
-		const entries = new HistoryLog()
-		entries.push(entry)
+		const entries = historyWith(ADDRESS, (effects) => {
+			effects.push(Kind.REGISTER, 8, 5)
+			effects.push(Kind.REGISTER, 9, 5)
+		})
+		const effects = entries.effects
 		const markup = renderToStaticMarkup(
-			<HistoryView entries={entries} effects={effects} cursor={1} version={1}
+			<HistoryView entries={entries} format={historyFormatter(effects)} cursor={1} version={1}
 				sourceOf={() => null} selectedId={null} onSelect={() => {}} onSetNow={() => {}}
 				onSelectAddress={() => {}} onSelectSource={() => {}} onSelectRegister={() => {}}
 				onHoverAddress={() => {}} hoveredAddress={null}

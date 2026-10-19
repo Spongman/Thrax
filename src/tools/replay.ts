@@ -22,19 +22,20 @@
  * on step-back seeks hundreds of times and replays once.
  */
 
-import type { Decoded } from '../core/decoder'
+import type { InstructionSet } from '../architectures/contracts'
 import type { InstructionHistory, MachineConfig } from '../core/observer'
-import { decode } from '../core/decoder'
 
 export interface Replayable {
 	/** Everything worked out from the instructions, which a replay redoes. */
 	clear(): void
 	/** One instruction again, with whatever the tool noted about it at the time. */
-	replayStep(address: number, decoded: Decoded, instructionCount: number): void
+	replayStep(address: number, instruction: unknown, instructionCount: number): void
 }
 
 export class Replay {
 	private history: InstructionHistory | null = null
+	/** The architecture's decoder, which is what reads an entry back. */
+	private instructions: InstructionSet | null = null
 	/** Where the machine has moved to, until something asks for the reading. */
 	private pending: number | null = null
 	/** The instruction count the reading stands before. */
@@ -47,6 +48,7 @@ export class Replay {
 	/** The machine's own log, which is what there is to replay. */
 	configure(machine: MachineConfig) {
 		this.history = machine.history ?? null
+		this.instructions = machine.instructions ?? null
 	}
 
 	get at() {
@@ -55,7 +57,8 @@ export class Replay {
 
 	/** The oldest instruction still held, past which nothing can be rebuilt. */
 	get oldest(): number | undefined {
-		return this.history?.at(0)?.instructionCount
+		const history = this.history
+		return history && history.length > 0 ? history.instructionCountAt(0) : undefined
 	}
 
 	/** A new run: what was worked out and what was watched both go. */
@@ -104,7 +107,8 @@ export class Replay {
 
 	private replayTo(to: number) {
 		const history = this.history
-		if (!history) {
+		const instructions = this.instructions
+		if (!history || !instructions) {
 			// Nothing to replay from, so the reading can only be what it has.
 			this.position = to
 			return
@@ -112,9 +116,9 @@ export class Replay {
 		for (let index = this.indexOf(this.position); index < history.length; index++) {
 			const entry = history.at(index)
 			if (!entry || entry.instructionCount >= to) break
-			if (entry.kind !== 'instruction' || entry.word === null) continue
-			const decoded = decode(entry.word)
-			if (!decoded) continue
+			if (entry.kind !== 'instruction') continue
+			const decoded = instructions.decodeExecuted(entry)
+			if (decoded === null) continue
 			this.tool.replayStep(entry.address, decoded, entry.instructionCount)
 		}
 		this.position = to
@@ -128,7 +132,7 @@ export class Replay {
 		let high = history.length
 		while (low < high) {
 			const middle = (low + high) >> 1
-			if ((history.at(middle)?.instructionCount ?? 0) < count) low = middle + 1
+			if (history.instructionCountAt(middle) < count) low = middle + 1
 			else high = middle
 		}
 		return low

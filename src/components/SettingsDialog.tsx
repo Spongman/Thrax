@@ -1,15 +1,10 @@
 import React from 'react'
-import { HEX_DIMMING_MODES, MAX_BACKSTEP_LIMIT, MAX_HIGHLIGHT_SECONDS, MEMORY_CONFIGURATIONS, MIN_HIGHLIGHT_SECONDS, SETTINGS_VALIDATORS, type HexDimming, type MemoryConfigurationName, type ThraxSettings } from '../core/settings'
-import { formatWord } from '../core/format'
+import type { ArchitectureDefinition } from '../architectures/contracts'
+import { architectureManifests } from '../architectures/registry'
+import { HEX_DIMMING_MODES, MAX_BACKSTEP_LIMIT, MAX_HIGHLIGHT_SECONDS, MIN_HIGHLIGHT_SECONDS, SETTINGS_VALIDATORS, type ArchitectureSettings, type SettingField, type TargetSettings, type HexDimming, type ThraxSettings } from '../core/settings'
 import { useTHRAXStore } from '../store/thraxStore'
 import Modal from './Modal'
 import './SettingsDialog.css'
-
-const MEMORY_CONFIGURATION_LABELS: Array<{ id: MemoryConfigurationName, label: string }> = [
-	{ id: 'default', label: 'Default' },
-	{ id: 'dataBasedCompact', label: 'Compact, data at address 0' },
-	{ id: 'textBasedCompact', label: 'Compact, text at address 0' },
-]
 
 const HEX_DIMMING_LABELS: Record<HexDimming, string> = {
 	off: 'Off',
@@ -112,6 +107,75 @@ function Check({ label, hint, checked, onChange }: CheckProps) {
 	)
 }
 
+/**
+ * Groups every architecture shares.  An architecture's field names Assembler or
+ * Simulator to join that group, or a title of its own to have a group of its own.
+ */
+const SHARED_GROUPS = ['Target', 'Assembler', 'Simulator', 'Display', 'Editor']
+
+/**
+ * Group titles in dialog order: the architecture's own groups, in the order its
+ * fields name them, sit between the shared simulator and display groups.  The
+ * assembler group is left out when there is nothing in it for this one.
+ */
+export function dialogGroups(definition: ArchitectureDefinition | undefined): string[] {
+	const contributed = new Set(definition?.settings.fields.map((field) => field.group))
+	const own = [...contributed].filter((title) => !SHARED_GROUPS.includes(title))
+	const assembler = definition?.multipleEntries === true || contributed.has('Assembler')
+	return [...SHARED_GROUPS.slice(0, 3), ...own, ...SHARED_GROUPS.slice(3)].filter((title) => title !== 'Assembler' || assembler)
+}
+
+/** The rows an architecture contributes to one group, drawn with the shared controls. */
+export function TargetFields({ schema, group, values, onChange }: { schema: ArchitectureSettings, group: string, values: TargetSettings, onChange: (key: string, value: unknown) => void }) {
+	const fields = schema.fields.filter((field) => field.group === group)
+	const details = schema.details?.(group, values) ?? []
+	return (
+		<>
+			{fields.map((field) => <TargetField key={field.key} field={field} values={values} onChange={onChange} />)}
+			{details.length > 0 && <div className="settings-addresses">
+				{details.map((line) => <span key={line}>{line}</span>)}
+			</div>}
+		</>
+	)
+}
+
+function TargetField({ field, values, onChange }: { field: SettingField, values: TargetSettings, onChange: (key: string, value: unknown) => void }) {
+	const { control, hint = '', key, label } = field
+	const value = values[key]
+	const disabled = field.enabledBy !== undefined && values[field.enabledBy] !== true
+	switch (control.kind) {
+		case 'check':
+			return <Check label={label} hint={hint} checked={value === true} onChange={(checked) => onChange(key, checked)} />
+		case 'text':
+			return (
+				<label className="settings-row settings-field" title={hint}>
+					<span>{label}</span>
+					<input
+						type="text"
+						value={typeof value === 'string' ? value : ''}
+						placeholder={control.placeholder}
+						disabled={disabled}
+						onChange={(event) => onChange(key, event.target.value)}
+					/>
+				</label>
+			)
+		case 'choice':
+			// Options are keyed by position, since a value need not be a string.
+			return (
+				<label className="settings-row settings-field" title={hint}>
+					<span>{label}</span>
+					<select
+						value={control.options.findIndex((option) => option.value === value)}
+						disabled={disabled}
+						onChange={(event) => onChange(key, control.options[Number(event.target.value)].value)}
+					>
+						{control.options.map((option, index) => <option key={option.label} value={index}>{option.label}</option>)}
+					</select>
+				</label>
+			)
+	}
+}
+
 interface SettingsDialogProps {
 	onClose: () => void
 }
@@ -122,82 +186,41 @@ interface SettingsDialogProps {
  * setting no chain consumes yet is shown all the same and simply has no effect.
  */
 function SettingsDialog({ onClose }: SettingsDialogProps) {
-	const { gutterColumns, heatMap, heatMapLines, setGutterColumns, setHeatMap, setHeatMapLines, setSetting, settings } = useTHRAXStore()
+	const { architecture, gutterColumns, heatMap, heatMapLines, setGutterColumns, setHeatMap, setHeatMapLines, setSetting, setTargetSetting, settings, switchArchitecture, target, targetSettings } = useTHRAXStore()
 	const set = <Key extends keyof ThraxSettings>(key: Key) => (value: ThraxSettings[Key]) => setSetting(key, value)
-	const configuration = MEMORY_CONFIGURATIONS[settings.memoryConfiguration]
+	const schema = target?.definition.settings
+	const multipleEntries = target?.definition.multipleEntries === true
+	const groups = dialogGroups(target?.definition)
+	const place = (title: string) => ({ title, index: groups.indexOf(title), count: groups.length })
+	const contribution = (title: string) => schema && <TargetFields schema={schema} group={title} values={targetSettings} onChange={setTargetSetting} />
+	const ownGroups = groups.filter((title) => !SHARED_GROUPS.includes(title))
 
 	return (
 		<Modal title="Settings" onClose={onClose} className="settings-dialog" movable persistKey="dialog.settings">
-			<Group title="Assembler" index={0} count={5}>
-				<Check
-					label="Permit extended (pseudo) instructions and formats"
-					hint="Off assembles only the basic MIPS instruction set"
-					checked={settings.extendedAssembler}
-					onChange={set('extendedAssembler')}
-				/>
-				<Check
+			<Group {...place('Target')}>
+				<label className="settings-row settings-field" title="The processor the open files are assembled for and run on">
+					<span>
+						Architecture
+						<span className="settings-hint">Switching keeps the open files and ends the run; the Examples menu follows it</span>
+					</span>
+					<select value={architecture} onChange={(event) => void switchArchitecture(event.target.value)}>
+						{architectureManifests().map(({ id, name }) => <option key={id} value={id}>{name}</option>)}
+					</select>
+				</label>
+			</Group>
+
+			{groups.includes('Assembler') && <Group {...place('Assembler')}>
+				{contribution('Assembler')}
+				{multipleEntries && <Check
 					label="Assemble all open files"
 					hint="Assemble every open tab as one program; the active tab holds the entry point"
 					checked={settings.assembleAll}
 					onChange={set('assembleAll')}
-				/>
-				<Check
-					label="Initialize the program counter to global 'main' if defined"
-					hint="Off starts at the text base of the memory configuration"
-					checked={settings.startAtMain}
-					onChange={set('startAtMain')}
-				/>
-				<Check
-					label="Assembler warnings are considered errors"
-					hint="A warning stops the assembly rather than annotating it"
-					checked={settings.warningsAreErrors}
-					onChange={set('warningsAreErrors')}
-				/>
-				<label className="settings-row settings-field" title="Source file prepended to every assembly; empty means none">
-					<span>Exception handler</span>
-					<input
-						type="text"
-						value={settings.exceptionHandler}
-						placeholder="none"
-						onChange={(event) => setSetting('exceptionHandler', event.target.value)}
-					/>
-				</label>
-			</Group>
+				/>}
+			</Group>}
 
-			<Group title="Simulator" index={1} count={5}>
-				<Check
-					label="Delayed branching"
-					hint="Run the instruction after a branch or jump before control transfers, as real MIPS hardware does"
-					checked={settings.delayedBranching}
-					onChange={set('delayedBranching')}
-				/>
-				<Check
-					label="Self-modifying code"
-					hint="Permit writes into the text segment and execution outside it"
-					checked={settings.selfModifyingCode}
-					onChange={set('selfModifyingCode')}
-				/>
-				<Check
-					label="Bare machine"
-					hint="Allow only the instructions real hardware implements"
-					checked={settings.bareMachine}
-					onChange={set('bareMachine')}
-				/>
-				<Check
-					label="Program arguments provided to the program"
-					hint="Place the arguments below on the stack, with their count in $a0"
-					checked={settings.programArguments}
-					onChange={set('programArguments')}
-				/>
-				<label className="settings-row settings-field" title="Arguments passed to the program, separated by spaces">
-					<span>Arguments</span>
-					<input
-						type="text"
-						value={settings.programArgumentsText}
-						disabled={!settings.programArguments}
-						onChange={(event) => setSetting('programArgumentsText', event.target.value)}
-					/>
-				</label>
+			<Group {...place('Simulator')}>
+				{contribution('Simulator')}
 				<label className="settings-row settings-field" title="Instructions the step-back history keeps">
 					<span>Backstep limit</span>
 					{/* A part-typed value such as an empty field fails the validator, so
@@ -216,25 +239,9 @@ function SettingsDialog({ onClose }: SettingsDialogProps) {
 				</label>
 			</Group>
 
-			<Group title="Memory configuration" index={2} count={5}>
-				<label className="settings-row settings-field" title="Where the segments of the address space start">
-					<span>Layout</span>
-					<select
-						value={settings.memoryConfiguration}
-						onChange={(event) => setSetting('memoryConfiguration', event.target.value as MemoryConfigurationName)}
-					>
-						{MEMORY_CONFIGURATION_LABELS.map(({ id, label }) => <option key={id} value={id}>{label}</option>)}
-					</select>
-				</label>
-				<div className="settings-addresses">
-					<span>.text {formatWord(configuration.textBaseAddress)}</span>
-					<span>.data {formatWord(configuration.dataBaseAddress)}</span>
-					<span>heap {formatWord(configuration.heapBaseAddress)}</span>
-					<span>$sp {formatWord(configuration.stackPointer)}</span>
-				</div>
-			</Group>
+			{ownGroups.map((title) => <Group key={title} {...place(title)}>{contribution(title)}</Group>)}
 
-			<Group title="Display" index={3} count={5}>
+			<Group {...place('Display')}>
 				{/* Seeds only: the registers panel keeps per-register formats, where
 				    decimal and hex can both be on, and the memory panel keeps its own
 				    group size and row options. */}
@@ -309,7 +316,7 @@ function SettingsDialog({ onClose }: SettingsDialogProps) {
 				</label>
 			</Group>
 
-			<Group title="Editor" index={4} count={5}>
+			<Group {...place('Editor')}>
 				<Check
 					label="Show the address of each machine word"
 					hint="A gutter column between the line numbers and the code"

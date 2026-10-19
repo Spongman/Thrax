@@ -1,12 +1,12 @@
-import type { CallFrame } from '../core/types'
+import type { CallFrame } from '../architectures/contracts'
 import { formatWord } from '../core/format'
 import { HexWord } from './HexNumber'
 import './CallStackView.css'
 
 interface CallStackViewProps {
-	frames: CallFrame[]
+	frames: readonly CallFrame[]
 	pc: number
-	labels: Map<string, number>
+	labels: ReadonlyMap<string, number>
 	hasProgram: boolean
 	halted: boolean
 	/** Index into frames of the selected frame, -1 for the running frame, null for none. */
@@ -17,7 +17,7 @@ interface CallStackViewProps {
 const formatAddress = formatWord
 
 /** Nearest label at or below `address`, rendered as `name` or `name+0x<offset>`. */
-function describeAddress(address: number, labels: Map<string, number>) {
+function describeAddress(address: number, labels: ReadonlyMap<string, number>) {
 	let bestName: string | null = null
 	let bestAddress = -1
 	for (const [name, labelAddress] of labels) {

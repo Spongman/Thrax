@@ -1,7 +1,8 @@
 import React from 'react'
 import { DockviewDefaultTab, DockviewReact, themeDark, type AddPanelOptions, type DockviewApi, type DockviewReadyEvent, type IDockviewPanel, type IDockviewPanelHeaderProps, type IDockviewPanelProps, type SerializedDockview } from 'dockview-react'
 import 'dockview-react/dist/styles/dockview.css'
-import { CP0_REGISTERS } from '../core/coprocessor'
+import type { PanelContribution } from '../architectures/contracts'
+import { contributedPanelIds } from '../architectures/registry'
 import { visibleAddresses } from '../debug/session'
 import { shownDocuments, useTHRAXStore, type SourceDocument } from '../store/thraxStore'
 import SourcePane from './SourcePane'
@@ -37,12 +38,8 @@ const KeyboardDisplayTool = deferred(() => import('./KeyboardDisplayTool'))
 const InstructionStatisticsView = deferred(() => import('./InstructionStatisticsView'))
 const CacheSimulatorView = deferred(() => import('./CacheSimulatorView'))
 const BranchHistoryView = deferred(() => import('./BranchHistoryView'))
-const MarsBotView = deferred(() => import('./MarsBotView'))
 const MemoryReferenceView = deferred(() => import('./MemoryReferenceView'))
-const MipsXrayView = deferred(() => import('./MipsXrayView'))
 const PipelineView = deferred(() => import('./PipelineView'))
-const ScavengerHuntView = deferred(() => import('./ScavengerHuntView'))
-const DigitalLabView = deferred(() => import('./DigitalLabView'))
 // These two read the store themselves, so what is fetched is the panel rather
 // than a view it is wrapped around.
 const HistoryPanel = deferred(async () => ({ default: (await import('./HistoryView')).HistoryPanel }))
@@ -65,46 +62,34 @@ const FilesWindow = () => (
 )
 
 const RegistersPanel = () => {
-	const { registers, fpRegisters, fpConditionFlags, cp0Registers, focusedRegister, hasMachine, hovered, isRunning, hover, setRegisterValue, setFpRegisterValue, setCp0RegisterValue } = useTHRAXStore()
+	const { focusedRegister, hasMachine, hovered, isRunning, hover, registers, setRegisterValue, target, targetProfile } = useTHRAXStore()
 	// Whenever the machine is stopped, which includes a program that has been
 	// assembled and not yet started: setting up a register before the first step
 	// is what editing one is mostly for.  A machine has to exist to be edited,
 	// though, or a cell would take the value only to refuse it.
 	const editable = !isRunning && hasMachine
-
-	const handleEdit = React.useCallback((entry: { name: string }, bits: number, high?: number) => {
-		const name = entry.name
-		if (name.startsWith('$f')) {
-			const index = Number(name.slice(2))
-			const low = setFpRegisterValue(index, bits)
-			// A double occupies the register and its odd partner.
-			return high === undefined ? low : low && setFpRegisterValue(index + 1, high)
-		}
-		const cp0 = CP0_REGISTERS.find((register) => register.name === name)
-		if (cp0) return setCp0RegisterValue(cp0.index, bits)
-		return setRegisterValue(name, bits | 0)
-	}, [setCp0RegisterValue, setFpRegisterValue, setRegisterValue])
+	const definition = target?.definition
 	return (
 		<div className="dock-panel">
 			<RegisterView
 				registers={registers}
+				descriptors={definition?.registers ?? NO_REGISTERS}
+				banks={definition?.registerBanks}
+				isAddress={targetProfile?.isMappedAddress}
 				editable={editable}
 				focused={focusedRegister}
 				hoveredAddress={hovered.address}
 				onHoverAddress={(address) => hover({ address })}
 				hoveredRegister={hovered.register}
 				onHoverRegister={(register) => hover({ register })}
-				onEdit={handleEdit}
-				fpRegisters={fpRegisters}
-				fpConditionFlags={fpConditionFlags}
-				cp0Registers={cp0Registers}
+				onEdit={setRegisterValue}
 			/>
 		</div>
 	)
 }
 
 const MemoryPanel = () => {
-	const { callStack, deleteMemoryByte, focusedMemory, hasMachine, hovered, insertMemoryByte, isRunning, memory, pc, setMemoryByte, sourceIndex, hover } = useTHRAXStore()
+	const { callStack, deleteMemoryByte, focusedMemory, hasMachine, hovered, insertMemoryByte, isRunning, memory, pc, setMemoryByte, sourceIndex, hover, target, targetProfile } = useTHRAXStore()
 	const editable = !isRunning && hasMachine
 	// Mark the program counter only where the editor can highlight it too: once a
 	// program halts, the pc sits past the last instruction and belongs to neither.
@@ -112,8 +97,12 @@ const MemoryPanel = () => {
 	const returnAddresses = React.useMemo(() => new Set(callStack.map((frame) => frame.returnAddress)), [callStack])
 	return (
 		<div className="dock-panel dock-panel-flush">
+			{/* Another target is another address space: the view starts over at its first section. */}
 			<MemoryView
+				key={target?.definition.id}
 				memory={memory}
+				sections={targetProfile?.memorySections ?? NO_SECTIONS}
+				disassembly={target?.services.disassembly}
 				pc={instructionAddresses.has(pc) ? pc : null}
 				returnAddresses={returnAddresses}
 				focusAddress={focusedMemory?.address ?? null}
@@ -162,11 +151,13 @@ const CallStackPanel = () => {
 
 const BitmapPanel = () => {
 	const memory = useTHRAXStore((state) => state.memory)
-	return <div className="dock-panel"><BitmapDisplay memory={memory} /></div>
+	const dataBase = useTHRAXStore((state) => state.targetProfile?.dataBase)
+	return <div className="dock-panel"><BitmapDisplay memory={memory} defaultBase={dataBase} /></div>
 }
 
 const KeyboardDisplayPanel = () => {
-	const { keyboardDisplay, sendKeyboardInput } = useTHRAXStore()
+	const { keyboardDisplay, sendKeyboardInput, target } = useTHRAXStore()
+	if (!keyboardDisplay) return <div className="dock-panel dock-panel-unavailable">{`Not available for ${target?.definition.name ?? 'this architecture'}.`}</div>
 	return <div className="dock-panel"><KeyboardDisplayTool device={keyboardDisplay} onSend={sendKeyboardInput} /></div>
 }
 
@@ -185,11 +176,6 @@ const BranchHistoryPanel = () => {
 	return <div className="dock-panel"><BranchHistoryView branchHistory={branchHistory} settings={branchHistorySettings} onChange={setBranchHistorySettings} /></div>
 }
 
-const XrayPanel = () => {
-	const { memory, pc } = useTHRAXStore()
-	return <div className="dock-panel"><MipsXrayView memory={memory} pc={pc} /></div>
-}
-
 const PipelinePanel = () => {
 	const { pipeline, pipelineSettings, setPipelineSettings } = useTHRAXStore()
 	return <div className="dock-panel"><PipelineView pipeline={pipeline} settings={pipelineSettings} onChange={setPipelineSettings} /></div>
@@ -200,21 +186,33 @@ const MemoryReferencePanel = () => {
 	return <div className="dock-panel"><MemoryReferenceView memoryReference={memoryReference} settings={memoryReferenceSettings} onChange={setMemoryReferenceSettings} /></div>
 }
 
-const MarsBotPanel = () => {
-	const marsBot = useTHRAXStore((state) => state.marsBot)
-	return <div className="dock-panel"><MarsBotView marsBot={marsBot} /></div>
+/**
+ * A panel an architecture contributes.  Its id is kept in the layout whatever
+ * the target, so switching away and back finds it where it was; a target that
+ * supplies none shows it as unavailable.
+ */
+function ContributedPanel({ id }: { id: string }) {
+	const target = useTHRAXStore((state) => state.target)
+	const contribution = target?.definition.panels?.find((panel) => panel.id === id)
+	const View = React.useMemo(() => contribution && React.lazy(contribution.load), [contribution])
+	if (!View) {
+		return <div className="dock-panel dock-panel-unavailable">{target ? `Not available for ${target.definition.name}.` : 'Loading…'}</div>
+	}
+	return (
+		<React.Suspense fallback={<div className="dock-panel dock-panel-loading">Loading…</div>}>
+			<View />
+		</React.Suspense>
+	)
 }
 
-const DigitalLabPanel = () => {
-	const digitalLab = useTHRAXStore((state) => state.digitalLab)
-	const pressKey = useTHRAXStore((state) => state.pressDigitalLabKey)
-	return <div className="dock-panel"><DigitalLabView state={digitalLab} onPressKey={pressKey} /></div>
+/** One component per contributed id, made once, since dockview creates panels by name. */
+function contributedComponent(id: string): React.FC {
+	const Contributed = () => <ContributedPanel id={id} />
+	Contributed.displayName = `Contributed(${id})`
+	return Contributed
 }
 
-const ScavengerHuntPanel = () => {
-	const scavengerHunt = useTHRAXStore((state) => state.scavengerHunt)
-	return <div className="dock-panel"><ScavengerHuntView scavengerHunt={scavengerHunt} /></div>
-}
+const contributions = (): readonly PanelContribution[] => useTHRAXStore.getState().target?.definition.panels ?? []
 
 /** Carries the console's plea for attention while its tab sits in the background. */
 const ConsoleTab = (props: IDockviewPanelHeaderProps) => {
@@ -241,7 +239,7 @@ const SourceTab = (props: IDockviewPanelHeaderProps) => {
 
 const tabComponents = { console: ConsoleTab, source: SourceTab }
 
-const components = {
+const SHARED_COMPONENTS: Record<string, React.FC<IDockviewPanelProps>> = {
 	source: SourcePanel,
 	files: FilesWindow,
 	history: HistoryPanel,
@@ -256,12 +254,21 @@ const components = {
 	cache: CachePanel,
 	branchHistory: BranchHistoryPanel,
 	memoryReference: MemoryReferencePanel,
-	marsBot: MarsBotPanel,
-	scavengerHunt: ScavengerHuntPanel,
-	digitalLab: DigitalLabPanel,
 	pipeline: PipelinePanel,
-	xray: XrayPanel,
 }
+
+/**
+ * The components dockview creates panels from.  Contributed ids are added as
+ * they are met, in a layout or a menu, since they are not known up front.
+ */
+const components: Record<string, React.FC<IDockviewPanelProps>> = { ...SHARED_COMPONENTS }
+
+function ensureComponent(id: string) {
+	if (!(id in components)) components[id] = contributedComponent(id)
+}
+
+const NO_REGISTERS: readonly never[] = []
+const NO_SECTIONS: readonly never[] = []
 
 const LAYOUT_KEY = 'thrax-web.dock-layout'
 /**
@@ -278,8 +285,9 @@ const LAYOUT_VERSION = 3
 const DOCK_LEADER: Record<'side' | 'bottom', string> = { side: 'registers', bottom: 'memory' }
 
 function panelOptions(id: string, anchor: string): AddPanelOptions | null {
-	const panel = panelById(id)
+	const panel = panelById(id, contributions())
 	if (!panel) return null
+	ensureComponent(panel.id)
 	const leader = DOCK_LEADER[panel.dock]
 	const options = { id: panel.id, component: panel.id, title: panel.title }
 	// The console asks for attention through its tab, so it draws its own.
@@ -313,8 +321,13 @@ function readStoredLayout(): SerializedDockview | null {
 		if (typeof stored !== 'object' || stored === null) return null
 		const { version, layout } = stored as { version?: unknown, layout?: SerializedDockview }
 		if (version !== LAYOUT_VERSION || !layout?.grid || !layout.panels) return null
-		const known = Object.values(layout.panels).every((panel) => panel.contentComponent !== undefined && panel.contentComponent in components)
-		return known ? layout : null
+		// A panel an architecture contributes keeps its place whichever target is
+		// in force, and says whether that target supplies it.
+		const contributed = contributedPanelIds()
+		const known = Object.values(layout.panels).every(({ contentComponent: id }) => id !== undefined && (id in components || contributed.has(id)))
+		if (!known) return null
+		for (const panel of Object.values(layout.panels)) ensureComponent(panel.contentComponent!)
+		return layout
 	} catch {
 		// Unreadable storage (private mode, bad JSON) just means the default layout.
 		return null

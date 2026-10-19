@@ -1,5 +1,5 @@
 import React from 'react'
-import { EXAMPLES } from '../examples'
+import { useTHRAXStore } from '../store/thraxStore'
 import { AboutIcon, ExamplesIcon, FileMenuIcon, SettingsIcon, ToolsIcon, WindowIcon, type Icon } from './icons'
 import { menuLabel, panelsIn, type PanelSpec } from './panels'
 import './MainMenu.css'
@@ -39,6 +39,7 @@ type Submenu = 'file' | 'examples' | 'window' | 'tools'
 
 function MainMenu({ onSettings, onLoadExample, onOpenPanel, openPanels, fileActions }: MainMenuProps) {
 	const [open, setOpen] = React.useState(false)
+	const definition = useTHRAXStore((state) => state.target?.definition)
 	const [submenu, setSubmenu] = React.useState<Submenu | null>(null)
 	const menuRef = React.useRef<HTMLDivElement>(null)
 
@@ -153,7 +154,7 @@ function MainMenu({ onSettings, onLoadExample, onOpenPanel, openPanels, fileActi
 							</button>
 						)))}
 
-					{section('examples', 'Examples', ExamplesIcon, Object.entries(EXAMPLES).map(([key, example]) => (
+					{section('examples', 'Examples', ExamplesIcon, Object.entries(definition?.examples ?? {}).map(([key, example]) => (
 						<button
 							key={key}
 							className="menu-item menu-item-described"
@@ -166,8 +167,8 @@ function MainMenu({ onSettings, onLoadExample, onOpenPanel, openPanels, fileActi
 						</button>
 					)), true)}
 
-					{section('window', 'Window', WindowIcon, panelsIn('window').map((panel) => panelItem(panel)))}
-					{section('tools', 'Tools', ToolsIcon, panelsIn('tool').map((panel) => panelItem(panel, true)), true)}
+					{section('window', 'Window', WindowIcon, panelsIn('window', definition?.panels).map((panel) => panelItem(panel)))}
+					{section('tools', 'Tools', ToolsIcon, panelsIn('tool', definition?.panels).map((panel) => panelItem(panel, true)), true)}
 
 					<div className="menu-separator" />
 

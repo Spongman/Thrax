@@ -1,5 +1,5 @@
 import React from 'react'
-import type { KeyboardDisplayState } from '../core/types'
+import type { KeyboardDisplayState } from '../architectures/contracts'
 import PanelGroup from './PanelGroup'
 import './KeyboardDisplayTool.css'
 

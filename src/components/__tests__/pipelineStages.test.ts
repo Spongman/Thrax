@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { build, withExit } from '../../core/__tests__/helpers'
+import { build, withExit, toolMachine } from '../../architectures/mips/core/__tests__/helpers'
 import { PipelineModel, type PipelineSettings } from '../../tools/pipeline'
 import { hazardCounts, hazardsOf, stageAt, stageOccupants } from '../pipelineStages'
 
@@ -21,6 +21,7 @@ const SETTINGS: PipelineSettings = {
 async function analyse(body: string, settings: Partial<PipelineSettings> = {}) {
 	const simulator = build(withExit(body))
 	const model = new PipelineModel({ ...SETTINGS, ...settings })
+	model.onConfigure(toolMachine())
 	simulator.observers.push(model)
 	await simulator.run()
 	return model.snapshot()

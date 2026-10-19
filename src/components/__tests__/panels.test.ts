@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import mips from '../../architectures/mips'
 import { INITIAL_PANELS, PANELS, menuLabel, panelById, panelsIn } from '../panels'
 
 describe('the panel catalogue', () => {
@@ -26,7 +27,9 @@ describe('the panel catalogue', () => {
 
 	it('splits the menus between the workspace views and the tools', () => {
 		expect(panelsIn('window').map((panel) => panel.id)).toEqual(['registers', 'callStack', 'files', 'symbols', 'memory', 'console', 'history'])
-		expect(panelsIn('tool')).toHaveLength(11)
+		expect(panelsIn('tool')).toHaveLength(7)
+		// MIPS adds the MARS tools no other target has, after the shared ones.
+		expect(panelsIn('tool', mips.panels).map((panel) => panel.id).slice(7)).toEqual(['xray', 'marsBot', 'scavengerHunt', 'digitalLab'])
 		expect(panelsIn('window').length + panelsIn('tool').length).toBe(PANELS.length)
 	})
 
@@ -38,7 +41,7 @@ describe('the panel catalogue', () => {
 	it('says what every tool watches, where the tool is chosen', () => {
 		// The menu is the only place a tool is described now, so a tool without a
 		// line here is one nobody can tell apart from its neighbours.
-		for (const tool of panelsIn('tool')) {
+		for (const tool of panelsIn('tool', mips.panels)) {
 			expect(tool.description, tool.id).toBeTruthy()
 		}
 		// A window is named by what it shows, so it needs no line of its own.

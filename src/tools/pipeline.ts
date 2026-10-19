@@ -1,43 +1,34 @@
 /**
- * Five-stage pipeline visualizer.
+ * Pipeline visualizer.
  *
  * The simulator itself is not pipelined: it retires one instruction at a time
  * with branches resolved immediately.  This tool is an overlay that takes the
  * sequence of instructions that actually ran and works out when each stage of
- * each one would happen on a classic MIPS pipeline, so the cost of a hazard is
- * visible without changing what the program computes.
+ * each one would happen on the pipeline the architecture describes, so the
+ * cost of a hazard is visible without changing what the program computes.
  *
- * What is modelled: in-order single issue, IF/ID/EX/MEM/WB, RAW hazards under
- * three countermeasures, the stage a branch or jump resolves in, and branch
- * prediction.  Those follow Tables III and IV of Lim & Smitha, "Pipelined MIPS
- * Simulation" (TALE 2019), which describes the PSBE plug-in.  What is
- * not modelled: structural hazards on memory (separate caches are assumed) and
+ * What is modelled: in-order single issue, RAW hazards under the model's
+ * bypass and stall policies, the stage a branch or jump resolves in, delay
+ * slots or annulment, and branch prediction.  What is not modelled:
+ * structural hazards on memory (separate caches are assumed) and
  * write-after-write, which cannot arise in order.
  */
 
-import type { Decoded } from '../core/decoder'
-import { Op, OP_NAMES } from '../core/ops'
+import { PipelineResult, type InstructionSet, type PipelineBypass, type PipelineModel as ArchitecturePipeline, type PipelineOption } from '../architectures/contracts'
 import type { ExecutionObserver, MachineConfig } from '../core/observer'
 import { Replay, type Replayable } from './replay'
 import { StepLog } from './stepLog'
 
-export const STAGES = ['IF', 'ID', 'EX', 'MEM', 'WB'] as const
-export type Stage = (typeof STAGES)[number]
-
-/** Where a branch outcome is known, which sets the penalty for getting it wrong. */
+/**
+ * Where a branch outcome is known, which sets the penalty for getting it wrong.
+ * These are persisted keys of the model's options.
+ */
 export type BranchResolution = 'id' | 'ex' | 'mem'
 
 /** A jump has no condition, so it is known one stage earlier than a branch can be. */
 export type JumpResolution = 'id' | 'ex'
 
-/** Bubbles owed when control is redirected from each stage (Table IV). */
-const RESOLUTION_PENALTY: Record<BranchResolution, number> = { id: 1, ex: 2, mem: 3 }
-
-/**
- * How the hardware copes with a read-after-write dependency (Table III):
- * bypasses feed the result back with no delay; a register file that decodes and
- * writes back in one cycle costs two bubbles; neither costs three.
- */
+/** Keys of the model's read-after-write policies. */
 export type DataHazardPolicy = 'forwarding' | 'split-decode' | 'none'
 
 /**
@@ -63,16 +54,16 @@ export const DEFAULT_PIPELINE_SETTINGS: PipelineSettings = {
 	windowSize: 24,
 }
 
-/** Why an instruction could not enter EX on the cycle after it was decoded. */
+/** Why an instruction could not leave the read stage on the cycle after it entered. */
 export type StallCause = 'data' | 'load-use' | null
 
 export interface PipelineRow {
 	index: number
 	address: number
 	op: string
-	/** Cycle each stage occupies, indexed as in STAGES. */
-	cycles: [number, number, number, number, number]
-	/** Cycles spent waiting in ID before EX. */
+	/** Cycle each stage is entered, indexed as the model's stages. */
+	cycles: number[]
+	/** Cycles spent held in the model's read stage. */
 	stalls: number
 	cause: StallCause
 	/** Register number this instruction waited on, for the tooltip. */
@@ -118,81 +109,69 @@ export interface PipelineSnapshot {
 	firstCycle: number
 	/** Totals per instruction address, which outlive the window of rows. */
 	byAddress: Map<number, PipelineAddressStats>
+	/** Names of the registers `blockedOn` indexes, from the architecture. */
+	registerNames: readonly string[]
+	/** The architecture's pipeline, or null before a machine or where it has none. */
+	model: ArchitecturePipeline | null
+	/** False once a machine with no pipeline model is attached. */
+	available: boolean
 }
 
-const LOADS = new Set([Op.LB, Op.LBU, Op.LH, Op.LHU, Op.LW])
-const STORES = new Set([Op.SB, Op.SH, Op.SW])
-const JUMPS = new Set([Op.J, Op.JAL, Op.JR, Op.JALR])
-const RA = 31
-
-export interface RegisterEffects {
-	reads: number[]
-	/** Register written, or -1 for none.  $zero counts as none. */
-	writes: number
-	isLoad: boolean
-	isBranch: boolean
-	isJump: boolean
+/** The option `value` names, or the list's first. */
+export function optionFor<T extends PipelineOption>(options: readonly T[], value: string): T {
+	for (const option of options) if (option.value === value) return option
+	return options[0]
 }
 
-/**
- * Which general-purpose registers an instruction reads and writes.  Only the
- * integer file matters here: the coprocessors have their own, and no bypass
- * between the two exists to model.
- */
-export function registerEffects(decoded: Decoded): RegisterEffects {
-	const { op, rs, rt, rd, shape } = decoded
-	const isLoad = LOADS.has(op)
-	// cc,branch is bc1t/bc1f with an explicit condition code -
-	// without it here, a non-zero-cc bc1t was not counted as a branch at all.
-	const isBranch = shape === 'rs,rt,branch' || shape === 'rs,branch' || shape === 'branch' || shape === 'cc,branch'
-	const isJump = JUMPS.has(op)
-	const effects = (reads: number[], writes = -1): RegisterEffects => ({
-		reads: reads.filter((register) => register !== 0),
-		writes: writes === 0 ? -1 : writes,
-		isLoad,
-		isBranch,
-		isJump,
-	})
+/** A model under one choice of settings, flattened to the ints the hot path reads. */
+interface Timing {
+	stageCount: number
+	/** Stage a waiting instruction is held in. */
+	hold: number
+	/** Stage after `hold`, whose entry the operands gate. */
+	gate: number
+	/** Earliest stage a bypass carries each kind of result from, or -1. */
+	aluBypass: number
+	loadBypass: number
+	/** Added to the bypass stage's cycle to give the earliest `gate` entry. */
+	bypassDelay: number
+	writeStage: number
+	/** Added to the write stage's cycle for a read through the register file. */
+	fileDelay: number
+	/** Whether a load's stall is the one bypassing cannot remove. */
+	loadUse: boolean
+	/** Instructions fetched behind a transfer before it resolves. */
+	branchPenalty: number
+	jumpPenalty: number
+	delaySlots: number
+}
 
-	switch (shape) {
-		case 'rd,rs,rt': return effects([rs, rt], rd)
-		case 'rd,rt,shamt': return effects([rt], rd)
-		case 'rd,rt,rs': return effects([rt, rs], rd)
-		case 'rd,rs': return effects([rs], rd)
-		// movf/movt with an explicit condition code - same
-		// register traffic as the plain 'rd,rs' form, the cc only picks whether it commits.
-		case 'rd,rs,cc': return effects([rs], rd)
-		case 'rs,rt': return effects([rs, rt])
-		case 'rd': return effects([], rd)
-		case 'rs': return effects([rs])
-		case 'jr': return effects([rs])
-		case 'jalr': return effects([rs], rd)
-		case 'rt,rs,imm': return effects([rs], rt)
-		case 'rt,rs,uimm': return effects([rs], rt)
-		case 'rt,uimm': return effects([], rt)
-		// A store reads the value it writes out; a load writes the register.
-		case 'rt,offset(rs)': return STORES.has(op) ? effects([rs, rt]) : effects([rs], rt)
-		// The coprocessor loads and stores touch only the base register here.
-		case 'ft,offset(rs)': return effects([rs])
-		// The twelve traps: rs,imm reads only the register
-		// half, since the immediate is baked into the word, not carried in a register.
-		case 'rs,imm': return effects([rs])
-		case 'rs,rt,branch': return effects([rs, rt])
-		// bgezal/bltzal write $ra like jal, in addition to reading rs.
-		case 'rs,branch': return (op === Op.BGEZAL || op === Op.BLTZAL) ? effects([rs], RA) : effects([rs])
-		case 'branch': return effects([])
-		// bc1t/bc1f with an explicit condition code: no GPR is read, only the FP flag,
-		// which this model does not track (see the module comment).
-		case 'cc,branch': return effects([])
-		// movz.s/movn.s/movz.d/movn.d: the condition is a GPR (rt); the moved value and
-		// destination are both FP registers, which this model does not track.
-		case 'fd,fs,rt': return effects([rt])
-		case 'jump': return op === Op.JAL ? effects([], RA) : effects([])
-		case 'rt,cp0': return op === Op.MFC0 ? effects([], rt) : effects([rt])
-		case 'rt,fs': return op === Op.MFC1 ? effects([], rt) : effects([rt])
-		// syscall reads its arguments; the CP1 operations use the other file.
-		case 'none': return op === Op.SYSCALL ? effects([2, 4, 5, 6, 7]) : effects([])
-		default: return effects([])
+function earliestBypass(bypasses: readonly PipelineBypass[], result: number) {
+	let stage = -1
+	for (const bypass of bypasses) {
+		if ((bypass.results & result) !== 0 && (stage < 0 || bypass.from < stage)) stage = bypass.from
+	}
+	return stage
+}
+
+function timingOf(model: ArchitecturePipeline, settings: PipelineSettings): Timing {
+	const policy = optionFor(model.hazards, settings.dataHazards)
+	const hold = model.readStage
+	return {
+		stageCount: model.stages.length,
+		hold,
+		gate: hold + 1,
+		aluBypass: earliestBypass(policy.bypasses, PipelineResult.ALU),
+		loadBypass: earliestBypass(policy.bypasses, PipelineResult.LOAD),
+		// Used in `hold` itself, a value must arrive while the instruction is
+		// still there; used in the next stage, it may arrive on the way in.
+		bypassDelay: 1 - (policy.useStage - hold),
+		writeStage: model.writeStage,
+		fileDelay: policy.writeThenRead ? 1 : 2,
+		loadUse: policy.bypasses.length > 0,
+		branchPenalty: optionFor(model.branches, settings.resolveBranchIn).stage,
+		jumpPenalty: optionFor(model.jumps, settings.resolveJumpIn).stage,
+		delaySlots: model.delaySlots,
 	}
 }
 
@@ -201,9 +180,7 @@ interface InFlight {
 	index: number
 	writes: number
 	isLoad: boolean
-	ex: number
-	mem: number
-	wb: number
+	cycles: readonly number[]
 }
 
 export class PipelineModel implements ExecutionObserver, Replayable {
@@ -211,8 +188,8 @@ export class PipelineModel implements ExecutionObserver, Replayable {
 	private rows: PipelineRow[] = []
 	private recent: InFlight[] = []
 	private index = 0
-	/** Cycles the instruction before this one occupies each stage. */
-	private previous: [number, number, number, number, number] | null = null
+	/** Cycles the instruction before this one entered each stage. */
+	private previous: readonly number[] | null = null
 	private lastCycle = 0
 	private firstCycle = 1
 	private dataStalls = 0
@@ -235,6 +212,11 @@ export class PipelineModel implements ExecutionObserver, Replayable {
 	 * describes the machine, not the run.
 	 */
 	delaySlots = false
+	/** Register traffic and control class of each instruction, from the architecture. */
+	private instructions: InstructionSet | null = null
+	/** The pipeline the architecture describes, and its reading under the settings. */
+	private model: ArchitecturePipeline | null = null
+	private timing: Timing | null = null
 	/**
 	 * Which way each conditional branch went.  The one thing a replay cannot
 	 * work out for itself: the machine's log holds what ran, not what was
@@ -249,8 +231,8 @@ export class PipelineModel implements ExecutionObserver, Replayable {
 	}
 
 	/** One instruction again, and the branch outcome noted against it. */
-	replayStep(address: number, decoded: Decoded, instructionCount: number) {
-		this.apply(address, decoded, instructionCount)
+	replayStep(address: number, instruction: unknown, instructionCount: number) {
+		this.apply(address, instruction, instructionCount)
 		const index = this.branches.indexFrom(instructionCount)
 		if (this.branches.countAt(index) === instructionCount) {
 			this.resolveBranch(address, this.branches.valueAt(index)!)
@@ -272,6 +254,7 @@ export class PipelineModel implements ExecutionObserver, Replayable {
 			|| next.prediction !== this.settings.prediction
 		this.settings = next
 		if (modelChanged) {
+			this.timing = this.model && timingOf(this.model, next)
 			// The instructions that ran have not changed, only what the model makes
 			// of them, so the reading is worked out again rather than thrown away.
 			this.replay.rework()
@@ -313,6 +296,9 @@ export class PipelineModel implements ExecutionObserver, Replayable {
 
 	onConfigure(machine: MachineConfig) {
 		this.delaySlots = machine.delayedBranching
+		this.instructions = machine.instructions ?? null
+		this.model = this.instructions?.pipeline ?? null
+		this.timing = this.model && timingOf(this.model, this.settings)
 		this.replay.configure(machine)
 	}
 
@@ -326,63 +312,63 @@ export class PipelineModel implements ExecutionObserver, Replayable {
 		return stats
 	}
 
-	onInstruction(address: number, decoded: Decoded, instructionCount = 0) {
+	onInstruction(address: number, instruction: unknown, instructionCount = 0) {
 		this.replay.watch(instructionCount)
 		// Running on from a step back leaves a future that did not happen, and
 		// the machine's history drops the oldest instructions as it fills.
 		this.branches.dropFrom(instructionCount)
 		const oldest = this.replay.oldest
 		if (oldest !== undefined) this.branches.dropBefore(oldest)
-		this.apply(address, decoded, instructionCount)
+		this.apply(address, instruction, instructionCount)
 	}
 
 	/** One instruction through the model, live or replayed. */
-	private apply(address: number, decoded: Decoded, instructionCount: number) {
-		const effects = registerEffects(decoded)
+	private apply(address: number, instruction: unknown, instructionCount: number) {
+		// Without the architecture's reading and pipeline there is nothing to model.
+		const timing = this.timing
+		if (!this.instructions || !timing) return
+		const effects = this.instructions.describe(instruction)
 		const flushed = this.pendingFlush
 		this.pendingFlush = 0
 
 		// An instruction may enter a stage only once the one ahead has left it, so
 		// a stall anywhere backs the whole front end up behind it.
-		const [priorIf, priorId, priorEx, priorMem] = this.previous ?? [0, 0, 0, 0]
-		const ifCycle = Math.max(priorIf + 1, priorId) + flushed
-		const idCycle = Math.max(ifCycle + 1, priorEx)
+		const { stageCount, hold, gate } = timing
+		const prior = this.previous
+		const cycles = new Array<number>(stageCount)
+		cycles[0] = (prior ? Math.max(prior[0] + 1, prior[1]) : 1) + flushed
+		for (let stage = 1; stage <= gate; stage++) {
+			const free = prior === null ? 0 : stage + 1 < stageCount ? prior[stage + 1] : prior[stage] + 1
+			cycles[stage] = Math.max(cycles[stage - 1] + 1, free)
+		}
 
-		// Enter EX as soon as the stage is free and every operand has arrived.
-		let exCycle = Math.max(idCycle + 1, priorMem)
+		// Leave the hold stage as soon as every operand has arrived.
 		let cause: StallCause = null
 		let blockedOn: number | null = null
 		let blockedBy: number | null = null
-
-		const forwarding = this.settings.dataHazards === 'forwarding'
 		for (const register of effects.reads) {
 			const producer = this.producerOf(register)
 			if (!producer) continue
-			// Forwarding: an ALU result is ready after EX, a load after MEM.
-			// Split decode: ID reads in the same cycle write-back writes.
-			// Neither: ID has to wait for the cycle after write-back.
-			const ready = forwarding
-				? (producer.isLoad ? producer.mem : producer.ex) + 1
-				: producer.wb + (this.settings.dataHazards === 'split-decode' ? 1 : 2)
-			if (ready > exCycle) {
-				exCycle = ready
-				cause = forwarding && producer.isLoad ? 'load-use' : 'data'
+			const bypass = producer.isLoad ? timing.loadBypass : timing.aluBypass
+			const fromFile = producer.cycles[timing.writeStage] + timing.fileDelay
+			const ready = bypass < 0 ? fromFile : Math.min(fromFile, producer.cycles[bypass] + timing.bypassDelay)
+			if (ready > cycles[gate]) {
+				cycles[gate] = ready
+				cause = timing.loadUse && producer.isLoad ? 'load-use' : 'data'
 				blockedOn = register
 				blockedBy = producer.index
 			}
 		}
+		for (let stage = gate + 1; stage < stageCount; stage++) cycles[stage] = cycles[stage - 1] + 1
 
-		const stalls = exCycle - (idCycle + 1)
+		const stalls = cycles[gate] - (cycles[hold] + 1)
 		if (stalls > 0) {
 			if (cause === 'load-use') this.loadUseStalls += stalls
 			else this.dataStalls += stalls
 		}
 
-		const memCycle = exCycle + 1
-		const wbCycle = memCycle + 1
-
 		// An unconditional jump always redirects; a branch reports itself below.
-		if (effects.isJump) this.redirect(RESOLUTION_PENALTY[this.settings.resolveJumpIn])
+		if (effects.isJump) this.redirect(timing.jumpPenalty)
 
 		const stats = this.statsFor(address)
 		stats.executions += 1
@@ -392,17 +378,17 @@ export class PipelineModel implements ExecutionObserver, Replayable {
 		this.lastStats = stats
 
 		this.index += 1
-		this.previous = [ifCycle, idCycle, exCycle, memCycle, wbCycle]
-		this.lastCycle = Math.max(this.lastCycle, wbCycle)
+		this.previous = cycles
+		this.lastCycle = Math.max(this.lastCycle, cycles[stageCount - 1])
 
-		this.recent.push({ index: this.index, writes: effects.writes, isLoad: effects.isLoad, ex: exCycle, mem: memCycle, wb: wbCycle })
+		this.recent.push({ index: this.index, writes: effects.writes, isLoad: effects.isLoad, cycles })
 		if (this.recent.length > 8) this.recent.shift()
 
 		this.rows.push({
 			index: this.index,
 			address: address >>> 0,
-			op: OP_NAMES[decoded.op],
-			cycles: [ifCycle, idCycle, exCycle, memCycle, wbCycle],
+			op: effects.mnemonic,
+			cycles,
 			stalls,
 			cause,
 			blockedOn,
@@ -431,7 +417,8 @@ export class PipelineModel implements ExecutionObserver, Replayable {
 
 	/** One branch outcome through the model, live or replayed. */
 	private resolveBranch(address: number, taken: boolean) {
-		const penalty = RESOLUTION_PENALTY[this.settings.resolveBranchIn]
+		if (!this.timing) return
+		const penalty = this.timing.branchPenalty
 		const row = this.rows[this.rows.length - 1]
 
 		// With no predictor the front end simply falls through, so only a taken
@@ -479,11 +466,12 @@ export class PipelineModel implements ExecutionObserver, Replayable {
 	}
 
 	/**
-	 * Charges the front end for instructions fetched down the wrong path.  A
-	 * delay slot is one of them that the machine runs anyway, so it costs nothing.
+	 * Charges the front end for the instructions fetched down the wrong path,
+	 * which are annulled.  Delay slots are ones the machine runs anyway, so
+	 * they cost nothing.
 	 */
 	private redirect(penalty: number) {
-		const cost = Math.max(0, penalty - (this.delaySlots ? 1 : 0))
+		const cost = Math.max(0, penalty - (this.delaySlots ? this.timing!.delaySlots : 0))
 		this.pendingFlush = cost
 		this.controlFlushes += cost
 	}
@@ -499,13 +487,14 @@ export class PipelineModel implements ExecutionObserver, Replayable {
 	snapshot(): PipelineSnapshot {
 		this.replay.settle()
 		const cycles = this.lastCycle
+		const fill = (this.model?.stages.length ?? 1) - 1
 		return {
 			settings: this.settings,
 			instructions: this.index,
 			cycles,
 			cpi: this.index === 0 ? 0 : cycles / this.index,
-			steadyStateCpi: this.index === 0 ? 0 : (cycles - (STAGES.length - 1)) / this.index,
-			idealCycles: this.index === 0 ? 0 : this.index + STAGES.length - 1,
+			steadyStateCpi: this.index === 0 ? 0 : (cycles - fill) / this.index,
+			idealCycles: this.index === 0 ? 0 : this.index + fill,
 			dataStalls: this.dataStalls,
 			loadUseStalls: this.loadUseStalls,
 			controlFlushes: this.controlFlushes,
@@ -514,6 +503,9 @@ export class PipelineModel implements ExecutionObserver, Replayable {
 			rows: this.rows,
 			firstCycle: this.rows.length > 0 ? this.rows[0].cycles[0] : 1,
 			byAddress: new Map([...this.addresses].map(([address, stats]) => [address, { ...stats }])),
+			registerNames: this.instructions?.registerNames ?? [],
+			model: this.model,
+			available: this.instructions === null || this.model !== null,
 		}
 	}
 }

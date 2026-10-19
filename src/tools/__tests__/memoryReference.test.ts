@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { build, withExit } from '../../core/__tests__/helpers'
+import { build, withExit } from '../../architectures/mips/core/__tests__/helpers'
 import {
 	colorForCount,
 	DEFAULT_MEMORY_REFERENCE_SETTINGS,

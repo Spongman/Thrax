@@ -1,5 +1,6 @@
+import type { PanelContribution } from '../architectures/contracts'
 import type { Icon } from './icons'
-import { BitmapIcon, BotIcon, BranchHistoryIcon, CacheIcon, CallStackIcon, ConsoleIcon, DigitalLabIcon, FilesIcon, HistoryIcon, KeyboardIcon, MemoryIcon, MemoryReferenceIcon, PipelineIcon, RegistersIcon, ScavengerIcon, StatisticsIcon, SymbolsIcon, XRayIcon } from './icons'
+import { BitmapIcon, BranchHistoryIcon, CacheIcon, CallStackIcon, ConsoleIcon, FilesIcon, HistoryIcon, KeyboardIcon, MemoryIcon, MemoryReferenceIcon, PipelineIcon, RegistersIcon, StatisticsIcon, SymbolsIcon } from './icons'
 
 /**
  * Every dock panel, and what the menu and the default layout each need to know
@@ -43,7 +44,8 @@ export interface PanelSpec {
 
 /**
  * Windows are the workspace's own views of the machine; tools watch a run
- * through the observer seam and are the ported MARS tool set.
+ * through the observer seam.  These are the panels every target shares; an
+ * architecture adds its own through its definition.
  */
 export const PANELS: readonly PanelSpec[] = [
 	{ id: 'registers', icon: RegistersIcon, title: 'Registers', group: 'window', dock: 'side', initial: true },
@@ -82,34 +84,23 @@ export const PANELS: readonly PanelSpec[] = [
 		id: 'pipeline', icon: PipelineIcon, title: 'Pipeline', menuTitle: 'Pipeline Model', group: 'tool', dock: 'bottom',
 		description: 'Where each instruction would sit in a classic five-stage pipeline, what the machine holds on a chosen cycle, and what the hazards between them cost.',
 	},
-	{
-		id: 'xray', icon: XRayIcon, title: 'X-Ray', menuTitle: 'MIPS X-Ray Datapath', group: 'tool', dock: 'bottom',
-		description: 'The datapath, control unit, ALU control and register bank, with the instruction at the pc animated through them.',
-	},
-	{
-		id: 'marsBot', icon: BotIcon, title: 'Mars Bot', group: 'tool', dock: 'bottom',
-		description: 'A bot driven by five memory-mapped registers: its heading, where it has reached, and the trail behind it.',
-	},
-	{
-		id: 'scavengerHunt', icon: ScavengerIcon, title: 'Scavenger Hunt', group: 'tool', dock: 'bottom',
-		description: 'Each player’s position, energy and score, the locations still to visit, and the writes that broke the rules.',
-	},
-	{
-		id: 'digitalLab', icon: DigitalLabIcon, title: 'Digital Lab', menuTitle: 'Digital Lab Simulator', group: 'tool', dock: 'bottom',
-		description: 'Two seven-segment displays, a hexadecimal keypad, and a counter that raises a timer interrupt.',
-	},
 ]
 
+/** The shared panels followed by what the active architecture contributes. */
+export function panelCatalog(contributed: readonly PanelContribution[] = []): readonly PanelSpec[] {
+	return contributed.length === 0 ? PANELS : [...PANELS, ...contributed]
+}
+
 /** The panels one menu lists, in the order they are shown. */
-export function panelsIn(group: PanelGroup): PanelSpec[] {
-	return PANELS.filter((panel) => panel.group === group)
+export function panelsIn(group: PanelGroup, contributed?: readonly PanelContribution[]): PanelSpec[] {
+	return panelCatalog(contributed).filter((panel) => panel.group === group)
 }
 
 /** What a fresh workspace opens, and all that the first bundle has to carry. */
 export const INITIAL_PANELS: readonly PanelSpec[] = PANELS.filter((panel) => panel.initial)
 
-export function panelById(id: string): PanelSpec | undefined {
-	return PANELS.find((panel) => panel.id === id)
+export function panelById(id: string, contributed?: readonly PanelContribution[]): PanelSpec | undefined {
+	return panelCatalog(contributed).find((panel) => panel.id === id)
 }
 
 /** How the menu names a panel: its full name where it has one. */

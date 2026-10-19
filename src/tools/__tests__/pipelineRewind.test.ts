@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { build, withExit } from '../../core/__tests__/helpers'
+import { build, toolMachine, withExit } from '../../architectures/mips/core/__tests__/helpers'
 import { PipelineModel, DEFAULT_PIPELINE_SETTINGS, type PipelineSettings } from '../pipeline'
 
 /**
@@ -20,7 +20,7 @@ ${Array.from({ length: 8 }, (_, index) => `	addi $t${(index % 6) + 1}, $zero, ${
 function start(settings: Partial<PipelineSettings> = {}) {
 	const simulator = build(withExit(body))
 	const model = new PipelineModel({ ...DEFAULT_PIPELINE_SETTINGS, ...settings })
-	model.onConfigure({ delayedBranching: false, history: simulator.executionHistory })
+	model.onConfigure(toolMachine({ history: simulator.executionHistory }))
 	simulator.observers.push(model)
 	return { simulator, model }
 }

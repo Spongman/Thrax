@@ -1,20 +1,23 @@
 import React from 'react'
 import './MemoryView.css'
 import './ToggleGroup.css'
-import type { MemoryView as Memory } from '../core/types'
+import type { Disassembly, MemoryInspector, MemorySection } from '../architectures/contracts'
 import { formatHex, formatWord, parseWord } from '../core/format'
-import { disassemble } from '../core/disassembler'
 import { nextToggles } from './toggleGroup'
 import HexNumber, { HexWord, dimmedDigits } from './HexNumber'
 import { afterWrite, applyNibble, asciiByte, beforeCaret, Column, hexDigit, moveCaret, type Caret, type CaretBounds } from './memoryCaret'
 import { flashClass, useChangedEntries, useFlash } from './highlight'
-import { MEMORY_CONFIGURATIONS, type HexDimming, type MemoryConfigurationValues } from '../core/settings'
+import type { HexDimming } from '../core/settings'
 import { useTHRAXStore } from '../store/thraxStore'
 import { isFlagSet, isOneOf, useStoredState } from '../hooks/useStoredState'
 import { rowTop, rowWindow, useFixedRowScroller } from './rowWindow'
 
 interface MemoryViewProps {
-	memory: Memory
+	memory: MemoryInspector
+	/** The regions the section picker offers, from the target's memory map. */
+	sections: readonly MemorySection[]
+	/** Reads a hovered word in a code section as an instruction. */
+	disassembly?: Disassembly
 	/** Address of the instruction about to execute, or null when there is none. */
 	pc: number | null
 	/** Return addresses of the live call stack frames. */
@@ -39,29 +42,10 @@ interface MemoryViewProps {
 	onHoverAddress: (address: number | null) => void
 }
 
-interface MemorySection { id: string; label: string; start: number; end: number }
+/** Where a view with no target to ask lands: the whole address space. */
+const ANYWHERE: readonly MemorySection[] = [{ id: 'all', label: 'memory', start: 0, end: 0xfffffffc }]
 
-const SECTION_IDS = ['text', 'data', 'heap', 'stack', 'kdata', 'mmio']
-
-/**
- * Memory map segments, ordered as they appear in the address space.  The
- * configuration draws every boundary but one: it gives the heap and the stack a
- * single region, since they grow towards each other.  They are shown apart, so
- * the stack takes the top eighth of that span and the heap the rest.
- */
-export function sectionsFor(layout: MemoryConfigurationValues): MemorySection[] {
-	// Unsigned: a bitwise AND alone would turn the top of the address space negative.
-	const word = (address: number) => (address & ~3) >>> 0
-	const stackStart = word(layout.stackBaseAddress - (layout.stackBaseAddress - layout.heapBaseAddress) / 8)
-	return [
-		{ id: 'text', label: '.text', start: layout.textBaseAddress, end: layout.textLimitAddress },
-		{ id: 'data', label: '.data', start: layout.dataBaseAddress, end: layout.heapBaseAddress - 4 },
-		{ id: 'heap', label: 'heap', start: layout.heapBaseAddress, end: stackStart - 4 },
-		{ id: 'stack', label: 'stack', start: stackStart, end: layout.stackBaseAddress },
-		{ id: 'kdata', label: 'kernel', start: layout.kernelBaseAddress, end: layout.memoryMapBaseAddress - 4 },
-		{ id: 'mmio', label: 'MMIO', start: layout.memoryMapBaseAddress, end: word(layout.memoryMapLimitAddress) },
-	]
-}
+const isText = (value: unknown) => typeof value === 'string'
 
 const GROUP_SIZES = [1, 2, 4, 8]
 const ROW_HEIGHT = 18
@@ -72,14 +56,11 @@ const OVERSCAN_ROWS = 6
 
 const formatAddress = formatWord
 
-const sectionForAddress = (sections: MemorySection[], address: number) =>
+const sectionForAddress = (sections: readonly MemorySection[], address: number) =>
 	sections.find((section) => address >= section.start && address <= section.end)
 
-/** Little-endian byte read against the word-indexed memory view. */
-const byteAt = (memory: Memory, address: number) => {
-	const word = memory.words.get(address >>> 2) ?? 0
-	return (word >>> ((address & 3) * 8)) & 0xff
-}
+/** A byte of memory, zero where nothing was written. */
+const byteAt = (memory: MemoryInspector, address: number) => memory.byte(address) ?? 0
 
 const isPrintable = (byte: number) => byte >= 0x20 && byte <= 0x7e
 
@@ -253,12 +234,11 @@ const MemoryRow = React.memo(function MemoryRow({ row, top, left, width, groupSi
 	)
 })
 
-function MemoryView({ memory, pc, returnAddresses, focusAddress, focusRequest = 0, editable = false, onEditByte, onInsertByte, onDeleteByte, onHoverAddress, hoveredAddress = null }: MemoryViewProps) {
-	const memoryConfiguration = useTHRAXStore((state) => state.settings.memoryConfiguration)
-	const sections = React.useMemo(() => sectionsFor(MEMORY_CONFIGURATIONS[memoryConfiguration]), [memoryConfiguration])
+function MemoryView({ memory, sections: offered, disassembly, pc, returnAddresses, focusAddress, focusRequest = 0, editable = false, onEditByte, onInsertByte, onDeleteByte, onHoverAddress, hoveredAddress = null }: MemoryViewProps) {
+	const sections = offered.length > 0 ? offered : ANYWHERE
 	const textSection = sections[0]
 	const [addressInput, setAddressInput] = React.useState(formatAddress(textSection.start))
-	const [sectionId, setSectionId] = useStoredState('memory.section', SECTION_IDS[0], isOneOf(SECTION_IDS))
+	const [sectionId, setSectionId] = useStoredState('memory.section', textSection.id, isText)
 	const [groupSize, setGroupSize] = useStoredState('memory.groupSize', 4, isOneOf(GROUP_SIZES))
 	const hexDimming = useTHRAXStore((state) => state.settings.hexDimming)
 	const [rowOptions, setRowOptions] = useStoredState('memory.rows', { powerOfTwo: true, ascii: true, icons: false }, isFlagSet(['powerOfTwo', 'ascii', 'icons']))
@@ -541,9 +521,9 @@ function MemoryView({ memory, pc, returnAddresses, focusAddress, focusRequest = 
 			? `${formatAddress(hover.start)} - ${formatAddress(hover.start + hover.size - 1)}`
 			: formatAddress(hover.start)
 		const text = bytes.map((byte) => toPrintable(byte, showIcons)).join('')
-		// Words in .text decode to an instruction; other widths and sections do not.
-		const inText = hover.start >= textSection.start && hover.start <= textSection.end
-		const assembly = hover.size === 4 && inText ? disassemble(Number(value), hover.start) : null
+		// A word in a code section decodes to an instruction; other widths and sections do not.
+		const inCode = sectionForAddress(sections, hover.start)?.code === true
+		const assembly = hover.size === memory.wordBytes && inCode ? disassembly?.at(memory, hover.start) ?? null : null
 		return {
 			range,
 			hex: `0x${[...bytes].reverse().map(toHex).join('')}`,
@@ -552,7 +532,7 @@ function MemoryView({ memory, pc, returnAddresses, focusAddress, focusRequest = 
 			ascii: hover.size > 1 ? `"${text}"` : describeByte(bytes[0]),
 			assembly,
 		}
-	}, [hover, memory, showIcons])
+	}, [disassembly, hover, memory, sections, showIcons])
 
 	const showSection = (target: MemorySection) => {
 		setAddressError(null)

@@ -9,8 +9,8 @@
  * table shows.
  */
 
-import { bitsToDouble, bitsToSingle } from '../core/coprocessor'
-import type { DataEntry, MemoryView } from '../core/types'
+import type { DataDeclaration, MemoryInspector } from '../architectures/contracts'
+import { bitsToDouble, bitsToSingle } from '../core/ieee754'
 
 /** One run of bytes a directive laid out, as the table looks them up. */
 export interface DataRun {
@@ -23,7 +23,7 @@ export interface DataRun {
  * The runs in address order, which is how they are searched.  Entries without a
  * directive are laid out by nothing in particular and say nothing about a name.
  */
-export function dataRuns(entries: readonly DataEntry[]): DataRun[] {
+export function dataRuns(entries: readonly DataDeclaration[]): DataRun[] {
 	return entries
 		.filter((entry) => entry.directive !== undefined)
 		.map((entry) => ({ address: entry.address >>> 0, directive: entry.directive!, length: entry.bytes.length }))
@@ -45,20 +45,16 @@ export function runAt(runs: readonly DataRun[], address: number): DataRun | unde
 	return undefined
 }
 
-/** A byte of memory, which is held a word at a time and little-endian. */
-function byteAt(memory: MemoryView, address: number): number | undefined {
-	const word = memory.words.get(address >>> 2)
-	if (word === undefined) return undefined
-	return (word >>> ((address & 3) * 8)) & 0xff
-}
+/** A byte of memory, or undefined where nothing was written. */
+const byteAt = (memory: MemoryInspector, address: number) => memory.byte(address)
 
 /** `size` bytes from `address`, or null where memory does not hold them all. */
-function readInteger(memory: MemoryView, address: number, size: number, signed: boolean): number | null {
+function readInteger(memory: MemoryInspector, address: number, size: number, signed: boolean): number | null {
 	let value = 0
 	for (let offset = 0; offset < size; offset++) {
 		const byte = byteAt(memory, address + offset)
 		if (byte === undefined) return null
-		value += byte * 2 ** (offset * 8)
+		value += byte * 2 ** ((memory.littleEndian ? offset : size - 1 - offset) * 8)
 	}
 	if (!signed) return value
 	const limit = 2 ** (size * 8)
@@ -66,7 +62,7 @@ function readInteger(memory: MemoryView, address: number, size: number, signed: 
 }
 
 /** The characters from `address`, stopping at a NUL or the end of the run. */
-function readText(memory: MemoryView, address: number, length: number): string | null {
+function readText(memory: MemoryInspector, address: number, length: number): string | null {
 	let text = ''
 	for (let offset = 0; offset < length; offset++) {
 		const byte = byteAt(memory, address + offset)
@@ -85,7 +81,7 @@ const FLOAT_DIGITS = 6
  * bytes are not in memory, so the table can leave the column empty rather than
  * show a zero nothing wrote.
  */
-export function valueOf(memory: MemoryView, run: DataRun, address: number): string | null {
+export function valueOf(memory: MemoryInspector, run: DataRun, address: number): string | null {
 	const remaining = run.address + run.length - address
 	switch (run.directive) {
 		case '.byte': return readInteger(memory, address, 1, true)?.toString() ?? null

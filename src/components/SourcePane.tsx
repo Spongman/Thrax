@@ -2,13 +2,11 @@ import React from 'react'
 import { createPortal } from 'react-dom'
 import Editor, { type OnMount } from '@monaco-editor/react'
 import type { editor } from 'monaco-editor'
-import type { CodeWord } from '../core/types'
-import { formatHex, formatWord, formatWordDigits } from '../core/format'
+import type { CodeRow } from '../architectures/contracts'
+import { formatHex, formatWord } from '../core/format'
 import { splitHex } from './HexNumber'
 import type { HexDimming } from '../core/settings'
-import { disassemble, disassembleData } from '../core/disassembler'
 import { useTHRAXStore } from '../store/thraxStore'
-import { describeToken, registerMipsDebugDataTips } from '../services/debugDataTips'
 import { setFindReplaceEditor } from '../services/findReplace'
 import { heatLevel } from '../tools/profile'
 import { useFlash } from './highlight'
@@ -127,20 +125,15 @@ export function tipRuns(paragraph: string): { text: string, kind: 'plain' | 'str
 }
 
 /** A file that assembled to nothing has no machine words and no breakpoints. */
-const NO_CODE_WORDS = new Map<number, CodeWord[]>()
+const NO_CODE_WORDS = new Map<number, CodeRow[]>()
 const NO_LINES: ReadonlySet<number> = new Set<number>()
-
-/**
- * Data tips read the live store, so one provider serves every open editor: a
- * second registration would answer the same hover twice.
- */
-let dataTipsRegistered = false
 
 const formatAddress = formatWord
 
-const formatCodeWord = (row: CodeWord) => row.word === null
-	? row.bytes.map((byte) => formatHex(byte, 2)).join(' ') + (row.truncated ? ' …' : '')
-	: formatWordDigits(row.word)
+/** An instruction reads as its encoding; data as its bytes, apart. */
+const formatCodeWord = (row: CodeRow) => row.instruction
+	? row.bytes.map((byte) => formatHex(byte, 2)).join('')
+	: row.bytes.map((byte) => formatHex(byte, 2)).join(' ') + (row.truncated ? ' …' : '')
 
 interface SourcePaneProps {
 	/** The open file this editor is showing. */
@@ -149,6 +142,7 @@ interface SourcePaneProps {
 
 function SourcePane({ documentId }: SourcePaneProps) {
 	const store = useTHRAXStore()
+	const disassembly = store.target?.services.disassembly
 	const hexDimming = store.settings.hexDimming
 	const { activeDocumentId, branchHistory, breakpoints, callStack, documents, entryDocumentId, focusedSource, gutterColumns, heatMap: showHeatMap, heatMapLines: showHeatLines, hovered, pipeline, profile, selectedFrame, setBreakpointLines, setDocumentCode, toggleBreakpointAddress, toggleBreakpointLine } = store
 	// Bug 12: every editor marks up its own file.  The keyboard and the find
@@ -271,8 +265,8 @@ function SourcePane({ documentId }: SourcePaneProps) {
 			return
 		}
 		const rect = span.getBoundingClientRect()
-		const { registers, memory, fpRegisters, labels } = useTHRAXStore.getState()
-		const described = describeToken(text, hoveredColumn(clientX, rect, text.length), { registers, memory, fpRegisters, labels })
+		const { registers, memory, labels, target } = useTHRAXStore.getState()
+		const described = target?.services.describeToken?.(text, hoveredColumn(clientX, rect, text.length), { registers, memory, labels }) ?? null
 		hoverRegister(described?.register ?? null)
 		if (!described) {
 			clearAssemblyTip()
@@ -329,15 +323,6 @@ function SourcePane({ documentId }: SourcePaneProps) {
 		editorRef.current = editorInstance
 		monacoRef.current = monaco
 		if (isActiveFileRef.current) setFindReplaceEditor(editorInstance)
-		if (!dataTipsRegistered) {
-			dataTipsRegistered = true
-			// The provider reads the model it was asked about, so a hover answers
-			// for the file under the pointer rather than for the entry file.
-			registerMipsDebugDataTips(monaco, () => {
-				const { registers, memory, fpRegisters, labels } = useTHRAXStore.getState()
-				return { registers, memory, fpRegisters, labels }
-			})
-		}
 		const editorDomNode = editorInstance.getDomNode()
 		setEditorNode(editorDomNode)
 		hoverDelay.current = editorInstance.getOption(monaco.editor.EditorOption.hover).delay
@@ -681,7 +666,7 @@ function SourcePane({ documentId }: SourcePaneProps) {
 		for (const [line, words] of codeWords) {
 			if (line > lineCount) continue
 			// Data holds no instructions, so only code words carry a profile.
-			const instructions = words.filter((word) => word.word !== null)
+			const instructions = words.filter((word) => word.instruction)
 			if (instructions.length === 0) continue
 			const count = instructions.reduce((total, word) => total + (profile.byAddress.get(word.address)?.count ?? 0), 0)
 			const level = heatLevel(count, profile.max)
@@ -689,7 +674,7 @@ function SourcePane({ documentId }: SourcePaneProps) {
 
 			for (const word of instructions) {
 				const entry = profile.byAddress.get(word.address)
-				const text = word.word === null ? '' : disassemble(word.word, word.address) ?? ''
+				const text = disassembly?.row(word) ?? ''
 				hover.push(`**${formatAddress(word.address)}**${text ? `  \`${text}\`` : ''}`)
 				// Nothing is counting unless the heat map asked for it, and a count
 				// nobody took is not a count of zero.
@@ -736,7 +721,7 @@ function SourcePane({ documentId }: SourcePaneProps) {
 		}
 
 		profileDecorationIds.current = editorInstance.deltaDecorations(profileDecorationIds.current, decorations)
-	}, [branchHistory, code, codeWords, pipeline, profile, showHeatLines, showHeatMap])
+	}, [branchHistory, code, codeWords, disassembly, pipeline, profile, showHeatLines, showHeatMap])
 
 	// Once the source assembles, the gutter columns sit between the line numbers
 	// and the source, one row per machine word.
@@ -744,14 +729,14 @@ function SourcePane({ documentId }: SourcePaneProps) {
 		const rows = [...codeWords.values()].flat()
 		const assembly = new Map<number, string>()
 		rows.forEach((row, index) => {
-			assembly.set(row.address, row.word === null ? disassembleData(row, rows[index + 1]) : disassemble(row.word, row.address) ?? '')
+			assembly.set(row.address, disassembly?.row(row, rows[index + 1]) ?? '')
 		})
 		// One width per column keeps the source aligned down the whole file.
 		const codeWidth = Math.max(0, ...rows.map((row) => formatCodeWord(row).length))
 		const assemblyWidth = Math.max(0, ...[...assembly.values()].map((text) => text.length))
 		// Three parts rather than one string, so the disassembly is a span of its own
 		// and a pointer over it can be told which character it is on.
-		const restParts = (entry?: CodeWord) => {
+		const restParts = (entry?: CodeRow) => {
 			const code = showCodeBytes ? (entry ? formatCodeWord(entry) : '').padEnd(codeWidth) : ''
 			const asm = showDisassembly ? (entry ? assembly.get(entry.address) ?? '' : '').padEnd(assemblyWidth) : ''
 			// The gutter's own gap, plus the address column's width when this line
@@ -760,7 +745,7 @@ function SourcePane({ documentId }: SourcePaneProps) {
 			return gutterParts(lead, code, asm)
 		}
 		return { restParts }
-	}, [codeWords, showAddresses, showCodeBytes, showDisassembly])
+	}, [codeWords, disassembly, showAddresses, showCodeBytes, showDisassembly])
 
 	React.useEffect(() => {
 		const editorInstance = editorRef.current
@@ -891,7 +876,7 @@ function SourcePane({ documentId }: SourcePaneProps) {
 					marginRow.style.height = `${lineHeight}px`
 					marginDomNode.append(marginRow)
 					// Data never executes, so only code rows take a breakpoint.
-					if (entry.word === null) continue
+					if (!entry.instruction) continue
 					const glyph = document.createElement('div')
 					glyph.className = breakpoints.has(entry.address) ? 'code-word-breakpoint active' : 'code-word-breakpoint'
 					glyph.style.left = `${layout.glyphMarginLeft}px`
@@ -929,7 +914,7 @@ function SourcePane({ documentId }: SourcePaneProps) {
 			<div className="source-editor">
 				<Editor
 					height="100%"
-					defaultLanguage="mips"
+					language={store.target?.definition.language ?? 'plaintext'}
 					value={code}
 					onChange={(value) => setDocumentCode(documentId, value ?? '')}
 					theme="vs-dark"

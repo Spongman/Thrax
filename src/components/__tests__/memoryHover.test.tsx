@@ -1,3 +1,5 @@
+import { WordMemory } from '../../architectures/mips/machine'
+import { mipsProfile } from '../../architectures/mips/profile'
 import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import EditableCell from '../EditableCell'
@@ -34,7 +36,8 @@ describe('a hoverable cell', () => {
 describe('the memory view', () => {
 	const render = (editable: boolean) => renderToStaticMarkup(
 		<MemoryView
-			memory={{ words: new Map([[0x10010000 >>> 2, 42]]) }}
+			memory={new WordMemory(new Map([[0x10010000 >>> 2, 42]]))}
+			sections={mipsProfile('default').memorySections}
 			pc={null}
 			returnAddresses={new Set()}
 			focusAddress={null}

@@ -1,4 +1,4 @@
-import { CATEGORY_LABELS, FORMAT_LABELS, type InstructionCategory, type InstructionFormat, type StatisticsSnapshot } from '../tools/statistics'
+import { CATEGORY_LABELS, type CategoryKey, type StatisticsSnapshot } from '../tools/statistics'
 import PanelGroup from './PanelGroup'
 import './ToolPanels.css'
 
@@ -6,11 +6,10 @@ interface Props {
 	statistics: StatisticsSnapshot
 }
 
-const CATEGORIES = Object.keys(CATEGORY_LABELS) as InstructionCategory[]
-const FORMATS = Object.keys(FORMAT_LABELS) as InstructionFormat[]
+const CATEGORIES = Object.keys(CATEGORY_LABELS) as CategoryKey[]
 
 function InstructionStatisticsView({ statistics }: Props) {
-	const { total, byCategory, byFormat, byMnemonic } = statistics
+	const { total, byCategory, byEncoding, byMnemonic } = statistics
 
 	return (
 		<div className="tool">
@@ -26,12 +25,11 @@ function InstructionStatisticsView({ statistics }: Props) {
 			</div>
 
 			<PanelGroup title="By format">
-				{FORMATS.map((encoding) => {
-					const count = byFormat[encoding]
+				{byEncoding.map(({ label, count }) => {
 					const share = total === 0 ? 0 : count / total
 					return (
-						<div className="tool-bar-row" key={encoding}>
-							<span>{FORMAT_LABELS[encoding]}</span>
+						<div className="tool-bar-row" key={label}>
+							<span>{label}</span>
 							<div className="tool-bar-track">
 								<div className="tool-bar-fill" style={{ width: `${share * 100}%` }} />
 							</div>

@@ -1,5 +1,5 @@
 import React from 'react'
-import type { PendingInput } from '../core/types'
+import type { PendingInput } from '../architectures/contracts'
 import { splitLocations } from './consoleLocations'
 import './ConsoleOutput.css'
 

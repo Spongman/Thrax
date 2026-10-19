@@ -26,7 +26,8 @@
 
 /* Shown for the moment a tool's code is being fetched, the first time it is
    opened. */
-.dock-panel-loading {
+.dock-panel-loading,
+.dock-panel-unavailable {
 	color: var(--text-muted);
 	font-size: 12px;
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
-import type { DataEntry, MemoryView, SymbolTables } from '../../core/types'
+import type { DataEntry, SymbolTables } from '../../core/types'
+import { WordMemory } from '../../architectures/mips/machine'
 import SymbolTableView, { symbolSite, type SymbolRow } from '../SymbolTableView'
 
 /**
@@ -18,7 +19,7 @@ const data: DataEntry[] = [
 	{ address: 0x10010004, bytes: [0x68, 0x69, 0], directive: '.asciiz' },
 ]
 
-const memory: MemoryView = { words: new Map([[0x10010000 >>> 2, 7], [0x10010004 >>> 2, 0x006968]]) }
+const memory = new WordMemory(new Map([[0x10010000 >>> 2, 7], [0x10010004 >>> 2, 0x006968]]))
 
 describe('a symbol row', () => {
 	const markup = renderToStaticMarkup(<SymbolTableView symbols={symbols} data={data} memory={memory} />)

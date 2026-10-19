@@ -13,12 +13,9 @@ import type { ServiceHost } from '../core/service'
 import { readStoredSetting, writeStoredSetting } from '../hooks/useStoredState'
 import { BranchHistoryTable, DEFAULT_BHT_SETTINGS } from './branchHistory'
 import { CacheSimulator, DEFAULT_CACHE_SETTINGS } from './cache'
-import { MarsBot } from './marsBot'
-import { DigitalLabSim } from './digitalLab'
 import { DEFAULT_MEMORY_REFERENCE_SETTINGS, MemoryReferenceVisualizer, isMemoryReferenceSettings } from './memoryReference'
 import { DEFAULT_PIPELINE_SETTINGS, PipelineModel } from './pipeline'
 import { ExecutionProfile } from './profile'
-import { ScavengerHunt } from './scavengerHunt'
 import { InstructionStatistics } from './statistics'
 
 /** An observer that can also be read and, for some, configured. */
@@ -187,6 +184,16 @@ export class ToolRegistry<E extends Entries> {
 	}
 
 	/**
+	 * Lets go of the run: every tool stops watching and starts again from
+	 * nothing, since the machine it was reading is gone.
+	 */
+	detach() {
+		for (const state of this.states) if (state.attached) this.disconnect(state)
+		this.simulator = null
+		this.machine = null
+	}
+
+	/**
 	 * Says which tools something is consuming: a panel that is open, or a feature
 	 * of another panel that reads one.  A tool joining a run in progress starts
 	 * from nothing, since it did not see what came before.
@@ -231,7 +238,7 @@ export class ToolRegistry<E extends Entries> {
 	 * The tool itself, for the few that are driven as well as watched: a device
 	 with a keypad has to be told a key was pressed.
 	 */
-	instance<Key extends E[number]['key']>(key: Key) {
+	instance(key: string) {
 		return this.states.find((candidate) => candidate.entry.key === key)?.entry.tool
 	}
 
@@ -326,8 +333,5 @@ export function createToolRegistry() {
 			// shape it checks rather than being restated here.
 			setting: { storageKey: MEMORY_REFERENCE_SETTING, defaults: DEFAULT_MEMORY_REFERENCE_SETTINGS, isValid: isMemoryReferenceSettings },
 		},
-		{ key: 'marsBot', tool: new MarsBot() },
-		{ key: 'digitalLab', tool: new DigitalLabSim() },
-		{ key: 'scavengerHunt', tool: new ScavengerHunt() },
 	] as const)
 }

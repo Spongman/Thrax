@@ -1,11 +1,7 @@
 import React from 'react'
 import './HistoryView.css'
-import { disassemble } from '../core/disassembler'
+import type { DescribedEffect, HistoryFormatter, HistoryRecord, MachineHistory } from '../architectures/contracts'
 import { formatWord } from '../core/format'
-import { KIND_CALL, KIND_CONSOLE, KIND_CONSOLE_RESET, KIND_CP0, KIND_DISPLAY, KIND_EXIT_CODE, KIND_FLAG, KIND_FP, KIND_HALTED, KIND_HEAP_POINTER, KIND_HI_LO, KIND_INPUT, KIND_MEMORY, KIND_QUEUED_INPUT, KIND_REGISTER, KIND_SERVICE, KIND_SLEEP } from '../core/effectKind'
-import type { EffectStore } from '../core/effectStore'
-import type { HistoryLog } from '../core/historyLog'
-import type { Effect, HistoryEntry } from '../core/types'
 import { useTHRAXStore } from '../store/thraxStore'
 import { HexWord } from './HexNumber'
 import { rowAt, rowForScroll, scrollStep } from './historyDrag'
@@ -13,95 +9,6 @@ import { rowTop, rowWindow, useFixedRowScroller } from './rowWindow'
 
 const ROW_HEIGHT = 20
 const OVERSCAN_ROWS = 8
-
-/**
- * What one effect did, taken apart rather than spelled out.
- *
- * An effect holds the value that is not in the machine, so which side of the
- * present it is on decides whether that reads as the old value or the new one:
- * `applied` puts the value after the arrow instead of before it.
- *
- * The parts stay parts because the panel does more with them than print them:
- * a word goes through the workspace's own hex rendering, a register name is
- * something to navigate to, and an address is somewhere to send the memory
- * view.  `label` is the whole of it as text, for a title and for a test.
- */
-export interface DescribedEffect {
-	/** What changed: a register name, a bracketed address, `console`. */
-	subject: string
-	/** The register file name this names, when a click should go to one. */
-	register?: string
-	/** An address this names, when a click should go to the memory view. */
-	address?: number
-	/** The word held, when the effect holds one. */
-	value?: number
-	/** A second word, since hi and lo move together. */
-	second?: number
-	/** What is held when it is not a word, and was exchanged like one: a flag. */
-	text?: string
-	/**
-	 * What the effect carries rather than what it replaced.  Console text and a
-	 * line of input were not swapped for anything, so no arrow: there is no
-	 * other value to point away from or towards.
-	 */
-	detail?: string
-	/** The value is what the instruction produced rather than what it destroyed. */
-	applied: boolean
-	/** The whole of it as one string. */
-	label: string
-}
-
-function described(applied: boolean, parts: Omit<DescribedEffect, 'applied' | 'label'>): DescribedEffect {
-	const held = parts.value === undefined ? parts.text
-		: parts.second === undefined ? hex(parts.value)
-			: `${hex(parts.value)}/${hex(parts.second)}`
-	const label = held !== undefined
-		? (applied ? `${parts.subject} → ${held}` : `${parts.subject} ${held} →`)
-		: parts.detail !== undefined ? `${parts.subject} ${parts.detail}` : parts.subject
-	return { ...parts, applied, label }
-}
-
-export function describeEffect(effect: Effect, applied: boolean): DescribedEffect {
-	const at = (parts: Omit<DescribedEffect, 'applied' | 'label'>) => described(applied, parts)
-	switch (effect.kind) {
-		case KIND_REGISTER: return at({ subject: effect.name, register: effect.name, value: effect.value })
-		case KIND_FP: return at({ subject: `$f${effect.index}`, register: `$f${effect.index}`, value: effect.value })
-		case KIND_FLAG: return at({ subject: `cc${effect.index}`, text: String(effect.value) })
-		case KIND_CP0: return at({ subject: `cp0[${effect.index}]`, value: effect.value })
-		case KIND_MEMORY: {
-			// Unsigned: a word address in the kernel or the MMIO region shifts into a
-			// negative byte address, which no panel would match.
-			const address = (effect.wordAddress << 2) >>> 0
-			const span = effect.words.length === 1 ? formatWord(address) : `${formatWord(address)}+${effect.words.length * 4}`
-			return at({ subject: `[${span}]`, address })
-		}
-		case KIND_CONSOLE: return at({ subject: 'console', detail: JSON.stringify(effect.text) })
-		case KIND_CONSOLE_RESET: return at({ subject: 'console cleared' })
-		case KIND_DISPLAY: return at({ subject: 'display' })
-		case KIND_QUEUED_INPUT: return at({ subject: 'keyboard read' })
-		case KIND_CALL: return at({ subject: `call ${formatWord(effect.frame.targetAddress)}`, address: effect.frame.targetAddress })
-		case KIND_HI_LO: return at({ subject: 'hi/lo', register: '$hi', value: effect.hi, second: effect.lo })
-		case KIND_HEAP_POINTER: return at({ subject: 'heap', value: effect.value })
-		case KIND_HALTED: return at({ subject: effect.value ? 'running' : 'halted' })
-		case KIND_EXIT_CODE: return at({ subject: 'exit code' })
-		case KIND_SLEEP: return at({ subject: 'sleep' })
-		case KIND_INPUT: return at({ subject: 'read', detail: JSON.stringify(effect.value) })
-		// Only the service knows what its slots mean, so the chip names the
-		// service and leaves it at that.
-		case KIND_SERVICE: return at({ subject: effect.name })
-	}
-}
-
-const hex = (value: number) => formatWord(value >>> 0)
-
-/**
- * The effects worth a chip on the row, in the order they happened.  They live
- * in columns, so an object is built only for the rows actually on screen.
- */
-export function rowEffects(entry: HistoryEntry, effects: EffectStore, applied: boolean) {
-	return Array.from({ length: entry.effectCount }, (unused, offset) =>
-		describeEffect(effects.materialize(entry.effectStart + offset), applied))
-}
 
 /**
  * The subject of a chip, with any address in it spelled the way every other
@@ -196,14 +103,14 @@ function EffectChip({ chip, hoveredAddress, onHoverAddress, hoveredRegister, onH
 }
 
 interface HistoryViewProps {
-	entries: HistoryLog
+	entries: MachineHistory
 	/** How many entries stand behind the present; the rest are ahead of it. */
 	cursor: number
 	/** Bumped whenever the log changes, since it is written in place. */
 	version: number
-	sourceOf: (entry: HistoryEntry) => { file: string, line: number, text?: string } | null
-	onSelect: (entry: HistoryEntry) => void
-	onSetNow: (entry: HistoryEntry) => void
+	sourceOf: (entry: HistoryRecord) => { file: string, line: number, text?: string } | null
+	onSelect: (entry: HistoryRecord) => void
+	onSetNow: (entry: HistoryRecord) => void
 	onSelectAddress: (address: number) => void
 	/** Sends the editor to the line an entry ran. */
 	onSelectSource: (file: string, line: number) => void
@@ -222,11 +129,11 @@ interface HistoryViewProps {
 	/** The register under the pointer anywhere, lit here wherever it appears. */
 	hoveredRegister: string | null
 	selectedId: number | null
-	/** The columns every entry's effects are read out of. */
-	effects: EffectStore
+	/** How the machine's entries read: their instructions and effects. */
+	format: HistoryFormatter | null
 }
 
-function HistoryView({ entries, cursor, version, sourceOf, onSelect, onSetNow, onSelectAddress, onSelectSource, onSelectRegister, onHoverAddress, hoveredAddress, onHoverRegister, hoveredRegister, selectedId, effects }: HistoryViewProps) {
+function HistoryView({ entries, cursor, version, sourceOf, onSelect, onSetNow, onSelectAddress, onSelectSource, onSelectRegister, onHoverAddress, hoveredAddress, onHoverRegister, hoveredRegister, selectedId, format }: HistoryViewProps) {
 	const { ref: scrollRef, originRef, viewport, scrollTop, frame, onScroll } = useFixedRowScroller(ROW_HEIGHT)
 	const [following, setFollowing] = React.useState(true)
 	/** Whether the marker is being dragged, and where the pointer last was. */
@@ -309,11 +216,13 @@ function HistoryView({ entries, cursor, version, sourceOf, onSelect, onSetNow, o
 	// The list follows the tail while a program runs, until the user scrolls off
 	// it.  Once the present is behind the tail the marker is what matters, and
 	// chasing the end would drag the view off it after every step back.
+	// The panel can mount detached, with no height to scroll, so it follows
+	// again once it is measured.
 	React.useEffect(() => {
 		const element = scrollRef.current
 		if (!element || !following || cursor < entries.length) return
 		element.scrollTop = element.scrollHeight
-	}, [version, following, cursor, entries.length, scrollRef])
+	}, [version, following, cursor, entries.length, scrollRef, viewport.height])
 
 	// Shift is read from the events themselves rather than held as state: a
 	// scroll event says nothing about the keyboard, and the pointer that took
@@ -438,7 +347,7 @@ function HistoryView({ entries, cursor, version, sourceOf, onSelect, onSetNow, o
 										onSetNow(entry)
 									}}
 								>
-									{entry.kind === 'edit' ? 'edited by hand' : entry.word === null ? '' : disassemble(entry.word)}
+									{entry.kind === 'edit' ? 'edited by hand' : format?.instruction(entry) ?? ''}
 								</button>
 								{/* The effects fill the rest of the row, so the empty space
 								    beyond the last chip runs to the entry as well. */}
@@ -450,7 +359,7 @@ function HistoryView({ entries, cursor, version, sourceOf, onSelect, onSetNow, o
 										onSetNow(entry)
 									}}
 								>
-									{rowEffects(entry, effects, ahead).map((chip, index) => (
+									{(format?.effects(entry, ahead) ?? []).map((chip, index) => (
 										<EffectChip
 											key={index}
 											chip={chip}
@@ -475,12 +384,12 @@ function HistoryView({ entries, cursor, version, sourceOf, onSelect, onSetNow, o
 
 /** The history of the program the workspace is running. */
 export function HistoryPanel() {
-	const { executionHistory, historyCursor, historyEffects, historyVersion, hovered, sourceIndex, focusMemoryAddress, focusRegister, focusSourceLine, moveHistoryTo, hover } = useTHRAXStore()
+	const { executionHistory, historyCursor, historyFormat, historyVersion, hovered, sourceIndex, focusMemoryAddress, focusRegister, focusSourceLine, moveHistoryTo, hover } = useTHRAXStore()
 	const [selectedId, setSelectedId] = React.useState<number | null>(null)
 
-	const sourceOf = React.useCallback((entry: HistoryEntry) => sourceIndex.lineForAddress(entry.address), [sourceIndex])
+	const sourceOf = React.useCallback((entry: HistoryRecord) => sourceIndex.lineForAddress(entry.address), [sourceIndex])
 
-	const setNow = React.useCallback((entry: HistoryEntry) => {
+	const setNow = React.useCallback((entry: HistoryRecord) => {
 		setSelectedId(entry.id)
 		moveHistoryTo(entry.id)
 	}, [moveHistoryTo])
@@ -488,7 +397,7 @@ export function HistoryPanel() {
 	return (
 		<HistoryView
 			entries={executionHistory}
-			effects={historyEffects}
+			format={historyFormat}
 			cursor={historyCursor}
 			version={historyVersion}
 			sourceOf={sourceOf}

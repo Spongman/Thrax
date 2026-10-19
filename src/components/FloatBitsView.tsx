@@ -1,4 +1,4 @@
-import { bitsToDouble, bitsToSingle, formatDouble, formatSingle } from '../core/coprocessor'
+import { bitsToDouble, bitsToSingle, formatDouble, formatSingle } from '../core/ieee754'
 import { formatHex, formatWord } from '../core/format'
 import './ToolPanels.css'
 import EditableCell from './EditableCell'
