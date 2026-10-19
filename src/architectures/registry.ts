@@ -3,6 +3,7 @@ import { DEFAULT_ARCHITECTURE } from '../services/workspace'
 import type { ArchitectureActivation, ArchitectureDefinition, ArchitectureServices, Disposable, EditorHost } from './contracts'
 import { manifest as betaManifest } from './beta/manifest'
 import { manifest as mipsManifest } from './mips/manifest'
+import { manifest as mos6502Manifest } from './mos6502/manifest'
 
 /** A later request replaced this one before it could commit. */
 export class ActivationSuperseded extends Error {
@@ -27,11 +28,13 @@ export interface ArchitectureManifest {
 const loaders: Record<string, Loader<ArchitectureServices>> = {
 	mips: () => import('./mips'),
 	beta: () => import('./beta'),
+	mos6502: () => import('./mos6502'),
 }
 
 const manifests: Readonly<Record<string, ArchitectureManifest>> = {
 	mips: mipsManifest,
 	beta: betaManifest,
+	mos6502: mos6502Manifest,
 }
 
 /** Ids of every architecture the catalog can load. */
