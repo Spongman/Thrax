@@ -12,7 +12,7 @@ A son of MARS (but in a different language). A modern, interactive web-based por
 ## 🚀 Features
 
 ### Core Functionality
-- ✅ **Four Architectures**: MIPS (MARS), the MIT Beta (BSim), the MOS 6502 and the Zilog Z80, chosen in Settings; each loads only when selected, and the files, line breakpoints and layout carry across
+- ✅ **Six Architectures**: MIPS (MARS), the MIT Beta (BSim), the MOS 6502, the Zilog Z80, ARMv8-A (AArch64) and the 26-bit ARM (ARMv2a), chosen in Settings; each loads only when selected, and the files, line breakpoints and layout carry across
 - ✅ **Complete MIPS Assembler**: Lexer → Parser → Machine Code Generator, with errors reported on the line that earned them
 - ✅ **Full MIPS Simulator**: The whole MARS instruction table, coprocessors 0 and 1, delayed branching, and device interrupts
 - ✅ **Monaco Editor**: Syntax highlighting, completion offering every instruction with its docs, and a hover saying what each instruction does
@@ -30,7 +30,7 @@ A son of MARS (but in a different language). A modern, interactive web-based por
 - ✅ **Portable Export**: Download assembled text in HexText format
 - ✅ **MARS Tools**: Bitmap display, keyboard/display MMIO, cache simulator, pipeline model, instruction statistics, branch history, MIPS X-Ray, memory reference visualization, Mars Bot, Scavenger Hunt, and the Digital Lab Simulator
 - ✅ **Settings**: Shared display and history preferences, plus each architecture's own options, kept per architecture: the MARS options with the three memory configurations for MIPS, and memory size and the console default for Beta
-- ✅ **Example Programs**: 13 ready-to-run MIPS programs, 12 Beta programs, among them the 6.004 TinyOS lab kernel, 13 6502 programs, 12 Z80 programs and 13 AArch64 programs
+- ✅ **Example Programs**: 13 ready-to-run MIPS programs, 12 Beta programs, among them the 6.004 TinyOS lab kernel, 13 6502 programs, 12 Z80 programs, 13 AArch64 programs and 13 26-bit ARM programs, two of them in armasm syntax
 - ✅ **Dark Theme UI**: VS Code-inspired interface
 
 ### Supported Instruction Types
@@ -232,6 +232,34 @@ Assembly is GNU as for AArch64 (`.s`/`.S`):
 - Literals are exact to 64 bits; arithmetic on symbols is exact within 2^53
 - Not supported: conditionals (`.if`), `.irp`, sections other than text and data, and relocations other than `:lo12:`
 - Sources use the `aarch64` editor language with data tips for X and W registers, effective addresses, symbols and numbers; new files are `.s`
+
+### ARM (26-bit, ARMv2a)
+The 26-bit ARM of the Acorn Archimedes: an ARM2 with the ARM3's `SWP`. R15
+holds the PC in bits 2-25 and N Z C V I F and the mode in the rest; USR, FIQ,
+IRQ and SVC bank R13-R14 (FIQ R8-R14), and the Registers panel shows the
+current view, the status flags, R15 whole, and every banked register on its own
+tab. PC reads 8 ahead (12 with a register-specified shift and when stored);
+`MOVS PC, LR`, the P forms (`TEQP`) and `LDM ... ^` also write the status bits,
+all of them in a privileged mode and only NZCV in USR. Data processing with the
+barrel shifter (RRX included), `MUL`/`MLA`, `LDR`/`STR` (byte, word, `T`, pre-
+and post-index, scaled register offsets, unaligned loads rotated), `LDM`/`STM`
+in all four modes with `!` and `^`, `SWP`, `B`/`BL` and `SWI`. No Thumb, no
+`MRS`/`MSR`, no halfword loads and no coprocessors.
+
+The machine:
+- RAM from 0 (512 KB to 16 MB, a setting); programs start at `0x8000` in USR mode, with R13_usr at the top of RAM and R13_svc, R13_irq and R13_fiq at `0x8000`, `0x7000` and `0x6000`. A program with bytes at address 0 owns the vectors and starts at reset in SVC with I and F set
+- Exceptions take the vectors at `0x00`-`0x1C` (reset, undefined, SWI, prefetch abort, data abort, address exception for data above 26 bits, IRQ, FIQ) when the vector word is not zero; through an empty vector the run stops with the reason instead
+- With the SWI vector empty, SWIs are RISC OS's console calls: `OS_WriteC` (&00), `OS_WriteS` (&01), `OS_Write0` (&02), `OS_NewLine` (&03), `OS_ReadC` (&04, waits for typed input; a line ends with 10) and `OS_Exit` (&11), the `X` forms alike; `swi OS_Exit` and `swi "OS_Exit"` both assemble
+- The Keyboard and Display tool's registers sit above RAM: `KBD_STATUS` at `0x03FF0000` (bit 0 a key waits, bit 1 enables an IRQ while one does), `KBD_DATA` at `0x03FF0004`, `TTY_STATUS` at `0x03FF0008` and `TTY_DATA` at `0x03FF000C`, all predefined symbols; the tool's own help text names MARS's addresses. The Bitmap Display reads words anywhere in RAM
+- The pipeline tool models fetch, decode and execute: no data stalls, and two instructions discarded behind a taken branch or a write to PC; multi-cycle instructions are not modelled
+- `BL` and returns to its link keep the call stack; every effect, banked registers and status bits included, steps back exactly
+
+Two assembler dialects, chosen by file: `.s`/`.S` are GNU as, `.armasm` is armasm, and any other file (`.asm`, new files) by its content when an indented `AREA` or a GNU directive says which, else by the dialect setting:
+- GNU as: `@` and `//` comments, `;` between statements, `name:` and `1:` labels (`1b`/`1f`), `.text`, `.data`, `.bss`, `.section`, `.word`, `.hword`, `.byte`, `.ascii`, `.asciz`, `.align` (a power of two), `.balign`, `.space`, `.equ`/`.set`/`=`, `.org` (an absolute address), `.ltorg`, `.include`, `.macro`/`.endm` with `\param`, defaults and `\@`, `.end`; the program starts at `_start`
+- armasm: `;` comments, labels in column 1 without a colon, `AREA` (CODE or DATA), `DCD`, `DCW`, `DCB`, `SPACE`, `FILL`, `EQU`, `ALIGN`, `LTORG`, `ENTRY`, `END`, `&FF` and `2_101` numbers and `:AND:`-style operators; `EXPORT`, `IMPORT` and the like are accepted and ignored
+- Both: divided (`addeqs`, `ldmeqfd`) and unified (`addseq`) suffix orders, `#` optional, APCS register names, `ldr rd, =value` as a `mov`/`mvn` or a literal pool word, `adr`, `push`/`pop`, `nop`, `lsl`/`lsr`/`asr`/`ror`/`rrx` and `neg`; an immediate no rotation fits is retried on the complementary instruction (`mov`/`mvn`, `add`/`sub`, `cmp`/`cmn`, `and`/`bic`, `adc`/`sbc`). `.data` is placed after the code
+- Not supported: conditionals, `.rept`, armasm macros and `GET`/`INCLUDE`
+- Sources use the `arm` editor language for both dialects, so `;` shows as a comment in GNU sources too, with data tips for registers, labels, symbols and numbers; new files are `.asm`
 
 ### Files, Folders and Links
 The workspace autosaves to the browser as you type, so a reload picks up where you
