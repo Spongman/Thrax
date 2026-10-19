@@ -1,6 +1,7 @@
 import type * as Monaco from 'monaco-editor'
 import { DEFAULT_ARCHITECTURE } from '../services/workspace'
 import type { ArchitectureActivation, ArchitectureDefinition, ArchitectureServices, Disposable, EditorHost } from './contracts'
+import { manifest as armv8Manifest } from './armv8/manifest'
 import { manifest as betaManifest } from './beta/manifest'
 import { manifest as mipsManifest } from './mips/manifest'
 import { manifest as mos6502Manifest } from './mos6502/manifest'
@@ -31,6 +32,7 @@ const loaders: Record<string, Loader<ArchitectureServices>> = {
 	beta: () => import('./beta'),
 	mos6502: () => import('./mos6502'),
 	z80: () => import('./z80'),
+	armv8: () => import('./armv8'),
 }
 
 const manifests: Readonly<Record<string, ArchitectureManifest>> = {
@@ -38,6 +40,7 @@ const manifests: Readonly<Record<string, ArchitectureManifest>> = {
 	beta: betaManifest,
 	mos6502: mos6502Manifest,
 	z80: z80Manifest,
+	armv8: armv8Manifest,
 }
 
 /** Ids of every architecture the catalog can load. */
