@@ -12,7 +12,7 @@ A son of MARS (but in a different language). A modern, interactive web-based por
 ## 🚀 Features
 
 ### Core Functionality
-- ✅ **Six Architectures**: MIPS (MARS), the MIT Beta (BSim), the MOS 6502, the Zilog Z80, ARMv8-A (AArch64) and the 26-bit ARM (ARMv2a), chosen in Settings; each loads only when selected, and the files, line breakpoints and layout carry across
+- ✅ **Six Architectures**: MIPS (MARS), the MIT Beta (BSim), the MOS 6502, the Zilog Z80, ARMv8-A (AArch64 and AArch32) and the 26-bit ARM (ARMv2a), chosen in Settings; each loads only when selected, and the files, line breakpoints and layout carry across
 - ✅ **Complete MIPS Assembler**: Lexer → Parser → Machine Code Generator, with errors reported on the line that earned them
 - ✅ **Full MIPS Simulator**: The whole MARS instruction table, coprocessors 0 and 1, delayed branching, and device interrupts
 - ✅ **Monaco Editor**: Syntax highlighting, completion offering every instruction with its docs, and a hover saying what each instruction does
@@ -30,7 +30,7 @@ A son of MARS (but in a different language). A modern, interactive web-based por
 - ✅ **Portable Export**: Download assembled text in HexText format
 - ✅ **MARS Tools**: Bitmap display, keyboard/display MMIO, cache simulator, pipeline model, instruction statistics, branch history, MIPS X-Ray, memory reference visualization, Mars Bot, Scavenger Hunt, and the Digital Lab Simulator
 - ✅ **Settings**: Shared display and history preferences, plus each architecture's own options, kept per architecture: the MARS options with the three memory configurations for MIPS, and memory size and the console default for Beta
-- ✅ **Example Programs**: 13 ready-to-run MIPS programs, 12 Beta programs, among them the 6.004 TinyOS lab kernel, 13 6502 programs, 12 Z80 programs, 13 AArch64 programs and 13 26-bit ARM programs, two of them in armasm syntax
+- ✅ **Example Programs**: 13 ready-to-run MIPS programs, 12 Beta programs, among them the 6.004 TinyOS lab kernel, 13 6502 programs, 12 Z80 programs, 13 AArch64 programs, 15 AArch32 programs and 13 26-bit ARM programs; two each of the AArch32 and 26-bit ARM programs are in armasm syntax
 - ✅ **Dark Theme UI**: VS Code-inspired interface
 
 ### Supported Instruction Types
@@ -206,7 +206,10 @@ Assembly is the common subset of zasm and sjasmplus:
 - Not supported: conditionals (`IF`), `PHASE`, `STRUCT`, unnamed and temporary labels, and `<`/`>` as low and high byte
 - Sources use the `z80` editor language with data tips for registers, pairs and what they point at, symbols and numbers; new files are `.z80`
 
-### ARMv8-A (AArch64)
+### ARMv8-A (AArch64 and AArch32)
+The execution-state setting chooses AArch64 or AArch32; switching rebuilds,
+and the Registers panel, the Examples menu and the editor language follow it.
+
 AArch64 user programs at EL0, as Linux runs them, with no MMU: X0-X30, SP and
 the PC as exact 64-bit values (the Registers panel shows them in full, with a
 W tab for the 32-bit views), and NZCV. The integer A64 instruction set: add and
@@ -215,8 +218,7 @@ subtract with immediates, shifted and extended registers, carry, logical
 and divide, conditional select and compare, every branch, and loads and stores
 of every width with sign extension, pre- and post-index, register offsets,
 pairs, unscaled offsets and literals. `svc`, `hlt`, `brk` and `nop` complete it.
-Floating point and SIMD are not supported. An execution-state setting selects
-AArch64; AArch32 is to follow.
+Floating point and SIMD are not supported.
 
 The machine:
 - Memory from `0x00400000`: code there, `.data` at `0x00420000`, the program break after the data, and SP starting at the top. The size is a setting (1, 4 or 16 MB); anything outside it faults. Unaligned data accesses are allowed and SP alignment is not checked
@@ -232,6 +234,31 @@ Assembly is GNU as for AArch64 (`.s`/`.S`):
 - Literals are exact to 64 bits; arithmetic on symbols is exact within 2^53
 - Not supported: conditionals (`.if`), `.irp`, sections other than text and data, and relocations other than `:lo12:`
 - Sources use the `aarch64` editor language with data tips for X and W registers, effective addresses, symbols and numbers; new files are `.s`
+
+AArch32 user programs in User mode, as Linux runs them under the EABI, with the
+A32 instruction set only: no Thumb (T32), VFP, Advanced SIMD or coprocessors.
+R0-R14, a 32-bit PC that reads (and stores) as the instruction's address + 8,
+and the CPSR with N Z C V Q and GE; User mode has no SPSR, and MSR writes only
+the flags and GE. Everything the 26-bit ARM runs except `SWP` and the P forms,
+plus `LDRH`/`STRH`/`LDRSB`/`LDRSH`/`LDRD`/`STRD`, `MRS`/`MSR`, `BX`/`BLX`, `CLZ`,
+`MOVW`/`MOVT`, `MLS`, `UMULL`/`UMLAL`/`SMULL`/`SMLAL`, `SDIV`/`UDIV` (by zero
+gives 0), `UBFX`/`SBFX`/`BFI`/`BFC`, `REV`/`REV16`/`REVSH`/`RBIT`,
+`SXTB`/`SXTH`/`UXTB`/`UXTH` and their `A` forms, `LDREX`/`STREX`, `SVC`,
+`BKPT`, `UDF`, `PLD`, the hints and the barriers. A write to the PC other than
+by `B` or `BL` interworks: an odd address, like `BLX` to a label, would enter
+Thumb, so it stops the program with an error saying so, changing nothing.
+
+The machine:
+- The AArch64 state's memory layout, keyboard and display, and Bitmap Display; `LDR`, `STR` and the halfword forms may be unaligned and read the bytes they name, while `LDRD`, `STRD`, `LDM`, `STM` and the exclusives need a word-aligned address
+- System calls by `svc #0` with the number in R7 and the result in R0: `read` (3), `write` (4), `exit` (1), `exit_group` (248), `brk` (45), as for AArch64
+- `bl`/`blx` and any return to a caller's address keep the call stack; every effect steps back exactly
+
+Assembly is the 26-bit ARM's GNU as and armasm (below), under ARMv8 rules:
+`.s` and `.S` are GNU as and `.armasm` armasm, and new files are `.s`.
+Mnemonics may be divided (`ldreqh`) or unified (`ldrheq`), and the disassembly
+is unified (`addseq`, `push`, `pop`). A `mov` of a 16-bit value no rotation
+fits becomes `movw`, and `movw`/`movt` take `#:lower16:` and `#:upper16:`.
+Sources use the `arm` editor language with ARMv8's mnemonics.
 
 ### ARM (26-bit, ARMv2a)
 The 26-bit ARM of the Acorn Archimedes: an ARM2 with the ARM3's `SWP`. R15
@@ -371,7 +398,7 @@ src/
 │   ├── beta/              # Beta CPU, BSim machine, UASM dialect and beta.uasm, editor, examples
 │   ├── mos6502/           # 6502 CPU, I/O page machine, ca65-style dialect, editor, examples
 │   ├── z80/               # Z80 CPU, device page machine, Zilog-syntax dialect, editor, examples
-│   └── armv8/             # ARMv8-A: execution states; a64/ holds the A64 assembler, CPU and Linux machine
+│   └── armv8/             # ARMv8-A: execution states; a64/ holds the A64 assembler, CPU and Linux machine, a32/ the AArch32 CPU and machine
 ├── core/                  # Shared assembler engine (assembly/), diagnostics, source index, history, settings
 ├── debug/                 # Debug session: breakpoints and stepping
 ├── tools/                 # Statistics, profile, cache, branch history, pipeline, memory reference
