@@ -50,8 +50,8 @@ export class LiteralPool {
 		const entries = () => this.entries
 		const words: FragmentStatement = {
 			kind: Fragment,
-			// Read as the statement runs, after the loads before it have taken their slots.
-			get size() { return entries().length * 4 },
+			// Chosen in layout, after the loads before it have taken their slots.
+			size: () => entries().length * 4,
 			encode(context) {
 				const bytes: number[] = []
 				for (const entry of entries()) {

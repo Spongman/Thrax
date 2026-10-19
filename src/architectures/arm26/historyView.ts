@@ -70,7 +70,7 @@ export function statusText(psr: number): string {
 }
 
 function described(applied: boolean, parts: Omit<DescribedEffect, 'applied' | 'label'>): DescribedEffect {
-	const held = parts.value === undefined ? parts.text : hex(parts.value)
+	const held = parts.value === undefined ? parts.text : hex(Number(parts.value))
 	const label = held !== undefined
 		? (applied ? `${parts.subject} → ${held}` : `${parts.subject} ${held} →`)
 		: parts.detail !== undefined ? `${parts.subject} ${parts.detail}` : parts.subject

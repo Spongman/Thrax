@@ -483,25 +483,19 @@ class Parser {
 			this.out.push({ kind: Origin, value: { kind: ExprKind.Binary, op: Op.Add, left: { kind: ExprKind.Dot }, right: size, at }, at })
 			return
 		}
-		let count = 0
 		const provenance: Provenance = { kind: 'data', source: location(at), expansion: [] }
-		const measure: Statement = {
-			kind: Hook,
-			run: (context: HookContext) => {
-				const value = context.value(size, true)!
-				if (!Number.isInteger(value) || value < 0) throw new AssemblyError(`Size ${value} is not a whole number of bytes`, at)
-				count = value
-			},
-			at,
-		}
 		const bytes: FragmentStatement = {
 			kind: Fragment,
-			get size() { return count },
-			encode: (context) => new Uint8Array(count).fill(context.value(fill, true)! & 0xFF),
+			size: (context: HookContext) => {
+				const value = context.value(size, true)!
+				if (!Number.isInteger(value) || value < 0) throw new AssemblyError(`Size ${value} is not a whole number of bytes`, at)
+				return value
+			},
+			encode: (context, count) => new Uint8Array(count).fill(context.value(fill, true)! & 0xFF),
 			provenance,
 			at,
 		}
-		this.out.push(measure, bytes)
+		this.out.push(bytes)
 	}
 
 	private instruction(head: Token, cursor: TokenCursor) {

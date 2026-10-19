@@ -73,7 +73,8 @@ export function describeArmToken(line: string, offset: number, state: DebugInspe
 		}
 		const id = registerId(text)
 		if (id !== undefined) {
-			const value = state.registers[id] ?? 0
+			// A32 registers are 32 bits wide.
+			const value = Number(state.registers[id] ?? 0)
 			const name = text.toUpperCase() === id ? id : `${id} (${text.toUpperCase()})`
 			return { ...span, register: id, contents: [`**${name}**\n\n\`${formatValue(value)}\``] }
 		}
