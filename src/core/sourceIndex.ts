@@ -8,6 +8,7 @@
  * of its own.
  */
 
+import type { CodeRow, MemoryInspector } from '../architectures/contracts'
 import type { DataEntry, MipsInstruction } from './types'
 
 /** Where a machine word came from. */
@@ -25,7 +26,10 @@ export interface SourceRow {
 	directive?: string
 	/** Byte offset of a data row within that directive's data. */
 	offset?: number
-	/** Bytes this data row covers, which the last row of a directive cuts short. */
+	/**
+	 * Bytes this row covers: a data row's share of its directive, which the last
+	 * row cuts short, or an instruction's length where it is not one word.
+	 */
 	length?: number
 	/** Set on the last row of data too long to show in full. */
 	truncated?: boolean
@@ -179,4 +183,23 @@ export function buildSourceIndex(entryFile: string, instructions: MipsInstructio
 	}
 
 	return new SourceIndex(entryFile, entries)
+}
+
+/**
+ * A row as the gutter shows it.  The index says which bytes a line owns; they
+ * are read live, so data the program has written to shows what it holds now,
+ * and so does an instruction it overwrote.
+ */
+export function codeRowOf(row: SourceRow, memory: MemoryInspector): CodeRow {
+	if (row.instruction === null) {
+		const bytes = Array.from({ length: row.length ?? 0 }, (_, offset) => memory.byte(row.address + offset) ?? 0)
+		return { address: row.address, instruction: false, bytes, directive: row.directive, offset: row.offset, truncated: row.truncated }
+	}
+	// Each word of an encoding is written most significant byte first, whatever the byte order.
+	const { littleEndian, wordBytes } = memory
+	const bytes = Array.from({ length: row.length ?? wordBytes }, (_, offset) => {
+		const within = offset % wordBytes
+		return memory.byte(row.address + offset - within + (littleEndian ? wordBytes - 1 - within : within)) ?? 0
+	})
+	return { address: row.address, instruction: true, bytes }
 }

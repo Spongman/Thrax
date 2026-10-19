@@ -5,7 +5,7 @@ import { EMPTY_HISTORY, EMPTY_MEMORY, type ArchitectureActivation, type Architec
 import type { ExecutionObserver } from '../core/observer'
 import { formatDiagnostic, hasErrors } from '../core/diagnostics'
 import { DEFAULT_SETTINGS, isRecord, SETTINGS_VALIDATORS, validSettings, type TargetSettings, type ThraxSettings } from '../core/settings'
-import { EMPTY_SOURCE_INDEX, type SourceIndex, type SourceRow } from '../core/sourceIndex'
+import { codeRowOf, EMPTY_SOURCE_INDEX, type SourceIndex } from '../core/sourceIndex'
 import { moveToEntry } from '../core/historyLog'
 import { DebugSession } from '../debug/session'
 import { isFlagSet, readStoredSetting, writeStoredSetting } from '../hooks/useStoredState'
@@ -580,30 +580,13 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 	const reportException = (error: unknown) => report([{ severity: 'error', message: error instanceof Error ? error.message : String(error) }])
 
 	/**
-	 * The index says which words a line owns; the bytes are read live, so data
-	 * the program has written to shows what it holds now.
-	 */
-	const codeWordFor = (row: SourceRow, memory: MemoryInspector): CodeRow => {
-		if (row.instruction === null) {
-			const bytes = Array.from({ length: row.length ?? 0 }, (_, offset) => memory.byte(row.address + offset) ?? 0)
-			return { address: row.address, instruction: false, bytes, directive: row.directive, offset: row.offset, truncated: row.truncated }
-		}
-		// Bug 13: the assembled array is what the program started as, not what it
-		// holds now, so an instruction the program overwrote read back as the original.
-		// The encoding is written most significant byte first, whatever the byte order.
-		const { littleEndian, wordBytes } = memory
-		const bytes = Array.from({ length: wordBytes }, (_, offset) => memory.byte(row.address + (littleEndian ? wordBytes - 1 - offset : offset)) ?? 0)
-		return { address: row.address, instruction: true, bytes }
-	}
-
-	/**
 	 * The assembled bytes of every file, under the line that wrote them.  Each
 	 * editor reads its own file's words, so an included file gets the same gutter
 	 * the entry file does.
 	 */
 	const codeWordsByFile = (index: SourceIndex, memory: MemoryInspector) =>
 		new Map([...index.files()].map((file) =>
-			[file, new Map([...index.lines(file)].map(([line, rows]) => [line, rows.map((row) => codeWordFor(row, memory))]))]))
+			[file, new Map([...index.lines(file)].map(([line, rows]) => [line, rows.map((row) => codeRowOf(row, memory))]))]))
 
 	const simulatorView = () => {
 		const machine = debug.machine
