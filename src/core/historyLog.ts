@@ -1,61 +1,189 @@
 /**
- * The execution history: one entry per instruction, bounded by the backstep
- * limit.
+ * The shared history engine: entries, each owning a run of effects, in typed
+ * blocks laid out by an architecture's explicit schema.
  *
- * Entries are held the same way their effects are, in a rolling list of
- * fixed-size blocks. Dropping the oldest is dropping a block off the front of
- * that list, which frees a thousand entries for the cost of one short splice.
- * Taking them one at a time instead moves every entry behind them, so a full
- * log would copy itself on every instruction and the deeper the history the
- * slower the program ran.
+ * The engine knows only the base entry columns (id and effect range). A codec
+ * writes its own columns into the blocks it is handed and gives them meaning.
+ * Entries and effects are addressed by absolute position (`HistoryRecords`), so
+ * an entry's effects may straddle blocks and nothing is copied as blocks roll.
  *
- * Every block but the last is full, so an entry's block is its index divided by
- * the block size: nothing has to be walked to reach one.
- *
- * The log therefore holds at least the limit, and at most one block more, since
- * a block is given up whole or not at all.
+ * Policies:
+ * - Entry limit: at least `limit` entries are kept. The oldest entry block goes
+ *   whole once the entries after it still cover the limit, so at most one block
+ *   more is held. Effect blocks go once no held entry reaches them.
+ * - Byte limit: the live typed blocks of both scopes stay within `byteLimit`.
+ *   Opening a block over it evicts the oldest complete entries first; payload
+ *   objects are not counted, since their heap size cannot be known exactly.
+ * - Oversized entry: an open entry that cannot fit even with every older entry
+ *   gone empties the log rather than keep half of it. The machine is untouched;
+ *   further effects of that entry are refused, and `overflows` counts it.
+ * - Truncation: a divergent run truncates entries from a position, with their
+ *   effects and payloads, across every declared buffer.
  */
 
-import { BLOCK_SIZE } from './effectStore'
-import type { HistoryEntry } from './types'
+import { ENTRY_EFFECT_START, ENTRY_ID, type HistoryBufferLayout } from './historyBuffers'
+import { HistoryRecords } from './historyRecords'
+
+/** Typed bytes a log may hold unless its owner chooses otherwise. */
+export const DEFAULT_HISTORY_BYTES = 256 * 1024 * 1024
 
 export class HistoryLog {
-	private blocks: HistoryEntry[][] = [[]]
-	private count = 0
+	readonly entries: HistoryRecords
+	readonly effects: HistoryRecords
+	/** Entries dropped because they could not fit the byte limit on their own. */
+	overflows = 0
+	private entryLimit = Number.POSITIVE_INFINITY
+	private bytes = DEFAULT_HISTORY_BYTES
+	/** The open entry's position, or -1. */
+	private open = -1
+	private openStart = 0
+	/** The entry end at which the oldest block has to go for the entry limit. */
+	private evictAt = Number.POSITIVE_INFINITY
+
+	constructor(readonly layout: HistoryBufferLayout, capacity?: number) {
+		this.entries = new HistoryRecords(layout, 'entry', capacity)
+		this.effects = new HistoryRecords(layout, 'effect', capacity)
+	}
+
+	/** Entries kept at least; whole blocks beyond it are dropped. */
+	get limit(): number {
+		return this.entryLimit
+	}
+
+	set limit(value: number) {
+		if (!(value >= 1)) throw new RangeError(`Invalid history limit: ${value}`)
+		this.entryLimit = value
+		this.schedule()
+	}
+
+	/** Live typed-block bytes allowed across both scopes. */
+	get byteLimit(): number {
+		return this.bytes
+	}
+
+	set byteLimit(value: number) {
+		const minimum = 2 * (this.entries.blockBytes + this.effects.blockBytes)
+		if (!(value >= minimum)) throw new RangeError(`History byte limit must be at least ${minimum}`)
+		this.bytes = value
+	}
 
 	get length(): number {
-		return this.count
+		return this.entries.length
 	}
 
-	/** Blocks held, which is what the log costs beyond the entries themselves. */
-	get blockCount(): number {
-		return this.blocks.length
+	/** Absolute position of entry 0. */
+	get first(): number {
+		return this.entries.first
 	}
 
-	at(index: number): HistoryEntry | undefined {
-		if (index < 0 || index >= this.count) return undefined
-		return this.blocks[Math.floor(index / BLOCK_SIZE)][index % BLOCK_SIZE]
+	/** Absolute position the next entry takes. */
+	get end(): number {
+		return this.entries.end
 	}
 
-	/** A window of entries, which is what a virtualized panel draws. */
-	slice(from: number, to: number): HistoryEntry[] {
-		const window: HistoryEntry[] = []
-		for (let index = Math.max(0, from); index < Math.min(this.count, to); index++) {
-			window.push(this.at(index)!)
-		}
-		return window
+	/** Position of the entry being recorded, or -1. */
+	get openEntry(): number {
+		return this.open
+	}
+
+	/** Where the open entry's effects begin. */
+	get openEffectStart(): number {
+		return this.openStart
+	}
+
+	get liveBufferBytes(): number {
+		return this.entries.liveBytes + this.effects.liveBytes
+	}
+
+	/** Exact typed-array bytes, spare blocks included; payload heap is not. */
+	get allocatedBufferBytes(): number {
+		return this.entries.allocatedBytes + this.effects.allocatedBytes
+	}
+
+	get payloadCount(): number {
+		return this.entries.payloadCount + this.effects.payloadCount
 	}
 
 	/**
-	 * Where the entry with this id sits, or -1 when it is no longer held.  Ids
-	 * only ever increase along the log, so this need not walk it.
+	 * Starts an entry; effects pushed until `close` are its. Returns its slot in
+	 * `entries.tail`, where the codec writes its own columns.
 	 */
+	openEntryWith(id: number): number {
+		const entries = this.entries
+		if (entries.full) this.reserve(entries.blockBytes)
+		const slot = entries.append()
+		const arrays = entries.tail!.arrays
+		const start = this.effects.end
+		arrays[ENTRY_ID][slot] = id
+		arrays[ENTRY_EFFECT_START][slot] = start
+		this.open = entries.end - 1
+		this.openStart = start
+		if (entries.end >= this.evictAt) this.evict()
+		return slot
+	}
+
+	/** Takes the next effect for the open entry: its slot in `effects.tail`, or -1 when none is open. */
+	pushEffect(): number {
+		if (this.open < 0) return -1
+		if (this.effects.full) {
+			this.reserve(this.effects.blockBytes)
+			if (this.open < 0) return -1
+		}
+		return this.effects.append()
+	}
+
+	/** Ends the open entry; its run ends where the next entry's begins. */
+	close() {
+		this.open = -1
+	}
+
+	/** Drops the open entry, which changed nothing worth keeping. */
+	discard() {
+		const position = this.open
+		if (position < 0) return
+		this.open = -1
+		this.effects.truncate(this.openStart)
+		this.entries.truncate(position)
+	}
+
+	/** Forgets entry `index` and every later one, with their effects and payloads. */
+	truncate(index: number) {
+		const position = this.entries.first + index
+		if (position >= this.entries.end) return
+		if (this.open >= position) this.open = -1
+		this.effects.truncate(this.effectStartAt(position))
+		this.entries.truncate(position)
+	}
+
+	clear() {
+		this.open = -1
+		this.entries.clear()
+		this.effects.clear()
+		this.schedule()
+	}
+
+	/** Base columns by index from the oldest held. */
+	id(index: number): number {
+		return this.base(index, ENTRY_ID)
+	}
+
+	effectStart(index: number): number {
+		return this.base(index, ENTRY_EFFECT_START)
+	}
+
+	/** The run's length; the open entry's grows as it records. */
+	effectCount(index: number): number {
+		const stop = index + 1 < this.length ? this.effectStart(index + 1) : this.effects.end
+		return stop - this.effectStart(index)
+	}
+
+	/** Where the entry with `id` sits, or -1; ids only increase along the log. */
 	indexOfId(id: number): number {
 		let low = 0
-		let high = this.count - 1
+		let high = this.length - 1
 		while (low <= high) {
-			const middle = (low + high) >> 1
-			const found = this.at(middle)!.id
+			const middle = Math.floor((low + high) / 2)
+			const found = this.id(middle)
 			if (found === id) return middle
 			if (found < id) low = middle + 1
 			else high = middle - 1
@@ -63,47 +191,57 @@ export class HistoryLog {
 		return -1
 	}
 
-	push(entry: HistoryEntry) {
-		let last = this.blocks[this.blocks.length - 1]
-		if (last.length >= BLOCK_SIZE) {
-			last = []
-			this.blocks.push(last)
+	private base(index: number, column: number): number {
+		const position = this.entries.first + index
+		return this.entries.block(position).arrays[column][position % this.entries.capacity]
+	}
+
+	private effectStartAt(position: number): number {
+		return this.entries.block(position).arrays[ENTRY_EFFECT_START][position % this.entries.capacity]
+	}
+
+	/** Drops whole oldest blocks while the entries after them still cover the limit. */
+	private evict() {
+		const capacity = this.entries.capacity
+		for (;;) {
+			const boundary = (Math.floor(this.entries.first / capacity) + 1) * capacity
+			if (this.entries.end - boundary < this.entryLimit) break
+			this.dropEntriesBefore(boundary)
 		}
-		last.push(entry)
-		this.count += 1
 	}
 
-	/**
-	 * Gives up whole blocks while what is left still covers the limit, and says
-	 * how many entries went and which is now the oldest, so the caller can free
-	 * what belonged to the ones dropped.
-	 */
-	evict(limit: number): { dropped: number, oldest: HistoryEntry | undefined } {
-		let dropped = 0
-		while (this.blocks.length > 1 && this.count - this.blocks[0].length >= limit) {
-			dropped += this.blocks[0].length
-			this.count -= this.blocks[0].length
-			this.blocks.shift()
+	/** Makes room for one more block, evicting complete entries, else overflowing. */
+	private reserve(blockBytes: number) {
+		const capacity = this.entries.capacity
+		while (this.liveBufferBytes + blockBytes > this.bytes) {
+			const keep = this.open >= 0 ? this.open : this.entries.end
+			const first = this.entries.first
+			if (first >= keep) {
+				this.overflow()
+				return
+			}
+			this.dropEntriesBefore(Math.min(keep, (Math.floor(first / capacity) + 1) * capacity))
 		}
-		return { dropped, oldest: dropped > 0 ? this.at(0) : undefined }
 	}
 
-	/** Drops everything from `length` on, which a diverging run has left behind. */
-	truncate(length: number) {
-		if (length >= this.count) return
-		const block = Math.floor(length / BLOCK_SIZE)
-		this.blocks.length = block + 1
-		this.blocks[block].length = length % BLOCK_SIZE
-		this.count = length
+	/** The open entry cannot be held whole: the log empties and refuses the rest of it. */
+	private overflow() {
+		this.overflows += 1
+		this.open = -1
+		this.entries.dropBefore(this.entries.end)
+		this.effects.dropBefore(this.effects.end)
+		this.schedule()
 	}
 
-	clear() {
-		this.blocks = [[]]
-		this.count = 0
+	private dropEntriesBefore(position: number) {
+		this.entries.dropBefore(position)
+		this.effects.dropBefore(this.entries.length > 0 ? this.effectStartAt(this.entries.first) : this.effects.end)
+		this.schedule()
 	}
 
-	*[Symbol.iterator](): Iterator<HistoryEntry> {
-		for (const block of this.blocks) yield* block
+	private schedule() {
+		const capacity = this.entries.capacity
+		this.evictAt = (Math.floor(this.entries.first / capacity) + 1) * capacity + this.entryLimit
 	}
 }
 

@@ -1,4 +1,7 @@
+import type { CallFrame, Diagnostic, KeyboardDisplayState, PendingInput, Registers, SymbolTables } from '../architectures/contracts'
 import type { Kind } from './effectKind'
+
+export type { CallFrame, Diagnostic, KeyboardDisplayState, PendingInput, Registers, SymbolTables }
 
 import type { SourceIndex, SourceLocation } from './sourceIndex'
 
@@ -32,18 +35,6 @@ export interface TokenData {
 	 * their own `file` but take the includer's `unit`.
 	 */
 	unit?: string
-}
-
-/** One problem found while assembling, positioned where the editor can mark it. */
-export interface Diagnostic {
-	severity: 'error' | 'warning'
-	message: string
-	file?: string
-	line?: number
-	column?: number
-	endColumn?: number
-	/** Stable identifier so `warningsAreErrors` can promote some warnings and not others. */
-	code?: string
 }
 
 export interface RegisterArgument { type: 'register'; value: string }
@@ -89,21 +80,6 @@ export interface MipsInstruction {
 	segment?: TextSegment
 }
 
-/** Labels left dangling at the end of a text segment, resolved after layout. */
-export interface SegmentEndLabels { segment: TextSegment; labels: LabelRef[] }
-
-/**
- * Symbols are scoped to the file that defined them.  `.globl` moves a name out
- * of its file's table into the one every file can see, and a reference resolves
- * against its own file first, then the global table.
- */
-export interface SymbolTables {
-	/** Per translation unit, the names only that unit can see. */
-	locals: Map<string, Map<string, number>>
-	/** Names declared `.globl`, and the `.extern` region, visible everywhere. */
-	globals: Map<string, number>
-}
-
 export interface MipsProgram {
 	instructions: MipsInstruction[]
 	/**
@@ -123,21 +99,6 @@ export interface MipsProgram {
 	/** Which line of which file every machine word came from. */
 	sourceIndex: SourceIndex
 }
-
-/** One gutter row: the bytes at `address`, and the instruction word when it is code. */
-export interface CodeWord {
-	address: number
-	word: number | null
-	bytes: number[]
-	/** Directive that wrote a data row's bytes, which is how it reads back. */
-	directive?: string
-	/** Byte offset of a data row within that directive's data. */
-	offset?: number
-	/** Set on the last row of data too long to show in full. */
-	truncated?: boolean
-}
-
-export type Registers = Record<string, number>
 
 /** Coprocessor register files, held as raw 32-bit words. */
 export interface CoprocessorState {
@@ -162,12 +123,6 @@ export interface MemoryView {
 	readonly words: ReadonlyMap<number, number>
 }
 
-/** State exposed by the THRAX Keyboard and Display MMIO tool. */
-export interface KeyboardDisplayState {
-	queuedInput: string
-	displayOutput: string
-}
-
 /** Serialized state of the syscall 13-16 file table, produced by `FileTable.snapshot`. */
 export interface FilesSnapshot {
 	contents: Array<{ name: string, bytes: number[] }>
@@ -180,23 +135,6 @@ export interface FilesSnapshot {
 export interface RandomSnapshot {
 	/** Per-stream LCG state, as a string since the generator's state is a bigint. */
 	streams: Array<{ id: number, seed: string }>
-}
-
-export interface CallFrame {
-	callAddress: number
-	returnAddress: number
-	targetAddress: number
-}
-
-export interface PendingInput {
-	type: 'integer' | 'string' | 'character' | 'float' | 'double' | 'confirm'
-	maximumLength?: number
-	/** Where a string read is stored; syscall 8 and 54 disagree on the register. */
-	bufferAddress?: number
-	/** Shown instead of the generic prompt, for the dialog syscalls. */
-	prompt?: string
-	/** Dialog reads report an outcome in `$a1` and can be cancelled. */
-	dialog?: boolean
 }
 
 /** How far along a delayed branch is when an instruction begins. */
@@ -248,12 +186,15 @@ export type Effect =
 	 */
 	| { kind: typeof Kind.INPUT, value: string }
 
-/** One executed instruction, or one edit the user made, and what it did. */
+/**
+ * One executed instruction, or one edit the user made, decoded from the history
+ * columns for inspection.  A copy: later exchanges do not change it.
+ */
 export interface HistoryEntry {
 	/**
-	 * Monotonic, and distinct from an array index: the log is a ring that drops
-	 * its oldest entry past the limit, so an index the panel captured would
-	 * slide out from under it.
+	 * Monotonic, and distinct from an array index: the log drops its oldest
+	 * entries past the limit, so an index the panel captured would slide out
+	 * from under it.
 	 */
 	id: number
 	/** The count before this instruction ran. */
@@ -261,23 +202,15 @@ export interface HistoryEntry {
 	address: number
 	/** The word executed, for the panel to disassemble. */
 	word: number | null
-	/** Source metadata for that word, when the debugger has any. */
-	instruction: MipsInstruction | null
 	kind: 'instruction' | 'edit'
 	/**
 	 * Where execution stood, exchanged like an effect: behind the present this
-	 * is where the instruction started, ahead of it where it went.  These live
-	 * on the entry rather than in `effects` because every instruction moves the
-	 * pc, and an effect object of its own costs more than three fields here.
+	 * is where the instruction started, ahead of it where it went.
 	 */
 	pc: number
 	delayState: DelayState
 	delayedTarget: number
-	/**
-	 * The run of effects this entry owns, in the shared store.  Held as an index
-	 * rather than an array of its own: an array per entry costs more in empty
-	 * slots than the effects themselves.
-	 */
+	/** The run of effects this entry owns, in the shared store. */
 	effectStart: number
 	effectCount: number
 	/**

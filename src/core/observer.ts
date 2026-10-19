@@ -7,7 +7,7 @@
  * nothing.
  */
 
-import type { Decoded } from './decoder'
+import type { HistoryRecord, InstructionSet } from '../architectures/contracts'
 import type { ServiceHost } from './service'
 
 /**
@@ -43,14 +43,7 @@ export interface DevicePort {
 }
 
 /** One instruction the machine has run, as a tool replaying them reads it. */
-export interface ExecutedInstruction {
-	address: number
-	/** The word executed, which a tool decodes for itself. */
-	word: number | null
-	/** The count before this instruction ran. */
-	instructionCount: number
-	kind: 'instruction' | 'edit'
-}
+export type ExecutedInstruction = HistoryRecord
 
 /**
  * The instructions that have run, in order.  A tool rebuilds itself from these
@@ -60,12 +53,19 @@ export interface ExecutedInstruction {
 export interface InstructionHistory {
 	readonly length: number
 	at(index: number): ExecutedInstruction | undefined
+	/** The entry's instruction count, without building the entry: tools ask per step. */
+	instructionCountAt(index: number): number
 }
 
 /** What a tool needs to know about the machine, as opposed to the run on it. */
 export interface MachineConfig {
 	/** Delayed branching: the instruction after a branch runs first. */
 	delayedBranching: boolean
+	/**
+	 * How a tool reads the decoded instruction it is handed, and decodes one
+	 * again for a replay.  Absent where nothing classifies instructions.
+	 */
+	instructions?: InstructionSet
 	/**
 	 * How a memory-mapped device reads and answers the program.  Absent for a
 	 * tool attached to something that offers no device port.
@@ -86,11 +86,12 @@ export interface MachineConfig {
 
 export interface ExecutionObserver {
 	/**
-	 * Before `decoded` at `address` runs.  `instructionCount` is how many have
-	 * retired, which is what a tool tags its own checkpoints with so a step back
-	 * can find them.
+	 * Before `instruction` at `address` runs: the architecture's own decoded
+	 * form, read through `MachineConfig.instructions`.  `instructionCount` is how
+	 * many have retired, which is what a tool tags its own checkpoints with so a
+	 * step back can find them.
 	 */
-	onInstruction?(address: number, decoded: Decoded, instructionCount: number): void
+	onInstruction?(address: number, instruction: unknown, instructionCount: number): void
 	/** A data read of `size` bytes; instruction fetches are not reported. */
 	onMemoryRead?(address: number, size: number): void
 	/**

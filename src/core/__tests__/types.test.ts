@@ -34,7 +34,6 @@ describe('the history entry shape', () => {
 			instructionCount: 0,
 			address: 0x00400000,
 			word: 0x21080005,
-			instruction: null,
 			kind: 'instruction',
 			pc: 0x00400000,
 			delayState: 'none',

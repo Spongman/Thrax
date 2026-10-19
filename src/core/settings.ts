@@ -1,137 +1,11 @@
 /**
- * IDE-level settings, each keyed by the name it persists under.
+ * IDE-level settings, each keyed by the name it persists under, and the schema
+ * an architecture declares its own settings with.
  *
  * Pure model: no React, no store, no wiring into the assembler or simulator.
  * Consumers read `ThraxSettings` and apply the effects themselves.
  */
 
-/** The three memory layouts, by identifier. */
-export type MemoryConfigurationName = 'default' | 'dataBasedCompact' | 'textBasedCompact'
-
-/**
- * All 21 addresses of one memory configuration, in field order.
- */
-export interface MemoryConfigurationValues {
-	textBaseAddress: number
-	dataSegmentBaseAddress: number
-	externBaseAddress: number
-	globalPointer: number
-	dataBaseAddress: number
-	heapBaseAddress: number
-	stackPointer: number
-	stackBaseAddress: number
-	userHighAddress: number
-	kernelBaseAddress: number
-	kernelTextBaseAddress: number
-	exceptionHandlerAddress: number
-	kernelDataBaseAddress: number
-	memoryMapBaseAddress: number
-	kernelHighAddress: number
-	dataSegmentLimitAddress: number
-	textLimitAddress: number
-	kernelDataSegmentLimitAddress: number
-	kernelTextLimitAddress: number
-	stackLimitAddress: number
-	memoryMapLimitAddress: number
-}
-
-/**
- * Whether `value` is an address the configuration maps, rather than a number
- * that happens to be in a register.
- *
- * Most registers hold a small integer or nothing at all, so treating every
- * register's contents as an address makes the whole file light the moment one
- * of them is pointed at: zero is in thirty of them at once.  Only a value
- * inside user space or the kernel is worth calling an address.
- */
-export function isMappedAddress(value: number, layout: MemoryConfigurationValues): boolean {
-	const address = value >>> 0
-	return (address >= (layout.textBaseAddress >>> 0) && address <= (layout.userHighAddress >>> 0))
-		|| (address >= (layout.kernelBaseAddress >>> 0) && address <= (layout.kernelHighAddress >>> 0))
-}
-
-/** SPIM-derived layout, used by default. */
-const DEFAULT_CONFIGURATION: MemoryConfigurationValues = {
-	textBaseAddress: 0x00400000,
-	dataSegmentBaseAddress: 0x10000000,
-	externBaseAddress: 0x10000000,
-	globalPointer: 0x10008000,
-	dataBaseAddress: 0x10010000,
-	heapBaseAddress: 0x10040000,
-	stackPointer: 0x7fffeffc,
-	stackBaseAddress: 0x7ffffffc,
-	userHighAddress: 0x7fffffff,
-	kernelBaseAddress: 0x80000000,
-	kernelTextBaseAddress: 0x80000000,
-	exceptionHandlerAddress: 0x80000180,
-	kernelDataBaseAddress: 0x90000000,
-	memoryMapBaseAddress: 0xffff0000,
-	kernelHighAddress: 0xffffffff,
-	dataSegmentLimitAddress: 0x7fffffff,
-	textLimitAddress: 0x0ffffffc,
-	kernelDataSegmentLimitAddress: 0xfffeffff,
-	kernelTextLimitAddress: 0x8ffffffc,
-	stackLimitAddress: 0x10040000,
-	memoryMapLimitAddress: 0xffffffff,
-}
-
-/** 16-bit addressing, data segment starts at 0. */
-const DATA_BASED_COMPACT_CONFIGURATION: MemoryConfigurationValues = {
-	textBaseAddress: 0x00003000,
-	dataSegmentBaseAddress: 0x00000000,
-	externBaseAddress: 0x00001000,
-	globalPointer: 0x00001800,
-	dataBaseAddress: 0x00000000,
-	heapBaseAddress: 0x00002000,
-	stackPointer: 0x00002ffc,
-	stackBaseAddress: 0x00002ffc,
-	userHighAddress: 0x00003fff,
-	kernelBaseAddress: 0x00004000,
-	kernelTextBaseAddress: 0x00004000,
-	exceptionHandlerAddress: 0x00004180,
-	kernelDataBaseAddress: 0x00005000,
-	memoryMapBaseAddress: 0x00007f00,
-	kernelHighAddress: 0x00007fff,
-	dataSegmentLimitAddress: 0x00002fff,
-	textLimitAddress: 0x00003ffc,
-	kernelDataSegmentLimitAddress: 0x00007eff,
-	kernelTextLimitAddress: 0x00004ffc,
-	stackLimitAddress: 0x00002000,
-	memoryMapLimitAddress: 0x00007fff,
-}
-
-/** 16-bit addressing, text segment starts at 0. */
-const TEXT_BASED_COMPACT_CONFIGURATION: MemoryConfigurationValues = {
-	textBaseAddress: 0x00000000,
-	dataSegmentBaseAddress: 0x00001000,
-	externBaseAddress: 0x00001000,
-	globalPointer: 0x00001800,
-	dataBaseAddress: 0x00002000,
-	heapBaseAddress: 0x00003000,
-	stackPointer: 0x00003ffc,
-	stackBaseAddress: 0x00003ffc,
-	userHighAddress: 0x00003fff,
-	kernelBaseAddress: 0x00004000,
-	kernelTextBaseAddress: 0x00004000,
-	exceptionHandlerAddress: 0x00004180,
-	kernelDataBaseAddress: 0x00005000,
-	memoryMapBaseAddress: 0x00007f00,
-	kernelHighAddress: 0x00007fff,
-	dataSegmentLimitAddress: 0x00003fff,
-	textLimitAddress: 0x00000ffc,
-	kernelDataSegmentLimitAddress: 0x00007eff,
-	kernelTextLimitAddress: 0x00004ffc,
-	stackLimitAddress: 0x00003000,
-	memoryMapLimitAddress: 0x00007fff,
-}
-
-export const MEMORY_CONFIGURATIONS: Record<MemoryConfigurationName, MemoryConfigurationValues> = {
-	default: DEFAULT_CONFIGURATION,
-	dataBasedCompact: DATA_BASED_COMPACT_CONFIGURATION,
-	textBasedCompact: TEXT_BASED_COMPACT_CONFIGURATION,
-}
-
-/** IDE-level settings, each keyed to the behaviour it selects. */
 /**
  * How far a hex number's leading zeros are dimmed.  `nibbles` dims every zero
  * digit; `bytes` and `halfwords` dim only whole units of that size, so a lone
@@ -143,27 +17,9 @@ export const HEX_DIMMING_MODES = ['off', 'nibbles', 'bytes', 'halfwords', 'pow2'
 
 export type HexDimming = (typeof HEX_DIMMING_MODES)[number]
 
+/** Settings every architecture shares. */
 export interface ThraxSettings {
-	/** Statement after a taken branch runs first (`DelayedBranching`). */
-	delayedBranching: boolean
-	/** Off rejects pseudo-instructions and extended operand forms (`ExtendedAssembler`). */
-	extendedAssembler: boolean
-	/** Assembly warnings become errors (`WarningsAreErrors`). */
-	warningsAreErrors: boolean
-	/** Entry point is `main` rather than the configuration's text base (`StartAtMain`). */
-	startAtMain: boolean
-	/** Gates text-segment writes and out-of-text fetches (`SelfModifyingCode`). */
-	selfModifyingCode: boolean
-	/** Off is current behaviour; on limits to bare-machine forms (`BareMachine`). */
-	bareMachine: boolean
-	/**
-	 * Source file prepended to the assembly (`ExceptionHandler`, a string
-	 * setting). Empty means none.  Not a dispatch switch: a handler at the
-	 * exception address is entered whenever one is loaded, so there is no
-	 * "enable exceptions" flag to model.
-	 */
-	exceptionHandler: string
-	/** Assemble every file in the active file's directory (`AssembleAll`). */
+	/** Assemble every open file, where the architecture takes several entries. */
 	assembleAll: boolean
 	/** Seeds the registers/memory panels' default radix (`DisplayValuesInHex`). */
 	displayValuesInHex: boolean
@@ -194,15 +50,6 @@ export interface ThraxSettings {
 	highlightNavigationColor: string
 	highlightChangeColor: string
 	/**
-	 * Enables the program-argument text field (`ProgramArguments`, a boolean).
-	 * The argument string itself is separate and is not a persisted setting.
-	 */
-	programArguments: boolean
-	/** The argument string used when `programArguments` is on. */
-	programArgumentsText: string
-	/** Which of `MEMORY_CONFIGURATIONS` lays out memory (`MemoryConfiguration`). */
-	memoryConfiguration: MemoryConfigurationName
-	/**
 	 * Instructions the history keeps, and so how far back a run can be stepped.
 	 * An entry costs about 370 bytes, measured over both arithmetic and
 	 * store-heavy code, so the default holds a whole small program at around
@@ -221,13 +68,6 @@ export const DEFAULT_BACKSTEP_LIMIT = 100_000
 export const MAX_BACKSTEP_LIMIT = 1_000_000
 
 export const DEFAULT_SETTINGS: ThraxSettings = {
-	delayedBranching: false,
-	extendedAssembler: true,
-	warningsAreErrors: false,
-	startAtMain: false,
-	selfModifyingCode: false,
-	bareMachine: false,
-	exceptionHandler: '',
 	assembleAll: false,
 	displayValuesInHex: true,
 	displayAddressesInHex: true,
@@ -237,9 +77,6 @@ export const DEFAULT_SETTINGS: ThraxSettings = {
 	highlightSeconds: 0.3,
 	highlightNavigationColor: '#4094ff',
 	highlightChangeColor: '#f0a830',
-	programArguments: false,
-	programArgumentsText: '',
-	memoryConfiguration: 'default',
 	backstepLimit: DEFAULT_BACKSTEP_LIMIT,
 }
 
@@ -250,27 +87,16 @@ export const DEFAULT_SETTINGS: ThraxSettings = {
 export const MIN_HIGHLIGHT_SECONDS = 0.2
 export const MAX_HIGHLIGHT_SECONDS = 10
 
-const isBoolean = (value: unknown): value is boolean => typeof value === 'boolean'
+export const isBoolean = (value: unknown): value is boolean => typeof value === 'boolean'
 /** `#rrggbb`, which is what a colour input produces and what the fade parses. */
 const isHexColor = (value: unknown): value is string =>
 	typeof value === 'string' && /^#[0-9a-fA-F]{6}$/.test(value)
-const isString = (value: unknown): value is string => typeof value === 'string'
+export const isString = (value: unknown): value is string => typeof value === 'string'
 const isPositiveInteger = (value: unknown): value is number =>
 	typeof value === 'number' && Number.isInteger(value) && value > 0
 
-const MEMORY_CONFIGURATION_NAMES: readonly MemoryConfigurationName[] = ['default', 'dataBasedCompact', 'textBasedCompact']
-const isMemoryConfigurationName = (value: unknown): value is MemoryConfigurationName =>
-	typeof value === 'string' && (MEMORY_CONFIGURATION_NAMES as readonly string[]).includes(value)
-
 /** Per-field validators, in the shape `ToolSetting.isValid` consumers expect. */
 export const SETTINGS_VALIDATORS: { [Key in keyof ThraxSettings]: (value: unknown) => boolean } = {
-	delayedBranching: isBoolean,
-	extendedAssembler: isBoolean,
-	warningsAreErrors: isBoolean,
-	startAtMain: isBoolean,
-	selfModifyingCode: isBoolean,
-	bareMachine: isBoolean,
-	exceptionHandler: isString,
 	assembleAll: isBoolean,
 	displayValuesInHex: isBoolean,
 	displayAddressesInHex: isBoolean,
@@ -281,17 +107,69 @@ export const SETTINGS_VALIDATORS: { [Key in keyof ThraxSettings]: (value: unknow
 		typeof value === 'number' && Number.isFinite(value) && value >= MIN_HIGHLIGHT_SECONDS && value <= MAX_HIGHLIGHT_SECONDS,
 	highlightNavigationColor: isHexColor,
 	highlightChangeColor: isHexColor,
-	programArguments: isBoolean,
-	programArgumentsText: isString,
-	memoryConfiguration: isMemoryConfigurationName,
 	backstepLimit: (value: unknown): value is number => isPositiveInteger(value) && value <= MAX_BACKSTEP_LIMIT,
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null
+export const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null
 
 /** Whether every field of `value` is present and passes its own validator. */
 export function isValidSettings(value: unknown): value is ThraxSettings {
 	if (!isRecord(value)) return false
 	return (Object.keys(DEFAULT_SETTINGS) as Array<keyof ThraxSettings>)
 		.every((key) => SETTINGS_VALIDATORS[key](value[key]))
+}
+
+/* ------------------------------------------------- architecture settings */
+
+/** An architecture's own settings, by field name. */
+export type TargetSettings = Record<string, unknown>
+
+/** How the settings dialog edits a field. */
+export type SettingControl =
+	| { kind: 'check' }
+	| { kind: 'text', placeholder?: string }
+	/** One of a fixed list; values compare by identity. */
+	| { kind: 'choice', options: readonly { value: unknown, label: string }[] }
+
+/** One field of an architecture's settings. */
+export interface SettingField<Settings extends TargetSettings = TargetSettings> {
+	key: keyof Settings & string
+	/** Dialog group it is shown in; one titled like a shared group joins it. */
+	group: string
+	label: string
+	hint?: string
+	control: SettingControl
+	isValid(value: unknown): boolean
+	/** Read when assembling or building the machine, so a change drops the program. */
+	rebuild?: boolean
+	/** A boolean field that must be on for this one to be editable. */
+	enabledBy?: keyof Settings & string
+	/** Where the value was stored before settings were per architecture. */
+	legacyKey?: string
+}
+
+/** The settings an architecture declares, and how the dialog shows them. */
+export interface ArchitectureSettings<Settings extends TargetSettings = TargetSettings> {
+	defaults: Settings
+	/** In dialog order; groups appear in the order their first field does. */
+	fields: readonly SettingField<Settings>[]
+	/** Read-only lines shown under a group, such as what a choice resolves to. */
+	details?(group: string, settings: Settings): readonly string[]
+}
+
+/**
+ * Checks a schema against the settings type it describes, then erases that
+ * type: shared code reads every architecture's settings alike.
+ */
+export const defineSettings = <Settings extends TargetSettings>(schema: ArchitectureSettings<Settings>) =>
+	schema as unknown as ArchitectureSettings
+
+/** Each field as stored, or its default where that is missing or invalid. */
+export function validSettings<Settings extends TargetSettings>(schema: ArchitectureSettings<Settings>, stored: unknown): Settings {
+	const values: TargetSettings = { ...schema.defaults }
+	if (!isRecord(stored)) return values as Settings
+	for (const field of schema.fields) {
+		if (field.isValid(stored[field.key])) values[field.key] = stored[field.key]
+	}
+	return values as Settings
 }
