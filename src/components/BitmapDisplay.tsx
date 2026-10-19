@@ -3,6 +3,7 @@ import { formatWord, parseWord } from '../core/format'
 import type { MemoryInspector } from '../architectures/contracts'
 import { isOneOf, useStoredState } from '../hooks/useStoredState'
 import PanelGroup from './PanelGroup'
+import { pixelBytes, pixelColor } from './bitmapPixels'
 import './BitmapDisplay.css'
 
 interface BitmapDisplayProps {
@@ -38,12 +39,13 @@ function BitmapDisplay({ memory, defaultBase = 0 }: BitmapDisplayProps) {
 		canvas.height = height
 		context.fillStyle = '#000000'
 		context.fillRect(0, 0, width, height)
+		const stride = pixelBytes(memory)
 		for (let row = 0; row < rows; row += 1) {
 			for (let column = 0; column < columns; column += 1) {
-				const address = (parsedBaseAddress + ((row * columns + column) * 4)) >>> 0
-				const color = memory.word(address)
+				const address = (parsedBaseAddress + ((row * columns + column) * stride)) >>> 0
+				const color = pixelColor(memory, address)
 				if (color === undefined || color === 0) continue
-				context.fillStyle = `#${(color & 0x00ffffff).toString(16).padStart(6, '0')}`
+				context.fillStyle = `#${color.toString(16).padStart(6, '0')}`
 				context.fillRect(column * unitSize, row * unitSize, unitSize, unitSize)
 			}
 		}
@@ -82,7 +84,9 @@ function BitmapDisplay({ memory, defaultBase = 0 }: BitmapDisplayProps) {
 					</select>
 				</label>
 			</div>
-			<p className="bitmap-description">Each word is a 24-bit RGB pixel (0x00RRGGBB), in row-major order.</p>
+			<p className="bitmap-description">{pixelBytes(memory) === 1
+				? 'Each byte is a pixel whose low four bits pick one of 16 colours, in row-major order.'
+				: 'Each word is a 24-bit RGB pixel (0x00RRGGBB), in row-major order.'}</p>
 		</div>
 	)
 }

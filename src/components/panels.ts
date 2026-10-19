@@ -58,7 +58,7 @@ export const PANELS: readonly PanelSpec[] = [
 
 	{
 		id: 'bitmap', icon: BitmapIcon, title: 'Bitmap', menuTitle: 'Bitmap Display', group: 'tool', dock: 'side',
-		description: 'Word-addressed memory drawn as 24-bit RGB pixels, at a base address and scale you choose.',
+		description: 'Memory drawn as pixels, a word of 24-bit RGB each or a byte of 16 colours on 8-bit targets, at a base address and scale you choose.',
 	},
 	{
 		id: 'keyboardDisplay', icon: KeyboardIcon, title: 'Keyboard / Display', menuTitle: 'Keyboard and Display MMIO', group: 'tool', dock: 'side',
