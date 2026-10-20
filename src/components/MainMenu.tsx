@@ -2,6 +2,7 @@ import React from 'react'
 import { useTHRAXStore } from '../store/thraxStore'
 import { AboutIcon, ExamplesIcon, FileMenuIcon, SettingsIcon, ToolsIcon, WindowIcon, type Icon } from './icons'
 import { menuLabel, panelsIn, type PanelSpec } from './panels'
+import ExamplesMenu from './ExamplesMenu'
 import './MainMenu.css'
 
 const PROJECT_PAGE = 'https://github.com/Spongman/Thrax'
@@ -155,18 +156,8 @@ function MainMenu({ onSettings, onLoadExample, onOpenPanel, openPanels, fileActi
 							</button>
 						)))}
 
-					{section('examples', 'Examples', ExamplesIcon, Object.entries(examples ?? {}).map(([key, example]) => (
-						<button
-							key={key}
-							className="menu-item menu-item-described"
-							role="menuitem"
-							onClick={() => { onLoadExample(example.code); close() }}
-						>
-							<example.icon />
-							<span className="item-name">{example.name}</span>
-							<span className="item-desc">{example.description}</span>
-						</button>
-					)), true)}
+					{section('examples', 'Examples', ExamplesIcon,
+						<ExamplesMenu examples={examples ?? {}} onLoad={code => { onLoadExample(code); close() }} />, true)}
 
 					{section('window', 'Window', WindowIcon, panelsIn('window', definition?.panels).map((panel) => panelItem(panel)))}
 					{section('tools', 'Tools', ToolsIcon, panelsIn('tool', definition?.panels).map((panel) => panelItem(panel, true)), true)}

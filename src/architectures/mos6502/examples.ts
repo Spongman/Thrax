@@ -1,4 +1,3 @@
-import { BitmapIcon, BitwiseIcon, FactorialIcon, FibonacciIcon, HelloIcon, InputIcon, KeyboardIcon, LoopIcon, MacrosIcon, MandelbrotIcon, RecursionIcon, SumIcon } from '../../components/icons'
 import type { Example } from '../contracts'
 
 /**
@@ -79,7 +78,6 @@ rem = $14                   ; remainder while printing`
 
 export const EXAMPLES: Readonly<Record<string, Example>> = {
 	input: {
-		icon: InputIcon,
 		name: 'Interactive Input',
 		description: 'Read a line from $F001 into a buffer, then print it',
 		code: `; Read a line into a buffer, then print it
@@ -109,7 +107,6 @@ buffer: .res 64
 	},
 
 	hello: {
-		icon: HelloIcon,
 		name: 'Hello, THRAX!',
 		description: 'Print a string stored after the code, a byte at a time',
 		code: `; .asciiz data and a print-string subroutine
@@ -127,7 +124,6 @@ ${PRINT_STRING}`,
 	},
 
 	sum: {
-		icon: SumIcon,
 		name: 'Sum of Numbers',
 		description: 'Add 5 + 3 and print the result',
 		code: `; Simple addition example
@@ -156,7 +152,6 @@ ${PRINT_DECIMAL}`,
 	},
 
 	factorial: {
-		icon: FactorialIcon,
 		name: 'Factorial',
 		description: 'Compute 5! (5 factorial) = 120',
 		code: `; Factorial example
@@ -216,7 +211,6 @@ ${PRINT_DECIMAL}`,
 	},
 
 	fibonacci: {
-		icon: FibonacciIcon,
 		name: 'Fibonacci',
 		description: 'Compute the 10th Fibonacci number',
 		code: `; Fibonacci sequence
@@ -263,7 +257,6 @@ ${PRINT_DECIMAL}`,
 	},
 
 	ackermann: {
-		icon: RecursionIcon,
 		name: 'Ackermann',
 		description: 'Deep recursion: compute A(3, 3) = 61',
 		code: `; Ackermann function
@@ -329,7 +322,6 @@ ${PRINT_DECIMAL}`,
 	},
 
 	loop: {
-		icon: LoopIcon,
 		name: 'Loop Counter',
 		description: 'Print numbers from 1 to 5',
 		code: `; Loop counter example
@@ -372,7 +364,6 @@ ${PRINT_DECIMAL}`,
 	},
 
 	bitwise: {
-		icon: BitwiseIcon,
 		name: 'Bitwise Operations',
 		description: 'Demonstrate AND, ORA and EOR',
 		code: `; Bitwise operations
@@ -423,7 +414,6 @@ ${PRINT_DECIMAL}`,
 	},
 
 	bitmap: {
-		icon: BitmapIcon,
 		name: 'Bitmap Display',
 		description: 'Draw colour bands for the Bitmap Display tool',
 		code: `; Fill a 32 x 32 grid of pixels for the Bitmap Display tool.
@@ -474,7 +464,6 @@ same_page:
 	},
 
 	mmio: {
-		icon: KeyboardIcon,
 		name: 'Keyboard and Display',
 		description: 'Echo queued keystrokes through the I/O page',
 		code: `; Memory-mapped I/O, through the Keyboard and Display tool or the console.
@@ -498,7 +487,6 @@ poll:
 	},
 
 	macros: {
-		icon: MacrosIcon,
 		name: 'Macros',
 		description: 'Define once, use many times with .macro and symbols',
 		code: `; Macros are expanded by the assembler, so each use costs no call-and-return
@@ -558,7 +546,6 @@ ${PRINT_DECIMAL}`,
 	},
 
 	interrupts: {
-		icon: KeyboardIcon,
 		name: 'Interrupts',
 		description: 'Timer and keyboard IRQs: a dot per tick, typed keys echoed, five ticks then exit',
 		code: `; The timer raises an IRQ every PERIOD cycles; the handler prints a dot per
@@ -622,7 +609,6 @@ irq:
 	},
 
 	mandelbrot: {
-		icon: MandelbrotIcon,
 		name: 'Mandelbrot Set',
 		description: 'Escape-time fractal in 8.8 fixed point, drawn to the Bitmap Display',
 		code: `; Mandelbrot set, in signed 8.8 fixed point: $0100 is 1.0.

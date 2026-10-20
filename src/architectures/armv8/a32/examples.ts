@@ -1,4 +1,3 @@
-import { BitmapIcon, BitwiseIcon, FactorialIcon, FibonacciIcon, HelloIcon, InputIcon, KeyboardIcon, LoopIcon, MacrosIcon, MandelbrotIcon, RecursionIcon, SumIcon } from '../../../components/icons'
 import type { Example } from '../../contracts'
 
 /**
@@ -63,7 +62,6 @@ print_string:
 
 export const A32_EXAMPLES: Readonly<Record<string, Example>> = {
 	input: {
-		icon: InputIcon,
 		name: 'Interactive Input',
 		description: 'Read a line with the read system call, then write it back',
 		code: `@ Read a line into a buffer, then print it.
@@ -91,7 +89,6 @@ ${EXIT}
 	},
 
 	hello: {
-		icon: HelloIcon,
 		name: 'Hello, THRAX!',
 		description: 'Print a string from the data section with the write system call',
 		code: `@ Data directives and the write system call.
@@ -115,7 +112,6 @@ ${EXIT}
 	},
 
 	sum: {
-		icon: SumIcon,
 		name: 'Sum of Numbers',
 		description: 'Add 5 + 3 and print the result',
 		code: `@ Simple addition example
@@ -141,7 +137,6 @@ ${PRINT_CHAR}
 	},
 
 	factorial: {
-		icon: FactorialIcon,
 		name: 'Factorial',
 		description: 'Compute 5! (5 factorial) = 120 by recursion',
 		code: `@ Recursive factorial: 5! = 120
@@ -171,7 +166,6 @@ ${PRINT_UINT}
 	},
 
 	fibonacci: {
-		icon: FibonacciIcon,
 		name: 'Fibonacci',
 		description: 'Compute the 10th Fibonacci number',
 		code: `@ Iterative Fibonacci: F(10) = 55
@@ -197,7 +191,6 @@ ${PRINT_UINT}
 	},
 
 	ackermann: {
-		icon: RecursionIcon,
 		name: 'Ackermann',
 		description: 'Deep recursion: compute A(3, 3) = 61',
 		code: `@ Ackermann's function, which recurses deeply: A(3, 3) = 61.
@@ -247,7 +240,6 @@ ${PRINT_UINT}
 	},
 
 	loop: {
-		icon: LoopIcon,
 		name: 'Loop Counter',
 		description: 'Print numbers from 1 to 5',
 		code: `@ Count from 1 to 5, a space after each number.
@@ -276,7 +268,6 @@ ${PRINT_CHAR}
 	},
 
 	bitwise: {
-		icon: BitwiseIcon,
 		name: 'Bitwise Operations',
 		description: 'Demonstrate AND, OR, XOR operations',
 		code: `@ Bitwise operations on two values.
@@ -308,7 +299,6 @@ ${PRINT_CHAR}
 	},
 
 	bitfields: {
-		icon: BitwiseIcon,
 		name: 'Bit Fields',
 		description: 'ARMv8 bit manipulation: UBFX, CLZ, REV, BFI and SXTB',
 		code: `@ Instructions ARMv8 has and the ARM2 had not, on r4 = 0x12345678.
@@ -351,7 +341,6 @@ ${PRINT_CHAR}
 	},
 
 	bitmap: {
-		icon: BitmapIcon,
 		name: 'Bitmap Display',
 		description: 'Draw a colour gradient for the Bitmap Display tool',
 		code: `@ Fill a 32 x 32 grid of pixels for the Bitmap Display tool.
@@ -384,7 +373,6 @@ ${EXIT}
 	},
 
 	mmio: {
-		icon: KeyboardIcon,
 		name: 'Keyboard and Display',
 		description: 'Echo queued keystrokes through the MMIO tool',
 		code: `@ Memory-mapped I/O, through the Keyboard and Display tool.
@@ -414,7 +402,6 @@ ${EXIT}
 	},
 
 	macros: {
-		icon: MacrosIcon,
 		name: 'Macros',
 		description: 'Define once, use many times with .macro and .equ',
 		code: `@ Macros are expanded by the assembler, so each use costs no call.
@@ -469,7 +456,6 @@ ${PRINT_CHAR}
 	},
 
 	mandelbrot: {
-		icon: MandelbrotIcon,
 		name: 'Mandelbrot Set',
 		description: 'Escape-time fractal in 16.16 fixed point, drawn to the Bitmap Display',
 		code: `@ Mandelbrot set in 16.16 fixed point, drawn to the Bitmap Display.
@@ -541,7 +527,6 @@ ${EXIT}
 	},
 
 	helloArmasm: {
-		icon: HelloIcon,
 		name: 'Hello, THRAX! (armasm)',
 		description: 'The greeting in armasm syntax: AREA, ENTRY, DCB and labels in column 1',
 		code: `; Hello, THRAX! in armasm syntax: labels start in column 1, without a
@@ -568,7 +553,6 @@ message
 	},
 
 	factorialArmasm: {
-		icon: FactorialIcon,
 		name: 'Factorial (armasm)',
 		description: 'Compute 5! = 120 in armasm syntax, with EQU and a literal pool',
 		code: `; Factorial in armasm syntax

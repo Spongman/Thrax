@@ -1,4 +1,3 @@
-import { BitmapIcon, BitwiseIcon, FactorialIcon, FibonacciIcon, HelloIcon, InputIcon, KeyboardIcon, LoopIcon, MacrosIcon, RecursionIcon, SumIcon } from '../../components/icons'
 import type { Example } from '../contracts'
 import tinyOs from './tinyos.uasm?raw'
 
@@ -78,7 +77,6 @@ export function solveTinyOs(source: string) {
 
 export const EXAMPLES: Readonly<Record<string, Example>> = {
 	input: {
-		icon: InputIcon,
 		name: 'Interactive Input',
 		description: 'Read a line with RDCHAR into a buffer, then print it',
 		code: `// Read a line into a data buffer, then print it
@@ -158,7 +156,6 @@ stack: STORAGE(64)
 	},
 
 	hello: {
-		icon: HelloIcon,
 		name: 'Hello, THRAX!',
 		description: 'Print a string stored after the code with a WRCHAR loop',
 		code: `// .text data and a print-string subroutine
@@ -180,7 +177,6 @@ stack: STORAGE(64)
 	},
 
 	sum: {
-		icon: SumIcon,
 		name: 'Sum of Numbers',
 		description: 'Add 5 + 3 and print the result',
 		code: `// Simple addition example
@@ -214,7 +210,6 @@ stack: STORAGE(64)
 	},
 
 	factorial: {
-		icon: FactorialIcon,
 		name: 'Factorial',
 		description: 'Compute 5! (5 factorial) = 120',
 		code: `// Factorial example
@@ -245,7 +240,6 @@ stack: STORAGE(64)
 	},
 
 	fibonacci: {
-		icon: FibonacciIcon,
 		name: 'Fibonacci',
 		description: 'Compute the 10th Fibonacci number',
 		code: `// Fibonacci sequence
@@ -280,7 +274,6 @@ stack: STORAGE(64)
 	},
 
 	ackermann: {
-		icon: RecursionIcon,
 		name: 'Ackermann',
 		description: 'Deep recursion: compute A(3, 3) = 61',
 		code: `// Ackermann function
@@ -355,7 +348,6 @@ stack: STORAGE(1024)
 	},
 
 	loop: {
-		icon: LoopIcon,
 		name: 'Loop Counter',
 		description: 'Print numbers from 1 to 5',
 		code: `// Loop counter example
@@ -395,7 +387,6 @@ stack: STORAGE(64)
 	},
 
 	bitwise: {
-		icon: BitwiseIcon,
 		name: 'Bitwise Operations',
 		description: 'Demonstrate AND, OR, XOR operations',
 		code: `// Bitwise operations
@@ -437,7 +428,6 @@ stack: STORAGE(64)
 	},
 
 	bitmap: {
-		icon: BitmapIcon,
 		name: 'Bitmap Display',
 		description: 'Draw a colour gradient for the Bitmap Display tool',
 		code: `// Fill a 32 x 32 grid of pixels for the Bitmap Display tool.
@@ -475,7 +465,6 @@ display: STORAGE(32 * 32)   // 32 rows x 32 columns, one word each
 	},
 
 	macros: {
-		icon: MacrosIcon,
 		name: 'Macros',
 		description: 'Define once, use many times with .macro and symbols',
 		code: `// Macros are expanded by the assembler, so each use costs no call-and-return
@@ -529,14 +518,12 @@ stack: STORAGE(64)
 	},
 
 	tinyos: {
-		icon: KeyboardIcon,
 		name: 'TinyOS',
 		description: 'The 6.004 lab kernel, as handed out: implement MapUserAddress (Design Problem 1) to run its processes (CC BY 4.0)',
 		code: tinyOs,
 	},
 
 	tinyosSolved: {
-		icon: KeyboardIcon,
 		name: 'TinyOS (solved)',
 		description: 'The 6.004 lab kernel with MapUserAddress filled in: clock and keyboard interrupts, segmentation and two processes (CC BY 4.0)',
 		code: solveTinyOs(tinyOs),

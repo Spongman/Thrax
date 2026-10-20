@@ -47,7 +47,6 @@ export interface Disposable { dispose(): void }
 
 /** A bundled program offered in the Examples menu. */
 export interface Example {
-	icon: () => ReactElement
 	name: string
 	description: string
 	code: string

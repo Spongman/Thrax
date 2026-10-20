@@ -1,4 +1,3 @@
-import { BitmapIcon, BitwiseIcon, FactorialIcon, FibonacciIcon, HelloIcon, InputIcon, KeyboardIcon, LoopIcon, MacrosIcon, RecursionIcon, SumIcon } from '../../components/icons'
 import type { Example } from '../contracts'
 
 /**
@@ -82,7 +81,6 @@ down
 
 export const EXAMPLES: Readonly<Record<string, Example>> = {
 	input: {
-		icon: InputIcon,
 		name: 'Interactive Input',
 		description: 'Read a line with OS_ReadC into a buffer, then print it with OS_Write0',
 		code: `@ Read a line into a buffer, then print it
@@ -110,7 +108,6 @@ buffer:	.space 64
 	},
 
 	hello: {
-		icon: HelloIcon,
 		name: 'Hello, THRAX!',
 		description: 'Print a string stored after the code with OS_Write0',
 		code: `@ Hello, THRAX! through RISC OS's OS_Write0
@@ -129,7 +126,6 @@ message:
 	},
 
 	sum: {
-		icon: SumIcon,
 		name: 'Sum of Numbers',
 		description: 'Add 5 + 3 and print the result',
 		code: `@ Simple addition example
@@ -149,7 +145,6 @@ ${PRINT_DECIMAL}`,
 	},
 
 	factorial: {
-		icon: FactorialIcon,
 		name: 'Factorial',
 		description: 'Compute 5! (5 factorial) = 120',
 		code: `@ Factorial example
@@ -175,7 +170,6 @@ ${PRINT_DECIMAL}`,
 	},
 
 	fibonacci: {
-		icon: FibonacciIcon,
 		name: 'Fibonacci',
 		description: 'Compute the 10th Fibonacci number',
 		code: `@ Fibonacci sequence
@@ -204,7 +198,6 @@ ${PRINT_DECIMAL}`,
 	},
 
 	ackermann: {
-		icon: RecursionIcon,
 		name: 'Ackermann',
 		description: 'Deep recursion: compute A(3, 3) = 61',
 		code: `@ Ackermann function
@@ -251,7 +244,6 @@ ${PRINT_DECIMAL}`,
 	},
 
 	loop: {
-		icon: LoopIcon,
 		name: 'Loop Counter',
 		description: 'Print numbers from 1 to 5',
 		code: `@ Loop counter example
@@ -278,7 +270,6 @@ ${PRINT_DECIMAL}`,
 	},
 
 	bitwise: {
-		icon: BitwiseIcon,
 		name: 'Bitwise Operations',
 		description: 'Demonstrate AND, OR, XOR operations',
 		code: `@ Bitwise operations
@@ -307,7 +298,6 @@ ${PRINT_DECIMAL}`,
 	},
 
 	bitmap: {
-		icon: BitmapIcon,
 		name: 'Bitmap Display',
 		description: 'Draw a colour gradient for the Bitmap Display tool',
 		code: `@ Fill a 32 x 32 grid of pixels for the Bitmap Display tool.
@@ -337,7 +327,6 @@ column:
 	},
 
 	macros: {
-		icon: MacrosIcon,
 		name: 'Macros',
 		description: 'Define once, use many times with .macro and .equ',
 		code: `@ Macros are expanded by the assembler, so each use costs no call and
@@ -380,7 +369,6 @@ ${PRINT_DECIMAL}`,
 	},
 
 	keyboard: {
-		icon: KeyboardIcon,
 		name: 'Keyboard Interrupts',
 		description: 'Own the vectors: echo keys typed in the Keyboard / Display tool from an IRQ handler, until a full stop',
 		code: `@ Interrupt-driven keyboard echo.  The program owns address 0, so it
@@ -422,7 +410,6 @@ irq:                        @ IRQ mode: sp and lr are R13_irq and R14_irq
 	},
 
 	helloArmasm: {
-		icon: HelloIcon,
 		name: 'Hello, THRAX! (armasm)',
 		description: 'The greeting in armasm syntax: AREA, ENTRY, DCB and labels in column 1',
 		code: `; Hello, THRAX! in armasm syntax: labels start in column 1, without a
@@ -444,7 +431,6 @@ message
 	},
 
 	factorialArmasm: {
-		icon: FactorialIcon,
 		name: 'Factorial (armasm)',
 		description: 'Compute 5! = 120 in armasm syntax, with EQU and a literal pool',
 		code: `; Factorial in armasm syntax

@@ -4,6 +4,7 @@ import { EXAMPLES } from '../../architectures/mips/examples'
 import { PANELS } from '../panels'
 import * as icons from '../icons'
 import type { Icon } from '../icons'
+import { exampleIcon } from '../ExamplesMenu'
 
 /**
  * The icons are drawn by hand on a 16-unit grid, and a mistyped coordinate
@@ -82,6 +83,6 @@ describe('icons', () => {
 
 	it('gives every panel and every example one', () => {
 		for (const panel of PANELS) expect(typeof panel.icon, panel.id).toBe('function')
-		for (const [key, example] of Object.entries(EXAMPLES)) expect(typeof example.icon, key).toBe('function')
+		for (const key of Object.keys(EXAMPLES)) expect(renderToStaticMarkup(exampleIcon(key)()), key).toContain('<svg')
 	})
 })

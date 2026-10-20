@@ -1,4 +1,3 @@
-import { BitmapIcon, BitwiseIcon, FactorialIcon, FibonacciIcon, HelloIcon, HistoryIcon, InputIcon, KeyboardIcon, LoopIcon, MacrosIcon, RecursionIcon, SumIcon } from '../../components/icons'
 import type { Example } from '../contracts'
 
 /**
@@ -80,7 +79,6 @@ div10:
 
 export const EXAMPLES: Readonly<Record<string, Example>> = {
 	input: {
-		icon: InputIcon,
 		name: 'Interactive Input',
 		description: 'Read a line into a buffer, waiting for each character, then print it',
 		code: `; Read a line into a buffer, then print it
@@ -108,7 +106,6 @@ buffer:	ds 64
 	},
 
 	hello: {
-		icon: HelloIcon,
 		name: 'Hello, THRAX!',
 		description: 'Print a string stored after the code',
 		code: `; DB data and a print-string subroutine
@@ -125,7 +122,6 @@ ${PRINT_STRING}`,
 	},
 
 	sum: {
-		icon: SumIcon,
 		name: 'Sum of Numbers',
 		description: 'Add 5 + 3 and print the result',
 		code: `; Simple addition example
@@ -156,7 +152,6 @@ ${PRINT_DECIMAL}`,
 	},
 
 	factorial: {
-		icon: FactorialIcon,
 		name: 'Factorial',
 		description: 'Compute 5! (5 factorial) = 120',
 		code: `; Factorial example
@@ -187,7 +182,6 @@ ${PRINT_DECIMAL}`,
 	},
 
 	fibonacci: {
-		icon: FibonacciIcon,
 		name: 'Fibonacci',
 		description: 'Compute the 10th Fibonacci number',
 		code: `; Fibonacci sequence
@@ -213,7 +207,6 @@ ${PRINT_DECIMAL}`,
 	},
 
 	ackermann: {
-		icon: RecursionIcon,
 		name: 'Ackermann',
 		description: 'Deep recursion: compute A(3, 3) = 61',
 		code: `; Ackermann function
@@ -275,7 +268,6 @@ ${PRINT_DECIMAL}`,
 	},
 
 	loop: {
-		icon: LoopIcon,
 		name: 'Loop Counter',
 		description: 'Print numbers from 1 to 5',
 		code: `; Loop counter example
@@ -313,7 +305,6 @@ ${PRINT_DECIMAL}`,
 	},
 
 	bitwise: {
-		icon: BitwiseIcon,
 		name: 'Bitwise Operations',
 		description: 'Demonstrate AND, OR, XOR operations',
 		code: `; Bitwise operations
@@ -360,7 +351,6 @@ ${PRINT_DECIMAL}`,
 	},
 
 	bitmap: {
-		icon: BitmapIcon,
 		name: 'Bitmap Display',
 		description: 'Draw colour bands for the Bitmap Display tool',
 		code: `; Fill a 32 x 32 grid of pixels for the Bitmap Display tool.
@@ -397,7 +387,6 @@ column:
 	},
 
 	macros: {
-		icon: MacrosIcon,
 		name: 'Macros',
 		description: 'Define once, use many times with MACRO and EQU',
 		code: `; Macros are expanded by the assembler, so each use costs no call-and-return
@@ -448,7 +437,6 @@ ${PRINT_DECIMAL}`,
 	},
 
 	keyboard: {
-		icon: KeyboardIcon,
 		name: 'Keyboard Interrupts',
 		description: 'Echo typed characters from an IM 1 interrupt handler until a full stop',
 		code: `; Type while the program runs: each character raises the keyboard
@@ -490,7 +478,6 @@ last:	db 0
 	},
 
 	timer: {
-		icon: HistoryIcon,
 		name: 'Timer Interrupts',
 		description: 'Count timer ticks in an IM 2 handler found through a vector table',
 		code: `; The timer interrupts every 10 x 256 T-states. In IM 2 the CPU reads the
