@@ -1,6 +1,6 @@
 # THRAX - Teaching Harness for Runtime Assembly eXecution
 
-A son of MARS (but in a different language). A modern, interactive web-based port of the classic MARS MIPS simulator, built with React, Monaco Editor, and execution engines implemented in TypeScript. Alongside MIPS it runs the MIT Beta under BSim rules, assembled from UASM, in the same workspace.
+A son of MARS (but in a different language). A modern, interactive web-based assembly workbench, built with React, Monaco Editor, and execution engines implemented in TypeScript. It runs nine CPU families in a shared workspace, including MIPS under MARS rules and the MIT Beta under BSim rules.
 
 ![THRAX](https://img.shields.io/badge/THRAX-Web%20Edition-blue)
 ![TypeScript](https://img.shields.io/badge/Language-TypeScript-3178C6)
@@ -12,7 +12,7 @@ A son of MARS (but in a different language). A modern, interactive web-based por
 ## 🚀 Features
 
 ### Core Functionality
-- ✅ **Six Architectures**: MIPS (MARS), the MIT Beta (BSim), the MOS 6502, the Zilog Z80, ARMv8-A (AArch64 and AArch32) and the 26-bit ARM (ARMv2a), chosen in Settings; each loads only when selected, and the files, line breakpoints and layout carry across
+- ✅ **Nine Architecture Families**: MIPS (MARS), the MIT Beta (BSim), MOS 6502 / WDC 65C02, Zilog Z80, ARM (AArch64, AArch32 and Cortex-M0 Thumb), 26-bit ARM (ARMv2a), AVR, RISC-V (RV32IM / RV32IMC) and Motorola 68k (68000 / 68010 / 68020), chosen in Settings; each loads only when selected, and the files, line breakpoints and layout carry across
 - ✅ **Complete MIPS Assembler**: Lexer → Parser → Machine Code Generator, with errors reported on the line that earned them
 - ✅ **Full MIPS Simulator**: The whole MARS instruction table, coprocessors 0 and 1, delayed branching, and device interrupts
 - ✅ **Monaco Editor**: Syntax highlighting, completion offering every instruction with its docs, and a hover saying what each instruction does
@@ -30,7 +30,7 @@ A son of MARS (but in a different language). A modern, interactive web-based por
 - ✅ **Portable Export**: Download assembled text in HexText format
 - ✅ **MARS Tools**: Bitmap display, keyboard/display MMIO, cache simulator, pipeline model, instruction statistics, branch history, MIPS X-Ray, memory reference visualization, Mars Bot, Scavenger Hunt, and the Digital Lab Simulator
 - ✅ **Settings**: Shared display and history preferences, plus each architecture's own options, kept per architecture: the MARS options with the three memory configurations for MIPS, and memory size and the console default for Beta
-- ✅ **Example Programs**: 13 ready-to-run MIPS programs, 12 Beta programs, among them the 6.004 TinyOS lab kernel, 13 6502 programs, 12 Z80 programs, 13 AArch64 programs, 15 AArch32 programs and 13 26-bit ARM programs; two each of the AArch32 and 26-bit ARM programs are in armasm syntax
+- ✅ **Example Programs**: Every CPU offers Sum of Numbers, Factorial, Fibonacci, Loop Counter, Bitwise Operations and Bitmap Display under the same names and order. Targets with a teaching console also offer Hello, THRAX! and Interactive Input. Extra programs demonstrate supported features such as macros, interrupts, compressed instructions, armasm syntax and the Beta TinyOS lab
 - ✅ **Dark Theme UI**: VS Code-inspired interface
 
 ### Supported Instruction Types
@@ -157,7 +157,10 @@ UASM compatibility:
 - `.pcheckoff`, `.tcheckoff` and `.verify` only talk to the course's checkoff server, and are skipped
 - Beta source files use the `uasm` editor language with completion of the library macros, go-to-definition into `beta.uasm`, and data tips for registers, symbols and macros; new files are `.uasm`, and **Download HexText** writes memory from address 0 as words
 
-### MOS 6502
+### MOS 6502 and WDC 65C02
+The CPU model setting selects the original NMOS 6502 (default) or WDC W65C02S.
+Both share the same CPU, assembler, debugger, memory/device model and history.
+
 An NMOS 6502 on a bare board: the 151 documented opcodes in all 13 addressing
 modes, with exact flags, NMOS decimal mode (Z from the binary sum, N and V from
 the intermediate result on `ADC`; binary flags on `SBC`), the `JMP ($xxFF)`
@@ -180,6 +183,16 @@ Assembly follows ca65 where it overlaps:
 - Directives: `.byte`/`.db`/`.byt`, `.word`/`.dw`/`.addr`, `.res`/`.ds` with an optional fill, `.ascii`, `.asciiz`, `.align`, `.include`, `.macro name params` ... `.endmacro`/`.endm`, and `.breakpoint`. Macro arguments are values, and labels inside a macro are local to each expansion
 - Not supported: `.if` and other conditionals, `.segment`, `.proc`/`.scope`, unnamed labels, and comparison and logical operators
 - Sources use the `ca65` editor language with data tips for registers, symbols, addresses and mnemonics; new files are `.a65`
+
+The W65C02S variant adds its documented CMOS instructions and addressing modes:
+`BRA`, `STZ`, `TRB`/`TSB`, `PHX`/`PLX`, `PHY`/`PLY`, accumulator `INC`/`DEC`,
+`JMP (abs,X)`, zero-page indirect operations, additional `BIT` forms,
+`RMB`/`SMB`, `BBR`/`BBS`, `WAI` and `STP`. It corrects indirect JMP page wrapping,
+uses CMOS decimal flags and timing, and clears D on interrupt entry after stacking
+the previous flags. NMOS mode rejects CMOS-only instructions. Wait/stop and
+interrupt transitions are reversible; the existing memory and history limits apply.
+This remains a CPU teaching machine using THRAX's I/O page, rather than a WDC board.
+See [the model notes](src/architectures/mos6502/W65C02S.md) for exact behavior and limits.
 
 ### Zilog Z80
 A Z80 on a bare board: every documented instruction with the CB, ED, DD/FD and
@@ -206,7 +219,10 @@ Assembly is the common subset of zasm and sjasmplus:
 - Not supported: conditionals (`IF`), `PHASE`, `STRUCT`, unnamed and temporary labels, and `<`/`>` as low and high byte
 - Sources use the `z80` editor language with data tips for registers, pairs and what they point at, symbols and numbers; new files are `.z80`
 
-### ARMv8-A (AArch64 and AArch32)
+### ARM (AArch64, AArch32 and Cortex-M0)
+
+The ARM target offers AArch64 and AArch32 ARMv8-A profiles, plus an ARMv6-M
+Cortex-M0 Thumb profile. Its persisted target id remains `armv8` for compatibility.
 The execution-state setting chooses AArch64 or AArch32; switching rebuilds,
 and the Registers panel, the Examples menu and the editor language follow it.
 
@@ -260,6 +276,21 @@ is unified (`addseq`, `push`, `pop`). A `mov` of a 16-bit value no rotation
 fits becomes `movw`, and `movw`/`movt` take `#:lower16:` and `#:upper16:`.
 Sources use the `arm` editor language with ARMv8's mnemonics.
 
+The Cortex-M0 profile executes ARMv6-M Thumb integer instructions, including
+16-bit operations and 32-bit `BL`, through the common debugger and typed history.
+It shares ARM arithmetic and condition-code helpers. MSP, PSP, CONTROL's SPSEL,
+PRIMASK and NZCV are represented; code starts at `0x00400000`, data at
+`0x00420000`, with the existing selectable ARM RAM sizes and history limits.
+The assembler accepts a GNU unified Thumb subset and literal pools; macros,
+numeric local labels and linker relaxation are absent.
+
+This profile runs privileged Thread mode with a flat memory map. Hardware
+exception entry/return, NVIC, SysTick, peripherals, full board boot and cycle
+timing are absent. `BKPT` halts. Its teaching SVC ABI uses the immediate as the
+service: 0 halts, 1 prints R0 as a signed integer, 4 prints a NUL-terminated
+string at R0, 5 reads an integer into R0, and 11 prints a character. Other
+services and unsupported instructions fault. See [the Cortex-M0 notes](src/architectures/armv8/m0/README.md).
+
 ### ARM (26-bit, ARMv2a)
 The 26-bit ARM of the Acorn Archimedes: an ARM2 with the ARM3's `SWP`. R15
 holds the PC in bits 2-25 and N Z C V I F and the mode in the rest; USR, FIQ,
@@ -288,6 +319,81 @@ Two assembler dialects, chosen by file: `.s`/`.S` are GNU as, `.armasm` is armas
 - Not supported: conditionals, `.rept`, armasm macros and `GET`/`INCLUDE`
 - Sources use the `arm` editor language for both dialects, so `;` shows as a comment in GNU sources too, with data tips for registers, labels, symbols and numbers; new files are `.asm`
 
+### AVR
+
+The initial AVR target is a classic 8-bit CPU teaching profile with 32 registers,
+SREG, a 16-bit stack pointer, 64 KiB of flash and 64 KiB of data space. It supports
+integer arithmetic and flags, branches and skips, calls and returns, stack
+operations, direct and X/Y/Z indirect loads and stores, and program-memory reads.
+`BREAK` stops execution. It is not a simulation of a particular ATmega device:
+interrupt delivery, timers, UART, EEPROM and other MCU peripherals are absent.
+
+Code labels, `.org` in `.text`/`.cseg`, and the debugger PC are **byte addresses**,
+unlike the word addresses used by traditional Microchip AVR assemblers. Relative
+branches and saved return addresses are encoded in hardware word units. Data
+labels and pointers retain their hardware data addresses; the memory inspector
+shows data at `0x10000 + address`, separately from flash at `0..0xFFFF`.
+Data starts at hardware address `0x100`. Register, SREG and SP aliases in data
+space refer to the live CPU state. Assembly uses `.include`, `.equ`/`.set`,
+`.text`/`.cseg`, `.data`/`.dseg`, `.org`, `.byte`/`.db` and `.word`/`.dw`,
+with `lo8`/`hi8` for address bytes. Unsupported instructions and directives are
+reported explicitly. This is a source assembler, with no ELF or device-header loader.
+Data symbols navigate to the mapped inspector address; generic navigation from a
+raw register value such as SP cannot distinguish data pointers from flash pointers,
+so use the SRAM section and add `0x10000` when navigating those values manually.
+
+### RISC-V (RV32IM and RV32IMC)
+
+The initial RISC-V target executes the 32-bit base integer ISA and all eight
+multiply/divide instructions, including the specified division-by-zero and
+signed-overflow results. Registers accept both `x0..x31` and ABI names; `x0`
+stays zero. Memory is 1 MiB, little-endian, with text at `0x1000`, data at
+`0x10000` and SP near the top. Instruction fetches and multi-byte data accesses
+must be aligned. `EBREAK` halts; `FENCE` has no effect in this single-core model.
+The ISA setting selects RV32IM (default, four-byte instruction alignment) or
+RV32IMC (two-byte instruction alignment). The latter adds all 27 integer
+compressed forms, explicitly written as `c.*`, mixed with regular 32-bit
+instructions. Both use the same integer execution engine and history schema;
+compressed calls save PC+2, and the debugger tracks each instruction's actual size.
+
+Assembly uses a GNU-like source subset with includes, text/data sections,
+integer and string data, alignment, constants, and common pseudos such as `li`,
+`la`, `mv`, `j`, `call` and `ret`. `li` and `la` always occupy two instructions;
+there is no linker relaxation. Programs enter at `_start`, then `main`, then
+the text base. The environment is educational, not Linux: `ECALL` takes its
+service number in `a7` and argument in `a0`: 1 prints an integer, 4 a
+zero-terminated string, 5 reads an integer, 11 prints a character, and 10 or 93
+exits. Other services fault. Atomic, floating-point, vector and
+privileged instructions, CSRs, ELF loading and general relocations are absent.
+Compression is explicit: ordinary instructions keep their original sizes, with
+no automatic compression or relaxation. `.option rvc` enables explicit compressed
+forms only under RV32IMC; `.option norvc` disables them until re-enabled. Reserved,
+RV64-only and floating-point compressed encodings fault; standard HINTs are harmless.
+
+### Motorola 68k (68000, 68010 and 68020)
+
+The new `m68k` family selects an MC68000, MC68010 or MC68020 integer teaching
+profile. It has D0-D7, A0-A7 (SP), PC and condition codes, with 1 MiB of big-endian
+RAM, text at `0x1000`, data at `0x10000` and a descending stack near the RAM limit.
+Supported operations include moves, integer arithmetic/logic, branches and calls,
+DBcc/Scc, word multiply/divide, register shifts/rotates, bit operations, MOVEM and
+the basic effective-address forms. The 68010 adds RTD, BKPT and MOVE from CCR;
+the 68020 adds long branches, EXTB, long LINK and scaled brief indexing. Instruction
+fetches remain even-aligned; the 68020 permits unaligned data accesses.
+
+The assembler uses a Motorola-style source subset through the shared engine.
+Unsupported model-specific instructions are rejected. Full indexed memory-indirect
+extension words, long multiply/divide forms, FPU/MMU, hardware exception delivery,
+OS boot and complete system emulation are absent. TRAP #15 supplies a teaching
+console: task in D0, 3 prints signed D1, 6 prints D1's low-byte character,
+14 prints a NUL-terminated string at A1, 5 reads an integer into D1, and 9 exits.
+Other traps/tasks fault. Memory, register, console and call-frame effects rewind
+through the shared typed history with the existing limits.
+
+These targets use the shared register, memory, call-stack, history and
+debugger windows, with typed history buffers and the common history limits.
+They do not supply a cycle-accurate pipeline model or an X-Ray panel.
+
 ### Files, Folders and Links
 The workspace autosaves to the browser as you type, so a reload picks up where you
 left off; **Save in this browser** keeps a second copy on purpose. Files come in from
@@ -310,7 +416,7 @@ gist, save as a new gist, and delete the current gist after confirming.
 
 ## 📦 Tech Stack
 
-- **Frontend**: React 18 + TypeScript + Vite
+- **Frontend**: React 19 + TypeScript + Vite
 - **Code Editor**: Monaco Editor
 - **State Management**: Zustand
 - **Styling**: CSS3
@@ -319,7 +425,7 @@ gist, save as a new gist, and delete the current gist after confirming.
 ## 🛠️ Installation & Setup
 
 ### Prerequisites
-- Node.js 16+
+- Node.js 22.12+ (22.x), 24.x or 26+ for the pinned Vite and Vitest versions
 - npm or yarn
 
 ### Quick Start
@@ -396,9 +502,13 @@ src/
 │   ├── registry.ts        # Loads and activates architectures; the only place that names them
 │   ├── mips/              # MARS assembler and simulator (core/), history, editor, examples, MIPS-only tools
 │   ├── beta/              # Beta CPU, BSim machine, UASM dialect and beta.uasm, editor, examples
-│   ├── mos6502/           # 6502 CPU, I/O page machine, ca65-style dialect, editor, examples
+│   ├── mos6502/           # Shared NMOS 6502 / W65C02S CPU, ca65-style dialect, editor, examples
 │   ├── z80/               # Z80 CPU, device page machine, Zilog-syntax dialect, editor, examples
-│   └── armv8/             # ARMv8-A: execution states; a64/ holds the A64 assembler, CPU and Linux machine, a32/ the AArch32 CPU and machine
+│   ├── armv8/             # ARM profiles: a64/, a32/ and Cortex-M0 Thumb in m0/
+│   ├── arm26/             # 26-bit ARMv2a
+│   ├── avr/               # Classic AVR integer teaching profile
+│   ├── riscv/             # Shared RV32IM / RV32IMC assembler and CPU
+│   └── m68k/              # Shared 68000 / 68010 / 68020 integer teaching profiles
 ├── core/                  # Shared assembler engine (assembly/), diagnostics, source index, history, settings
 ├── debug/                 # Debug session: breakpoints and stepping
 ├── tools/                 # Statistics, profile, cache, branch history, pipeline, memory reference
@@ -418,6 +528,11 @@ and an `index.ts` whose default export is an `ArchitectureDefinition` from
 `contracts.ts`; then add its loader and manifest to `src/architectures/registry.ts`.
 Shared code never imports an architecture directly. See
 [docs/FEATURE_ARCHITECTURE.md](docs/FEATURE_ARCHITECTURE.md).
+
+Example declarations are data (`name`, `description`, `code`). Use the shared topic
+IDs in `src/core/exampleCatalog.ts` for equivalent programs. `ExamplesMenu` owns
+the SVG icons, canonical names, order and row layout for every architecture;
+architecture modules supply their source programs and feature-specific extras.
 
 ## 🔄 Execution Pipeline
 
@@ -500,7 +615,7 @@ web port is documented in [docs/FEATURE_ARCHITECTURE.md](docs/FEATURE_ARCHITECTU
 - Every MARS syscall is implemented except the MIDI pair, 31 and 33, which keep their timing and play nothing; an unknown syscall number stops safely with an error
 - A run has no instruction limit; execution yields between batches so runaway code does not block the page, and Pause stops it
 - Sparse virtual memory covers the segments of the selected memory configuration. An address outside all of them faults, as does a load from or store into `.text` unless self-modifying code is enabled
-- The history keeps the last 100,000 instructions by default, at about 150 bytes each and no cost to the speed of a run; it can be set as high as 1,000,000. The limit is shared by every architecture. Stepping back past what it holds is not possible, and neither is replaying what came before it
+- The history keeps the last 100,000 instructions by default and can be set as high as 1,000,000. Every architecture uses the same limit and shared typed-buffer storage; memory use and recording cost depend on its history schema and the effects of each instruction. Stepping back past what it holds is not possible, and neither is replaying what came before it
 - Beta memory is one flat region of 64 KB to 16 MB, 1 MB by default. A program and its data must fit in it; an access past the end stops the run
 - Settings are stored per architecture (under `thrax-web.settings.architecture.<id>`); settings saved before there was more than one architecture are read as MIPS settings
 - Only one architecture is active at a time. Switching stops the run and discards registers, memory, history and address breakpoints; source files, line breakpoints and the layout are kept
