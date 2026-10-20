@@ -26,4 +26,10 @@ describe('gutter rows', () => {
 		const row = codeRowOf({ address: 1, instruction: null, length: 2, directive: '.byte', offset: 0 }, memoryOf([0, 7, 8, 9], 4))
 		expect(row).toEqual({ address: 1, instruction: false, bytes: [7, 8], directive: '.byte', offset: 0, truncated: undefined })
 	})
+
+	it('reads only a short instruction within a wider memory word', () => {
+		const memory = memoryOf([0x55, 0x45, 0x13, 0x05, 0x75, 0], 4)
+		expect(codeRowOf({ address: 0, instruction: 0, length: 2 }, memory).bytes).toEqual([0x45, 0x55])
+		expect(codeRowOf({ address: 2, instruction: 1, length: 4 }, memory).bytes).toEqual([0, 0x75, 0x05, 0x13])
+	})
 })

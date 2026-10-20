@@ -26,4 +26,15 @@ describe('bitmap pixels', () => {
 		expect(pixelColor(memory, 3)).toBe(BYTE_PALETTE[15])
 		expect(pixelColor(memory, 9)).toBeUndefined()
 	})
+
+	it.each([true, false])('reads all four pixel bytes on a 16-bit machine (little-endian: %s)', (littleEndian) => {
+		const memory: MemoryInspector = {
+			...memoryOf(2),
+			littleEndian,
+			word: () => { throw new Error('A 16-bit word cannot hold a pixel') },
+		}
+		expect(pixelBytes(memory)).toBe(4)
+		expect(pixelColor(memory, 0)).toBe(littleEndian ? 0x332211 : 0x2233ff)
+		expect(pixelColor(memory, 3)).toBeUndefined()
+	})
 })

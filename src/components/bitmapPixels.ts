@@ -15,6 +15,15 @@ export function pixelColor(memory: MemoryInspector, address: number): number | u
 		const byte = memory.byte(address)
 		return byte === undefined ? undefined : BYTE_PALETTE[byte & 0x0f]
 	}
+	if (memory.wordBytes === 2) {
+		let color = 0
+		for (let offset = 0; offset < 4; offset++) {
+			const byte = memory.byte(address + offset)
+			if (byte === undefined) return undefined
+			color |= byte << ((memory.littleEndian ? offset : 3 - offset) * 8)
+		}
+		return color & 0x00ffffff
+	}
 	const word = memory.word(address)
 	return word === undefined ? undefined : word & 0x00ffffff
 }

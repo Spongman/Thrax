@@ -196,7 +196,10 @@ export function codeRowOf(row: SourceRow, memory: MemoryInspector): CodeRow {
 		return { address: row.address, instruction: false, bytes, directive: row.directive, offset: row.offset, truncated: row.truncated }
 	}
 	// Each word of an encoding is written most significant byte first, whatever the byte order.
-	const { littleEndian, wordBytes } = memory
+	const { littleEndian } = memory
+	// A short instruction can occupy less than one debugger memory word.
+	// Reverse only its own bytes, so a two-byte instruction never reads the next one.
+	const wordBytes = Math.min(memory.wordBytes, row.length ?? memory.wordBytes)
 	const bytes = Array.from({ length: row.length ?? wordBytes }, (_, offset) => {
 		const within = offset % wordBytes
 		return memory.byte(row.address + offset - within + (littleEndian ? wordBytes - 1 - within : within)) ?? 0
