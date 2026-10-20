@@ -53,7 +53,7 @@ beforeEach(async () => {
 describe('ARMv8-A in the workbench', () => {
 	it('is the active target, with its own examples', () => {
 		expect(state().architecture).toBe('armv8')
-		expect(state().target?.definition.name).toBe('ARMv8-A')
+		expect(state().target?.definition.name).toBe('ARM')
 		expect(state().target?.definition.language).toBe('aarch64')
 		expect(Object.keys(examples()).sort()).toEqual([...Object.keys(OUTPUT), 'input', 'mmio'].sort())
 		expect(state().registers.PC).toBe(BigInt(TEXT_BASE))

@@ -1,8 +1,7 @@
 /**
- * An ARMv8-A execution state: everything that differs between AArch64 and
- * AArch32, behind one interface the definition dispatches through by the
- * `executionState` setting: AArch64 (a64/) and AArch32 (a32/), each with its
- * own assembler, CPU and machine.
+ * An ARM target variant behind the `executionState` setting: AArch64 (a64/),
+ * AArch32 (a32/) and Cortex-M0 ARMv6-M Thumb (m0/), each with its own assembler,
+ * CPU and machine. The persisted target id remains `armv8`.
  */
 
 import type { AssembledProgram, AssemblySources, DebugInspection, Disassembly, Machine, MachineOptions, MachineProfile, TokenDescription } from '../contracts'

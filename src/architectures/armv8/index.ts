@@ -1,8 +1,9 @@
 /**
- * ARMv8-A: programs in the execution state the settings choose, assembled
+ * ARM: programs in the execution state the settings choose, assembled
  * and run by that state. AArch64 runs GNU as A64 source on the shared engine;
  * AArch32 runs A32 source in GNU as or armasm syntax through the shared ARM
- * library. Both run in user mode under Linux system calls.
+ * library. Those states run in user mode under Linux system calls. Cortex-M0
+ * runs ARMv6-M Thumb in Thread mode with its explicit teaching console ABI.
  */
 
 import { ARCH_V8 } from '../arm/a32/isa'
@@ -17,18 +18,21 @@ import { A64_LANGUAGE_ID } from './editor/grammar'
 import { EXAMPLES } from './examples'
 import type { ExecutionState } from './executionState'
 import { manifest } from './manifest'
+import { createM0State, M0_VARIANT } from './m0/state'
 import { ARMV8_SETTINGS, DEFAULT_ARMV8_SETTINGS, type Armv8Settings } from './settings'
 
 /** Each execution state the setting can name, made fresh per activation. */
 const STATES: Readonly<Record<string, () => ExecutionState>> = {
 	aarch64: createA64State,
 	aarch32: createA32State,
+	'cortex-m0': createM0State,
 }
 
 /** What each state edits, shows and offers; an unknown one falls back to AArch64. */
 const VARIANTS: Readonly<Record<string, ArchitectureVariant>> = {
 	aarch64: Object.freeze({ language: A64_LANGUAGE_ID, registers: A64_REGISTERS, registerBanks: A64_REGISTER_BANKS, examples: EXAMPLES }),
 	aarch32: Object.freeze({ language: ARM_LANGUAGE_ID, registers: A32_REGISTERS, registerBanks: A32_REGISTER_BANKS, examples: A32_EXAMPLES }),
+	'cortex-m0': M0_VARIANT,
 }
 
 const definition: ArchitectureDefinition<ArchitectureServices<Armv8Settings>> = {
@@ -75,10 +79,10 @@ const definition: ArchitectureDefinition<ArchitectureServices<Armv8Settings>> = 
 			},
 			profile: (settings) => stateFor(settings).profile(settings),
 			describeToken: (text, column, inspection) => current().describeToken(text, column, inspection),
-			// Both languages, so a file reads right whichever state is chosen.
+			// Every state's language, so files read right whichever state is chosen.
 			async installEditor(monaco, host) {
 				check()
-				const [a64Editor, armEditor] = await Promise.all([import('./editor'), import('../arm/editor')])
+				const [a64Editor, armEditor, m0Editor] = await Promise.all([import('./editor'), import('../arm/editor'), import('./m0/editor')])
 				check()
 				const sources = {
 					files: () => host.files(),
@@ -87,7 +91,7 @@ const definition: ArchitectureDefinition<ArchitectureServices<Armv8Settings>> = 
 					inspection: () => host.inspection(),
 					values: () => current().values(),
 				}
-				const parts = [a64Editor.installEditor(monaco, sources), armEditor.installEditor(monaco, sources, ARCH_V8)]
+				const parts = [a64Editor.installEditor(monaco, sources), armEditor.installEditor(monaco, sources, ARCH_V8), m0Editor.installM0Editor(monaco, host)]
 				const contribution = { dispose: () => parts.splice(0).reverse().forEach((part) => part.dispose()) }
 				contributions.push(contribution)
 				return contribution
