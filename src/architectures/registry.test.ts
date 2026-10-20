@@ -85,6 +85,14 @@ describe('architecture activation', () => {
 		await expect(registry.activate('missing')).rejects.toThrow('Unknown architecture')
 	})
 
+	it.each(['constructor', 'toString', '__proto__'])('rejects inherited catalog names such as %s without releasing the active CPU', async (id) => {
+		const registry = createArchitectureRegistry<{ value: string }>({ first: async () => moduleFor('first') })
+		const first = await registry.activate('first')
+		await expect(registry.activate(id)).rejects.toThrow(`Unknown architecture: ${id}`)
+		expect(registry.current()).toBe(first)
+		expect(first.isCurrent()).toBe(true)
+	})
+
 	it('names in each manifest exactly the panels its definition contributes', async () => {
 		const { default: mips } = await import('./mips')
 		const manifest = architectureManifests().find((candidate) => candidate.id === mips.id)
@@ -100,4 +108,3 @@ describe('architecture activation', () => {
 		expect(first.services.exportWords?.(result)).toEqual([0x20080005])
 	})
 })
-

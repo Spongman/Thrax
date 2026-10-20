@@ -75,7 +75,7 @@ export function createArchitectureRegistry<Services>(catalog: Readonly<Record<st
 			const request = ++generation
 			// Choosing the target in force again cancels a load in progress, and nothing more.
 			if (active?.definition.id === id) return active
-			const load = catalog[id]
+			const load = Object.prototype.hasOwnProperty.call(catalog, id) ? catalog[id] : undefined
 			if (!load) throw new Error(`Unknown architecture: ${id}`)
 			const { default: definition } = await load()
 			if (request !== generation) throw new ActivationSuperseded()

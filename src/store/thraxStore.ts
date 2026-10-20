@@ -655,15 +655,17 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 		}
 	}
 
+	let executionGeneration = 0
 	const controlledAsync = async (action: () => Promise<boolean>, after: () => Partial<THRAXStore> = () => ({})) => {
 		const target = peekArchitecture()
+		const generation = executionGeneration
 		try {
 			const acted = await action()
 			// A target switched in meanwhile has already published its own view.
-			if (peekArchitecture() !== target) return
+			if (peekArchitecture() !== target || generation !== executionGeneration) return
 			set(acted ? { ...simulatorView(), ...after() } : { isRunning: false })
 		} catch (error) {
-			if (peekArchitecture() !== target) return
+			if (peekArchitecture() !== target || generation !== executionGeneration) return
 			set({ ...reportException(error), isRunning: false })
 		}
 	}
@@ -734,6 +736,19 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 			symbolSites: new Map(),
 			programData: [],
 		}
+	}
+
+	/** A model or memory-layout change invalidates the machine, including a run in flight. */
+	const detachForRebuild = () => {
+		executionGeneration++
+		const machine = debug.machine
+		if (machine) {
+			machine.onProgress = null
+			machine.stop()
+			machine.dispose()
+		}
+		tools.detach()
+		debug.detach()
 	}
 
 	// A committed activation is the only place a target takes effect.  Nothing
@@ -831,8 +846,8 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 				set({ settings })
 				return
 			}
-			debug.detach()
-			set({ settings, ...resetExecution() })
+			detachForRebuild()
+			set({ settings, ...resetExecution(), ...debug.view(), ...tools.views() })
 		},
 
 		setTargetSetting: (key, value) => {
@@ -846,8 +861,8 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 				set({ targetSettings })
 				return
 			}
-			debug.detach()
-			set({ targetSettings, ...resetExecution(targetSettings) })
+			detachForRebuild()
+			set({ targetSettings, ...resetExecution(targetSettings), ...debug.view(), ...tools.views() })
 		},
 
 		workspaceSnapshot: () => {
