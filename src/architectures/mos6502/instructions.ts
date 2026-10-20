@@ -9,9 +9,10 @@ import { InstructionCategory, type HistoryRecord, type InstructionInfo, type Ins
 import type { Mos6502Cpu } from './cpu'
 import {
 	ABS, ABX, ABY, ACC, ADC, AND, ASL, BCC, BCS, BEQ, BIT, BMI, BNE, BPL, BRK, BVC, BVS, CMP, CPX, CPY, DEC, DEX, DEY, EOR, IMM, INC,
-	IND, INX, INY, IZX, IZY, JMP, JSR, LDA, LDX, LDY, LSR, MNEMONICS, MODE_BYTES, MODE_NAMES, NOP, OPCODE_INSN, OPCODE_MODE, ORA, PHA, PHP,
+	IND, INX, INY, IZX, IZY, JMP, JSR, LDA, LDX, LDY, LSR, ALL_MNEMONICS, MODE_BYTES, MODE_NAMES, NOP, OPCODE_INSN, OPCODE_MODE, ORA, PHA, PHP,
 	PLA, PLP, REL, ROL, ROR, RTI, RTS, SBC, STA, STX, STY, TAX, TAY, TSX, TXA, TXS, TYA, ZP, ZPX, ZPY,
 } from './isa'
+import { AIX, BBR0, BBS0, BRA, NMOS_MODEL, PHX, PHY, PLX, PLY, RMB0, SMB0, STZ, TRB, TSB, ZPI, ZPR, type CpuModel } from './isa'
 
 /** Register indices of `registerNames`. */
 export const REG_A = 0
@@ -24,9 +25,9 @@ const REGISTER_NAMES = Object.freeze(['A', 'X', 'Y', 'SP', 'P'])
 const { ALU, BRANCH, JUMP, MEMORY, OTHER, TRAP } = InstructionCategory
 
 const LOADS = new Set([LDA, LDX, LDY, ADC, SBC, AND, ORA, EOR, CMP, CPX, CPY, BIT])
-const STORES = new Set([STA, STX, STY])
-const MODIFIES = new Set([ASL, LSR, ROL, ROR, INC, DEC])
-const BRANCHES = new Set([BCC, BCS, BEQ, BNE, BMI, BPL, BVC, BVS])
+const STORES = new Set([STA, STX, STY, STZ])
+const MODIFIES = new Set([ASL, LSR, ROL, ROR, INC, DEC, TRB, TSB, ...Array.from({ length: 16 }, (_, i) => RMB0 + i)])
+const BRANCHES = new Set([BCC, BCS, BEQ, BNE, BMI, BPL, BVC, BVS, BRA, ...Array.from({ length: 16 }, (_, i) => BBR0 + i)])
 
 /** The register each instruction writes, where it writes one. */
 const WRITES: ReadonlyMap<number, number> = new Map([
@@ -34,6 +35,7 @@ const WRITES: ReadonlyMap<number, number> = new Map([
 	[LDX, REG_X], [TAX, REG_X], [TSX, REG_X], [INX, REG_X], [DEX, REG_X],
 	[LDY, REG_Y], [TAY, REG_Y], [INY, REG_Y], [DEY, REG_Y],
 	[TXS, REG_SP], [PLP, REG_P],
+	[PLX, REG_X], [PLY, REG_Y],
 ])
 
 /** Registers each instruction reads, index registers of its mode aside. */
@@ -44,6 +46,7 @@ const READS: ReadonlyMap<number, readonly number[]> = new Map([
 	[STY, [REG_Y]], [CPY, [REG_Y]], [TYA, [REG_Y]], [INY, [REG_Y]], [DEY, [REG_Y]],
 	[TSX, [REG_SP]], [PLA, [REG_SP]], [PLP, [REG_SP]], [PHP, [REG_P, REG_SP]], [JSR, [REG_SP]], [RTS, [REG_SP]], [RTI, [REG_SP]], [BRK, [REG_P, REG_SP]],
 	[ROL, [REG_P]], [ROR, [REG_P]],
+	[PHX, [REG_X, REG_SP]], [PHY, [REG_Y, REG_SP]], [PLX, [REG_SP]], [PLY, [REG_SP]], [TRB, [REG_A]], [TSB, [REG_A]],
 	...[...BRANCHES].map((insn): [number, number[]] => [insn, [REG_P]]),
 ])
 
@@ -56,21 +59,21 @@ function categoryOf(insn: number): number {
 	return ALU
 }
 
-function infoOf(opcode: number): InstructionInfo {
-	const insn = OPCODE_INSN[opcode]
+function infoOf(opcode: number, model: CpuModel = NMOS_MODEL): InstructionInfo {
+	const insn = model.instructions[opcode]
 	if (insn < 0) return { mnemonic: 'ILLEGAL', category: OTHER, encoding: 0, reads: [], writes: -1, isLoad: false, isBranch: false, isJump: false }
-	const mode = OPCODE_MODE[opcode]
+	const mode = model.modes[opcode]
 	const reads = new Set(READS.get(insn) ?? [])
-	if (mode === ZPX || mode === ABX || mode === IZX) reads.add(REG_X)
+	if (mode === ZPX || mode === ABX || mode === IZX || mode === AIX) reads.add(REG_X)
 	if (mode === ZPY || mode === ABY || mode === IZY) reads.add(REG_Y)
 	if (mode === ACC) reads.add(REG_A)
 	return {
-		mnemonic: MNEMONICS[insn],
+		mnemonic: ALL_MNEMONICS[insn],
 		category: categoryOf(insn),
 		encoding: mode,
 		reads: [...reads],
 		writes: mode === ACC ? REG_A : WRITES.get(insn) ?? -1,
-		isLoad: mode !== IMM && (LOADS.has(insn) || (MODIFIES.has(insn) && mode !== ACC)),
+		isLoad: mode !== IMM && (LOADS.has(insn) || (MODIFIES.has(insn) && mode !== ACC) || mode === ZPR),
 		isBranch: BRANCHES.has(insn),
 		isJump: insn === JMP || insn === JSR || insn === RTS || insn === RTI,
 	}
@@ -96,6 +99,16 @@ export const mos6502InstructionSet: InstructionSet = {
 		return kind === 'instruction' && !interrupt ? opcode : null
 	},
 }
+const sets = new Map<CpuModel, InstructionSet>([[NMOS_MODEL, mos6502InstructionSet]])
+export function instructionSetFor(model: CpuModel): InstructionSet {
+	let set = sets.get(model)
+	if (!set) {
+		const info = Array.from({ length: 256 }, (_, opcode) => Object.freeze(infoOf(opcode, model)))
+		set = { ...mos6502InstructionSet, describe: instruction => info[(instruction as number) & 255] }
+		sets.set(model, set)
+	}
+	return set
+}
 
 /** Flag bits of Mos6502Access.flags. */
 export const ACCESS_READ = 1
@@ -118,8 +131,8 @@ export class Mos6502Access {
 export function classifyAt(cpu: Mos6502Cpu, out: Mos6502Access): Mos6502Access {
 	const { memory, pc, x, y } = cpu
 	const opcode = memory[pc]
-	const insn = OPCODE_INSN[opcode]
-	const mode = OPCODE_MODE[opcode]
+	const insn = cpu.model.instructions[opcode]
+	const mode = cpu.model.modes[opcode]
 	const low = memory[(pc + 1) & 0xFFFF]
 	const word = low | (memory[(pc + 2) & 0xFFFF] << 8)
 	out.opcode = opcode
@@ -128,6 +141,8 @@ export function classifyAt(cpu: Mos6502Cpu, out: Mos6502Access): Mos6502Access {
 	out.target = 0
 	if (insn < 0) return out
 	switch (mode) {
+		case ZPI: out.address = memory[low] | (memory[(low + 1) & 255] << 8); break
+		case ZPR: out.address = low; out.target = (pc + 3 + ((memory[(pc + 2) & 65535] << 24) >> 24)) & 65535; break
 		case ZP: out.address = low; break
 		case ZPX: out.address = (low + x) & 0xFF; break
 		case ZPY: out.address = (low + y) & 0xFF; break
@@ -144,9 +159,12 @@ export function classifyAt(cpu: Mos6502Cpu, out: Mos6502Access): Mos6502Access {
 		case IND: case IMM: case ACC: break
 	}
 	const data = mode !== IMM && mode !== ACC && mode !== REL && mode !== IND && insn !== JMP && insn !== JSR
-	if (data && (LOADS.has(insn) || MODIFIES.has(insn))) out.flags |= ACCESS_READ
+	if (data && (LOADS.has(insn) || MODIFIES.has(insn) || mode === ZPR)) out.flags |= ACCESS_READ
 	if (data && (STORES.has(insn) || MODIFIES.has(insn))) out.flags |= ACCESS_WRITE
-	if (BRANCHES.has(insn)) out.flags |= ACCESS_BRANCH | (cpu.taken(insn) ? ACCESS_TAKEN : 0)
+	if (BRANCHES.has(insn)) {
+		const taken = mode === ZPR ? !!(memory[low] & (1 << ((insn - BBR0) & 7))) === (insn >= BBS0) : cpu.taken(insn)
+		out.flags |= ACCESS_BRANCH | (taken ? ACCESS_TAKEN : 0)
+	}
 	if (insn === JSR) out.flags |= ACCESS_CALL
 	return out
 }

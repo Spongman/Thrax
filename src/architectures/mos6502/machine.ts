@@ -15,10 +15,12 @@
 import type { ProgramImage } from '../contracts'
 import { Mos6502CallStack } from './callStack'
 import { Mos6502Cpu, STEP_FAULT, STEP_HALT, STEP_INTERRUPT, STEP_OK, STEP_WAIT, VECTOR_IRQ, VECTOR_NMI, FLAG_I } from './cpu'
-import { ENABLE_TIMER_NMI, Mos6502Device } from './device'
+import { ENABLE_TIMER, ENABLE_TIMER_NMI, Mos6502Device } from './device'
 import { ENTRY_EDIT, Mos6502History } from './history'
+import type { CpuModel } from './isa'
 
 export interface Mos6502MachineOptions {
+	model?: CpuModel
 	/** D takes effect; off models the NES 2A03. */
 	decimal?: boolean
 	/** Entries of history to keep; 0 for none. */
@@ -30,7 +32,7 @@ const covers = (image: ProgramImage, address: number) =>
 	image.sections.some((section) => address >= section.address && address < section.address + section.bytes.length)
 
 export class Mos6502Machine {
-	readonly cpu = new Mos6502Cpu()
+	readonly cpu: Mos6502Cpu
 	readonly device: Mos6502Device
 	readonly callStack = new Mos6502CallStack()
 	readonly history: Mos6502History | null
@@ -42,6 +44,7 @@ export class Mos6502Machine {
 	instructionCount = 0
 
 	constructor(options: Mos6502MachineOptions = {}) {
+		this.cpu = new Mos6502Cpu(options.model)
 		this.cpu.decimal = options.decimal ?? true
 		this.device = new Mos6502Device(this.cpu)
 		this.cpu.io = this.device
@@ -83,6 +86,18 @@ export class Mos6502Machine {
 		const history = this.history
 		history?.begin()
 		device.waiting = false
+		if (cpu.sleeping && !this.nmiPending && !device.irq) {
+			// The clock/device timer continues while WAI suspends instruction fetch.
+			if (device.period > 0 && (device.control & (ENABLE_TIMER | ENABLE_TIMER_NMI))) {
+				const clocks = Math.max(1, device.timer)
+				cpu.cycles += clocks
+				this.tick(clocks)
+			} else {
+				history?.end()
+				return STEP_WAIT
+			}
+		}
+		if (cpu.sleeping && device.irq) cpu.sleeping = false
 		if (this.nmiPending || (device.irq && !(cpu.p & FLAG_I))) {
 			const vector = this.nmiPending ? VECTOR_NMI : VECTOR_IRQ
 			this.nmiPending = false
@@ -99,6 +114,7 @@ export class Mos6502Machine {
 		if (status === STEP_OK) {
 			this.callStack.observe(cpu.opcode, pc, cpu.pc, cpu.sp)
 			this.instructionCount++
+			if (cpu.stopped) this.halted = true
 			this.tick(cpu.cycles - before)
 			if (device.haltRequest >= 0) {
 				this.exitCode = device.haltRequest
@@ -133,6 +149,8 @@ export class Mos6502Machine {
 		return this.edit(() => {
 			this.cpu.pc = value & 0xFFFF
 			this.halted = false
+			this.cpu.sleeping = false
+			this.cpu.stopped = false
 		})
 	}
 

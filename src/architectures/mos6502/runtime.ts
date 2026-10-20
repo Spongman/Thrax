@@ -13,6 +13,8 @@ import { ACCESS_BRANCH, ACCESS_CALL, ACCESS_READ, ACCESS_TAKEN, ACCESS_WRITE, cl
 import { Mos6502Machine } from './machine'
 import type { Mos6502Assembly } from './program'
 import { FLAGS } from './registers'
+import type { CpuModel } from './isa'
+import { instructionSetFor } from './instructions'
 
 /** Instructions run between yields to the browser. */
 const DEFAULT_BATCH_SIZE = 20_000
@@ -47,6 +49,7 @@ class Mos6502Memory implements MemoryInspector {
 }
 
 export interface Mos6502RuntimeOptions {
+	model?: CpuModel
 	decimal: boolean
 	historyLimit: number
 	speed: number | null
@@ -72,7 +75,7 @@ export class Mos6502Runtime implements Machine {
 	private readonly access = new Mos6502Access()
 
 	constructor(readonly program: Mos6502Assembly, options: Mos6502RuntimeOptions) {
-		this.machine = new Mos6502Machine({ decimal: options.decimal, historyLimit: options.historyLimit })
+		this.machine = new Mos6502Machine({ model: options.model ?? program.model, decimal: options.decimal, historyLimit: options.historyLimit })
 		this.machine.load(program.image())
 		this.speed = options.speed
 		this.history = new Mos6502HistoryView(this.machine.history)
@@ -92,7 +95,7 @@ export class Mos6502Runtime implements Machine {
 		const { device } = this.machine
 		if (this.halted) return null
 		if (device.waiting) return READ_INPUT
-		return !device.keyReady && (device.polled || (device.control & ENABLE_KEYBOARD) !== 0) ? KEYBOARD_INPUT : null
+		return !device.keyReady && (this.machine.cpu.sleeping || device.polled || (device.control & ENABLE_KEYBOARD) !== 0) ? KEYBOARD_INPUT : null
 	}
 	get instructionCount() { return this.machine.instructionCount }
 	get historyCursor() { return this.history.length }
@@ -312,7 +315,7 @@ export class Mos6502Runtime implements Machine {
 	}
 
 	toolConfig(): MachineConfig {
-		return { delayedBranching: false, instructions: mos6502InstructionSet, history: this.history }
+		return { delayedBranching: false, instructions: instructionSetFor(this.machine.cpu.model), history: this.history }
 	}
 
 	dispose() {

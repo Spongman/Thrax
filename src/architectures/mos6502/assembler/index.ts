@@ -14,6 +14,7 @@ import type { Diagnostic } from '../../../core/types'
 import { VECTOR_RESET } from '../cpu'
 import { OP_HIGH, OP_LOW, parseMos6502, type Mos6502ParseState } from './parser'
 import { tokenizeMos6502 } from './tokenizer'
+import type { CpuModel } from '../isa'
 
 export { mos6502ExpressionSyntax, parseMos6502 } from './parser'
 export { tokenizeMos6502 } from './tokenizer'
@@ -74,6 +75,7 @@ export function mos6502Config(limits: AssemblerLimits = { ...defaultLimits, addr
 }
 
 export interface Mos6502AssemblyOptions {
+	model?: CpuModel
 	/** Workspace documents that `.include` may name; they are not assembled unless included. */
 	files?: readonly AssemblySource[]
 	maxFileExpansions?: number
@@ -138,7 +140,7 @@ export function assembleMos6502(main: AssemblySource, options: Mos6502AssemblyOp
 		return fail([error.diagnostic])
 	}
 
-	const parsed = parseMos6502(tokens, state)
+	const parsed = parseMos6502(tokens, state, options.model)
 	if (parsed.diagnostics.length) return fail(parsed.diagnostics)
 	const outcome = assembleStatements(parsed.statements, mos6502Config())
 	if (!outcome.image) return fail(outcome.diagnostics)

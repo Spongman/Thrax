@@ -46,6 +46,8 @@ export const EFFECT_CONTROL = 7
 export const EFFECT_PERIOD = 8
 export const EFFECT_TIMER_FLAG = 9
 export const EFFECT_NMI = 10
+export const EFFECT_SLEEPING = 11
+export const EFFECT_STOPPED = 12
 
 export const DEFAULT_HISTORY_LIMIT = 100_000
 
@@ -102,6 +104,8 @@ export class Mos6502History implements Mos6502EffectSink, Mos6502CallStackSink {
 	private period = 0
 	private timerFlag = false
 	private nmi = false
+	private sleeping = false
+	private stopped = false
 
 	constructor(private readonly target: Mos6502HistoryTarget, limit = DEFAULT_HISTORY_LIMIT) {
 		this.log.limit = limit
@@ -144,6 +148,8 @@ export class Mos6502History implements Mos6502EffectSink, Mos6502CallStackSink {
 		this.period = device.period
 		this.timerFlag = device.timerFlag
 		this.nmi = this.target.nmiPending
+		this.sleeping = cpu.sleeping
+		this.stopped = cpu.stopped
 	}
 
 	/** Marks the open entry as taking the interrupt through `vector`. */
@@ -163,6 +169,8 @@ export class Mos6502History implements Mos6502EffectSink, Mos6502CallStackSink {
 		if (this.target.nmiPending !== this.nmi) this.push(EFFECT_NMI, 0, this.nmi ? 1 : 0)
 		if (this.target.exitCode !== this.exitCode) this.push(EFFECT_EXIT, 0, this.exitCode)
 		if (this.target.halted !== this.halted) this.push(EFFECT_HALTED, 0, this.halted ? 1 : 0)
+		if (cpu.sleeping !== this.sleeping) this.push(EFFECT_SLEEPING, 0, Number(this.sleeping))
+		if (cpu.stopped !== this.stopped) this.push(EFFECT_STOPPED, 0, Number(this.stopped))
 		const log = this.log
 		const position = log.openEntry
 		// None open: the entry outgrew the byte limit and the log let it go.
@@ -283,6 +291,8 @@ export class Mos6502History implements Mos6502EffectSink, Mos6502CallStackSink {
 				case EFFECT_PERIOD: device.period = b; break
 				case EFFECT_TIMER_FLAG: device.timerFlag = b !== 0; break
 				case EFFECT_NMI: target.nmiPending = b !== 0; break
+				case EFFECT_SLEEPING: cpu.sleeping = b !== 0; break
+				case EFFECT_STOPPED: cpu.stopped = b !== 0; break
 			}
 		}
 		const registers = this.column(index, REGISTERS)

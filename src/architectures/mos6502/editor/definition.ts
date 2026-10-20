@@ -48,8 +48,8 @@ export function findMos6502Definition(files: readonly SourceFile[], name: string
 	return null
 }
 
-export function registerMos6502Definitions(monaco: typeof Monaco, sources: GotoDefinitionSources): Monaco.IDisposable {
-	return registerGotoDefinition(monaco, sources, MOS6502_LANGUAGE_ID, {
+export function registerMos6502Definitions(monaco: typeof Monaco, sources: GotoDefinitionSources, language = MOS6502_LANGUAGE_ID): Monaco.IDisposable {
+	return registerGotoDefinition(monaco, sources, language, {
 		nameAt: mos6502SymbolAt,
 		find: (files, name) => findMos6502Definition(files.map((file) => ({ name: file.title, code: file.code })), name),
 	})

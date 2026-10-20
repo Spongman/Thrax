@@ -13,6 +13,7 @@ import { disassemble, hex2, hex4 } from './disassemble'
 import {
 	EFFECT_CONTROL, EFFECT_EXIT, EFFECT_FRAME_DEPTH, EFFECT_HALTED, EFFECT_INPUT, EFFECT_MEMORY, EFFECT_NMI, EFFECT_OUTPUT, EFFECT_PERIOD,
 	EFFECT_TIMER_FLAG, ENTRY_EDIT, ENTRY_INTERRUPT, type Mos6502History,
+	EFFECT_SLEEPING, EFFECT_STOPPED,
 } from './history'
 import type { Mos6502Executed } from './instructions'
 
@@ -82,7 +83,7 @@ export function mos6502HistoryFormatter(log: Mos6502History | null, cpu: Mos6502
 			if (interrupt) return `${VECTOR_NAMES[opcode] ?? hex4(opcode)} interrupt`
 			if (kind === 'edit') return ''
 			const memory = cpu.memory
-			return disassemble([opcode, memory[(address + 1) & 0xFFFF], memory[(address + 2) & 0xFFFF]], address)
+			return disassemble([opcode, memory[(address + 1) & 0xFFFF], memory[(address + 2) & 0xFFFF]], address, undefined, cpu.model)
 		},
 		effects(record, applied) {
 			if (!log) return []
@@ -115,6 +116,8 @@ export function mos6502HistoryFormatter(log: Mos6502History | null, cpu: Mos6502
 					case EFFECT_PERIOD: at({ subject: 'timer period', text: String(b) }); break
 					case EFFECT_TIMER_FLAG: at({ subject: 'timer flag', text: String(b) }); break
 					case EFFECT_NMI: at({ subject: 'NMI', text: b ? 'pending' : 'none' }); break
+					case EFFECT_SLEEPING: at({ subject: 'WAI', text: b ? 'waiting' : 'running' }); break
+					case EFFECT_STOPPED: at({ subject: 'STP', text: b ? 'stopped' : 'running' }); break
 				}
 			}
 			return effects

@@ -4,6 +4,7 @@ import type { AssemblyImage } from '../../core/assembly/emitter'
 import { EMPTY_SOURCE_INDEX, SourceIndex, type SourceEntry } from '../../core/sourceIndex'
 import type { AssembledProgram, CodeRow, DataDeclaration, Diagnostic, Disassembly, ProgramImage, SourceLocation, SymbolTables } from '../contracts'
 import { disassemble, hex2, instructionLength } from './disassemble'
+import { NMOS_MODEL, type CpuModel } from './isa'
 
 /** Data rows are four bytes wide. */
 const DATA_ROW_BYTES = 4
@@ -63,6 +64,7 @@ export class Mos6502Assembly implements AssembledProgram {
 		readonly breakpoints: readonly number[] = [],
 		/** Every symbol's value, assignments included, for data tips. */
 		readonly values: ReadonlyMap<string, number> = new Map(),
+		readonly model: CpuModel = NMOS_MODEL,
 	) {
 		this.sourceIndex = assembled ? sourceIndexOf(entryFile, assembled) : EMPTY_SOURCE_INDEX
 		const labels = new Map((assembled?.symbols ?? []).map(({ name, address }) => [name, address]))
@@ -79,14 +81,15 @@ export class Mos6502Assembly implements AssembledProgram {
 	}
 }
 
-export const mos6502Disassembly: Disassembly = {
+export const disassemblyFor = (model: CpuModel = NMOS_MODEL): Disassembly => ({
 	row: (row: CodeRow) => row.instruction
-		? disassemble(row.bytes, row.address)
+		? disassemble(row.bytes, row.address, undefined, model)
 		: `.byte ${row.bytes.map(hex2).join(', ')}${row.truncated ? ', …' : ''}`,
 	at: (memory, address) => {
 		const opcode = memory.byte(address)
 		if (opcode === undefined) return null
-		const bytes = Array.from({ length: instructionLength(opcode) }, (_, offset) => memory.byte((address + offset) & 0xFFFF) ?? 0)
-		return disassemble(bytes, address)
+		const bytes = Array.from({ length: instructionLength(opcode, model) }, (_, offset) => memory.byte((address + offset) & 0xFFFF) ?? 0)
+		return disassemble(bytes, address, undefined, model)
 	},
-}
+})
+export const mos6502Disassembly = disassemblyFor()

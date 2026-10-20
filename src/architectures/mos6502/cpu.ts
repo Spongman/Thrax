@@ -28,6 +28,7 @@ import {
 	OPCODE_INSN, OPCODE_MODE, OPCODE_PAGE_PENALTY, ORA, PHA, PHP, PLA, PLP, REL, ROL, ROR, RTI, RTS, SBC, SEC, SED, SEI,
 	STA, STX, STY, TAX, TAY, TSX, TXA, TXS, TYA, ZP, ZPX, ZPY,
 } from './isa'
+import { AIX, BBR0, BBS0, BRA, NMOS_MODEL, PHX, PHY, PLX, PLY, RMB0, SMB0, STP, STZ, TRB, TSB, WAI, ZPI, ZPR, type CpuModel } from './isa'
 
 /** Status register bits. */
 export const FLAG_C = 0x01
@@ -85,6 +86,9 @@ export function faultMessage(fault: number, address: number, opcode: number): st
 }
 
 export class Mos6502Cpu {
+	constructor(readonly model: CpuModel = NMOS_MODEL) {}
+	sleeping = false
+	stopped = false
 	a = 0
 	x = 0
 	y = 0
@@ -109,6 +113,8 @@ export class Mos6502Cpu {
 
 	/** RESET: registers as the NMOS part leaves them, PC from the reset vector. Memory is kept. */
 	reset() {
+		this.sleeping = false
+		this.stopped = false
 		this.a = 0
 		this.x = 0
 		this.y = 0
@@ -137,33 +143,38 @@ export class Mos6502Cpu {
 	 * The machine decides whether one is due; this always takes it.
 	 */
 	interrupt(vector: number) {
+		if (this.stopped) return
+		this.sleeping = false
 		const pc = this.pc
 		this.push(pc >> 8)
 		this.push(pc & 0xFF)
 		this.push((this.p & ~FLAG_B) | FLAG_U)
 		this.p |= FLAG_I
+		if (this.model.cmos) this.p &= ~FLAG_D
 		this.pc = this.word(vector)
 		this.cycles += INTERRUPT_CYCLES
 	}
 
 	/** Executes one instruction; returns a STEP_* code. */
 	step(): number {
+		if (this.stopped) return STEP_HALT
+		if (this.sleeping) return STEP_WAIT
 		const memory = this.memory
 		const pc = this.pc
 		const opcode = memory[pc]
 		this.opcode = opcode
 		this.waiting = false
-		const insn = OPCODE_INSN[opcode]
+		const insn = this.model.instructions[opcode]
 		if (insn < 0) {
 			this.fault = FAULT_ILLEGAL_INSTRUCTION
 			this.faultAddress = pc
 			return STEP_FAULT
 		}
 		if (insn === BRK && this.brkHalts) return STEP_HALT
-		const mode = OPCODE_MODE[opcode]
+		const mode = this.model.modes[opcode]
 		const next = (pc + MODE_BYTES[mode]) & 0xFFFF
 		const low = memory[(pc + 1) & 0xFFFF]
-		let cycles = OPCODE_CYCLES[opcode]
+		let cycles = this.model.cycles[opcode]
 		let address = 0
 		switch (mode) {
 			case IMM: address = (pc + 1) & 0xFFFF; break
@@ -175,13 +186,13 @@ export class Mos6502Cpu {
 			case ABY: {
 				const base = low | (memory[(pc + 2) & 0xFFFF] << 8)
 				address = (base + (mode === ABX ? this.x : this.y)) & 0xFFFF
-				if (OPCODE_PAGE_PENALTY[opcode] && (base ^ address) & 0xFF00) cycles++
+				if (this.model.penalties[opcode] && (base ^ address) & 0xFF00) cycles++
 				break
 			}
 			case IND: {
 				const pointer = low | (memory[(pc + 2) & 0xFFFF] << 8)
 				// The high byte comes from the start of the pointer's page, not the next one.
-				address = memory[pointer] | (memory[(pointer & 0xFF00) | ((pointer + 1) & 0xFF)] << 8)
+				address = this.model.cmos ? this.word(pointer) : memory[pointer] | (memory[(pointer & 0xFF00) | ((pointer + 1) & 0xFF)] << 8)
 				break
 			}
 			case IZX: {
@@ -189,10 +200,13 @@ export class Mos6502Cpu {
 				address = memory[pointer] | (memory[(pointer + 1) & 0xFF] << 8)
 				break
 			}
+			case AIX: address = this.word((this.word((pc + 1) & 0xFFFF) + this.x) & 0xFFFF); break
+			case ZPI: address = memory[low] | (memory[(low + 1) & 0xFF] << 8); break
+			case ZPR: address = low; break
 			case IZY: {
 				const base = memory[low] | (memory[(low + 1) & 0xFF] << 8)
 				address = (base + this.y) & 0xFFFF
-				if (OPCODE_PAGE_PENALTY[opcode] && (base ^ address) & 0xFF00) cycles++
+				if (this.model.penalties[opcode] && (base ^ address) & 0xFF00) cycles++
 				break
 			}
 			case REL: address = (next + ((low << 24) >> 24)) & 0xFFFF; break
@@ -201,7 +215,21 @@ export class Mos6502Cpu {
 		// Undone if a device read has to wait.
 		const { a, x, y, sp, p } = this
 		let target = next
+		if (this.model.cmos && this.decimal && (this.p & FLAG_D) && (insn === ADC || insn === SBC)) cycles++
 		switch (insn) {
+			case STZ: this.write(address, 0); break
+			case TRB: case TSB: {
+				const value = this.read(address)
+				this.p = (this.p & ~FLAG_Z) | ((value & this.a) === 0 ? FLAG_Z : 0)
+				this.write(address, insn === TRB ? value & ~this.a : value | this.a)
+				break
+			}
+			case PHX: this.push(this.x); break
+			case PHY: this.push(this.y); break
+			case PLX: this.x = this.nz(this.pull()); break
+			case PLY: this.y = this.nz(this.pull()); break
+			case WAI: this.sleeping = true; break
+			case STP: this.stopped = true; break
 			case LDA: this.a = this.nz(this.read(address)); break
 			case LDX: this.x = this.nz(this.read(address)); break
 			case LDY: this.y = this.nz(this.read(address)); break
@@ -218,7 +246,8 @@ export class Mos6502Cpu {
 			case CPY: this.compare(this.y, this.read(address)); break
 			case BIT: {
 				const value = this.read(address)
-				this.p = (this.p & ~(FLAG_N | FLAG_V | FLAG_Z)) | (value & (FLAG_N | FLAG_V)) | ((this.a & value) === 0 ? FLAG_Z : 0)
+				const mask = mode === IMM ? FLAG_Z : FLAG_N | FLAG_V | FLAG_Z
+				this.p = (this.p & ~mask) | (mode === IMM ? 0 : value & (FLAG_N | FLAG_V)) | ((this.a & value) === 0 ? FLAG_Z : 0)
 				break
 			}
 			case ASL: case LSR: case ROL: case ROR: case INC: case DEC: {
@@ -251,6 +280,7 @@ export class Mos6502Cpu {
 			case CLV: this.p &= ~FLAG_V; break
 			case NOP: break
 			case BCC: case BCS: case BEQ: case BNE: case BMI: case BPL: case BVC: case BVS:
+			case BRA:
 				if (this.taken(insn)) {
 					cycles += (next ^ address) & 0xFF00 ? 2 : 1
 					target = address
@@ -282,9 +312,21 @@ export class Mos6502Cpu {
 				this.push(back & 0xFF)
 				this.push(this.p | FLAG_B | FLAG_U)
 				this.p |= FLAG_I
+				if (this.model.cmos) this.p &= ~FLAG_D
 				target = this.word(VECTOR_IRQ)
 				break
 			}
+			default:
+				if (insn >= RMB0 && insn < BBR0) {
+					const bit = 1 << ((insn - RMB0) & 7), value = this.read(address)
+					this.write(address, insn < SMB0 ? value & ~bit : value | bit)
+				} else if (insn >= BBR0 && insn < BBS0 + 8) {
+					const bit = 1 << ((insn - BBR0) & 7), value = this.read(address)
+					if (!!(value & bit) === (insn >= BBS0)) {
+						target = (next + ((memory[(pc + 2) & 0xFFFF] << 24) >> 24)) & 0xFFFF
+						cycles += (next ^ target) & 0xFF00 ? 2 : 1
+					}
+				}
 		}
 		if (this.waiting) {
 			this.a = a
@@ -303,6 +345,7 @@ export class Mos6502Cpu {
 	taken(insn: number): boolean {
 		const p = this.p
 		switch (insn) {
+			case BRA: return true
 			case BCC: return !(p & FLAG_C)
 			case BCS: return (p & FLAG_C) !== 0
 			case BNE: return !(p & FLAG_Z)
@@ -391,6 +434,7 @@ export class Mos6502Cpu {
 		if (sum > 0xFF) p |= FLAG_C
 		this.p = p
 		this.a = sum & 0xFF
+		if (this.model.cmos) this.nz(this.a)
 	}
 
 	private sbc(value: number) {
@@ -410,5 +454,6 @@ export class Mos6502Cpu {
 		let difference = (a & 0xF0) - (value & 0xF0) + low
 		if (difference < 0) difference -= 0x60
 		this.a = difference & 0xFF
+		if (this.model.cmos) this.nz(this.a)
 	}
 }

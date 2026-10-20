@@ -6,7 +6,7 @@
 import type * as Monaco from 'monaco-editor'
 import type { DebugInspection, TokenDescription } from '../../contracts'
 import { hex2, hex4 } from '../disassemble'
-import { INSN_BY_NAME, INSN_OPCODE, MODE_NAMES } from '../isa'
+import { INSN_BY_NAME, INSN_OPCODE, MODE_NAMES, NMOS_MODEL, type CpuModel } from '../isa'
 import { MOS6502_LANGUAGE_ID } from './grammar'
 
 const TOKEN = /\$[0-9a-f]+|%[01]+|0x[0-9a-f]+|\d+|[a-z_.@][\w.@]*/gi
@@ -31,6 +31,7 @@ const SUMMARIES: Readonly<Record<string, string>> = {
 const REGISTERS: Readonly<Record<string, string>> = { a: 'A', x: 'X', y: 'Y', sp: 'SP', pc: 'PC', p: 'P' }
 
 export interface Mos6502TipSources {
+	model?: CpuModel
 	/** A symbol's value where it is not a label, such as `IO_OUT = $F000`. */
 	value?(name: string): number | undefined
 }
@@ -78,9 +79,10 @@ export function describeMos6502Token(line: string, offset: number, state: DebugI
 			return { ...span, register, contents: [`**${register}**\n\n\`${formatValue(value)}\``] }
 		}
 		const insn = INSN_BY_NAME.get(text.toUpperCase())
-		if (insn !== undefined) {
-			const modes = MODE_NAMES.filter((_, mode) => INSN_OPCODE[insn][mode] >= 0)
-			return { ...span, contents: [`**${text.toUpperCase()}**: ${SUMMARIES[text.toUpperCase()]}`, `Modes: ${modes.join(', ')}`] }
+		const model = sources.model ?? NMOS_MODEL
+		if (insn !== undefined && model.opcodes[insn].some(opcode => opcode >= 0)) {
+			const modes = MODE_NAMES.filter((_, mode) => model.opcodes[insn][mode] >= 0)
+			return { ...span, contents: [`**${text.toUpperCase()}**: ${SUMMARIES[text.toUpperCase()] ?? 'W65C02S instruction'}`, `Modes: ${modes.join(', ')}`] }
 		}
 		const address = state.labels.get(text)
 		if (address !== undefined) {
@@ -100,12 +102,13 @@ export interface Mos6502HoverSources {
 }
 
 /** Live data tips in 6502 sources. */
-export function registerMos6502DataTips(monaco: typeof Monaco, sources: Mos6502HoverSources): Monaco.IDisposable {
-	return monaco.languages.registerHoverProvider(MOS6502_LANGUAGE_ID, {
+export function registerMos6502DataTips(monaco: typeof Monaco, sources: Mos6502HoverSources, language = MOS6502_LANGUAGE_ID, cpuModel: CpuModel = NMOS_MODEL): Monaco.IDisposable {
+	return monaco.languages.registerHoverProvider(language, {
 		provideHover(model, position) {
 			const state = sources.inspection?.()
 			if (!state) return null
 			const described = describeMos6502Token(model.getLineContent(position.lineNumber), position.column - 1, state, {
+				model: cpuModel,
 				value: (name) => sources.values?.()?.get(name),
 			})
 			if (!described) return null

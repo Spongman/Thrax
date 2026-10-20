@@ -1,5 +1,28 @@
 import type { Example } from '../contracts'
 
+/** CMOS shares the existing programs and adds a program using its new operations. */
+export const cmosPrimer: Example = {
+	name: 'W65C02S Instructions',
+	description: 'CMOS zero store, memory bits, stack registers and accumulator increment.',
+	code: `.org $0600
+stz $10
+smb3 $10
+bbr3 $10, failed
+ldx #42
+phx
+ldx #0
+plx
+txa
+inc a
+sta $0200
+bra done
+failed:
+stz $0200
+done:
+stp
+`
+}
+
 /**
  * Example 6502 programs in ca65 syntax, ported from the MIPS and Beta
  * examples. Not ported: Coprocessors, as the 6502 has no floating point or
@@ -855,3 +878,5 @@ mul:
 `,
 	},
 }
+
+export const CMOS_EXAMPLES = { ...EXAMPLES, cmos: cmosPrimer }

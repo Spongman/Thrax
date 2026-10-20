@@ -12,7 +12,8 @@ import { Op, parseExpression, type Expr, type ExpressionSyntax } from '../../../
 import { TokenCursor, TokenKind, positionOf, type Position, type Token } from '../../../core/assembly/tokens'
 import { AssemblyError } from '../../../core/diagnostics'
 import type { Diagnostic } from '../../../core/types'
-import { ABS, ABX, ABY, ACC, IMM, IMP, IND, INSN_BY_NAME, INSN_OPCODE, IZX, IZY, MNEMONICS, MODE_BYTES, REL, ZP, ZPX, ZPY, isBranch, takesAccumulator } from '../isa'
+import { ABS, ABX, ABY, ACC, IMM, IMP, IND, INSN_BY_NAME, INSN_OPCODE, IZX, IZY, ALL_MNEMONICS, MODE_BYTES, REL, ZP, ZPX, ZPY, isBranch, takesAccumulator } from '../isa'
+import { AIX, NMOS_MODEL, ZPI, ZPR, type CpuModel } from '../isa'
 import { PC_SYMBOL } from './tokenizer'
 
 const { Label, Assign, Origin, Emit, Invoke, Define, Align, Bytes, Hook, Fragment } = StatementKind
@@ -69,8 +70,8 @@ function scopeLocals(tokens: readonly Token[]): Token[] {
 }
 
 /** Parse an include-expanded token stream into engine statements. */
-export function parseMos6502(tokens: readonly Token[], state: Mos6502ParseState): Mos6502Parse {
-	const parser = new Parser(new TokenCursor(scopeLocals(tokens)), state)
+export function parseMos6502(tokens: readonly Token[], state: Mos6502ParseState, model: CpuModel = NMOS_MODEL): Mos6502Parse {
+	const parser = new Parser(new TokenCursor(scopeLocals(tokens)), state, model)
 	const statements = parser.body(null)
 	return { statements, diagnostics: parser.diagnostics }
 }
@@ -86,7 +87,7 @@ function byteOf(value: number, what: string, at: Position): number {
 class Parser {
 	readonly diagnostics: Diagnostic[] = []
 
-	constructor(private readonly cursor: TokenCursor, private readonly state: Mos6502ParseState) {}
+	constructor(private readonly cursor: TokenCursor, private readonly state: Mos6502ParseState, private readonly model: CpuModel) {}
 
 	/** Statements up to the end, or to `.endmacro` when `macro` opened them. */
 	body(macro: Position | null): Statement[] {
@@ -138,7 +139,7 @@ class Parser {
 			const at = positionOf(token)
 			if (token.kind === Identifier && cursor.isOperator(':', 1) && !token.text.startsWith('.')) {
 				if (token.text === PC_SYMBOL) throw new AssemblyError('Cannot use * as a label', at)
-				if (REGISTER_NAMES.has(token.text.toLowerCase()) || INSN_BY_NAME.has(token.text.toUpperCase())) {
+				if (REGISTER_NAMES.has(token.text.toLowerCase()) || this.model.mnemonics.includes(token.text.toUpperCase())) {
 					throw new AssemblyError(`'${token.text}' is reserved and cannot be a label`, at)
 				}
 				cursor.index += 2
@@ -169,7 +170,7 @@ class Parser {
 			return
 		}
 		const insn = INSN_BY_NAME.get(token.text.toUpperCase())
-		if (insn !== undefined) {
+		if (insn !== undefined && this.model.opcodes[insn].some(opcode => opcode >= 0)) {
 			out.push(this.instruction(insn, at))
 			return
 		}
@@ -290,8 +291,9 @@ class Parser {
 	/** The operand of instruction `insn`, as an engine fragment. */
 	private instruction(insn: number, at: Position): Statement {
 		const cursor = this.cursor
-		const name = MNEMONICS[insn]
-		const opcodes = INSN_OPCODE[insn]
+		const name = ALL_MNEMONICS[insn]
+		const opcodes = this.model.opcodes[insn]
+		if (opcodes.every(opcode => opcode < 0)) throw new AssemblyError(`${name} is not supported by the ${this.model.id} CPU`, at)
 		const fixed = (mode: number, expr: Expr | null): Statement => {
 			const opcode = opcodes[mode]
 			if (opcode < 0) throw new AssemblyError(`${name} has no ${modeLabel(mode)} mode`, at)
@@ -299,7 +301,7 @@ class Parser {
 		}
 		if (cursor.atLineEnd()) {
 			if (opcodes[IMP] >= 0) return fixed(IMP, null)
-			if (takesAccumulator(insn)) return fixed(ACC, null)
+			if (opcodes[ACC] >= 0) return fixed(ACC, null)
 			throw new AssemblyError(`${name} needs an operand`, at)
 		}
 		const first = cursor.peek()
@@ -308,7 +310,19 @@ class Parser {
 			return fixed(ACC, null)
 		}
 		if (cursor.accept('#')) return fixed(IMM, this.expression(`${name} # expects a value`))
-		if (isBranch(insn)) return fixed(REL, this.expression(`${name} expects a target`))
+		if (opcodes[ZPR] >= 0) {
+			const zero = this.expression(`${name} expects a zero-page address`)
+			cursor.expect(',', `${name} expects a branch target after the zero-page operand`)
+			const target = this.expression(`${name} expects a target`)
+			return { kind: Fragment, at, provenance: 'instruction', size: 3, encode: context => {
+				this.state.firstInstruction ??= context.dot
+				const address = context.value(zero, true)!, offset = context.value(target, true)! - ((context.dot + 3) & 0xFFFF)
+				if (!Number.isInteger(address) || address < 0 || address > 255) throw new AssemblyError('Bit branch address is outside zero page', at)
+				if (!Number.isInteger(offset) || offset < -128 || offset > 127) throw new AssemblyError('Bit branch target is out of range', at)
+				return [opcodes[ZPR], address, offset & 255]
+			} }
+		}
+		if (opcodes[REL] >= 0) return fixed(REL, this.expression(`${name} expects a target`))
 		if (cursor.isOperator('(')) {
 			const start = cursor.index
 			cursor.next()
@@ -316,12 +330,12 @@ class Parser {
 			if (cursor.accept(',')) {
 				this.index('x', name)
 				cursor.expect(')', 'Expected ) after ,X')
-				return fixed(IZX, inner)
+				return fixed(opcodes[AIX] >= 0 ? AIX : IZX, inner)
 			}
 			cursor.expect(')', 'Expected )')
 			if (cursor.atLineEnd()) {
-				if (opcodes[IND] < 0) throw new AssemblyError(`${name} has no indirect mode; the NMOS 6502 has only (zp,X) and (zp),Y`, at)
-				return fixed(IND, inner)
+				if (opcodes[IND] < 0 && opcodes[ZPI] < 0) throw new AssemblyError(`${name} has no indirect mode in ${this.model.id}`, at)
+				return fixed(opcodes[ZPI] >= 0 ? ZPI : IND, inner)
 			}
 			if (cursor.accept(',')) {
 				this.index('y', name)
@@ -417,6 +431,9 @@ function modeLabel(mode: number): string {
 		case IND: return 'indirect'
 		case IZX: return '(zp,X)'
 		case IZY: return '(zp),Y'
+		case ZPI: return '(zero page)'
+		case AIX: return '(absolute,X)'
+		case ZPR: return 'zero page,relative'
 		default: return 'relative'
 	}
 }
