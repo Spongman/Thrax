@@ -7,6 +7,7 @@ import { manifest as avrManifest } from './avr/manifest'
 import { manifest as betaManifest } from './beta/manifest'
 import { manifest as mipsManifest } from './mips/manifest'
 import { manifest as mos6502Manifest } from './mos6502/manifest'
+import { manifest as riscvManifest } from './riscv/manifest'
 import { manifest as z80Manifest } from './z80/manifest'
 
 /** A later request replaced this one before it could commit. */
@@ -37,6 +38,7 @@ const loaders: Record<string, Loader<ArchitectureServices>> = {
 	armv8: () => import('./armv8'),
 	arm26: () => import('./arm26'),
 	avr: () => import('./avr'),
+	riscv: () => import('./riscv'),
 }
 
 const manifests: Readonly<Record<string, ArchitectureManifest>> = {
@@ -47,6 +49,7 @@ const manifests: Readonly<Record<string, ArchitectureManifest>> = {
 	armv8: armv8Manifest,
 	arm26: arm26Manifest,
 	avr: avrManifest,
+	riscv: riscvManifest,
 }
 
 /** Ids of every architecture the catalog can load. */
