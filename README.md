@@ -15,7 +15,7 @@ A son of MARS (but in a different language). A modern, interactive web-based ass
 - ✅ **Nine Architecture Families**: MIPS (MARS), the MIT Beta (BSim), MOS 6502 / WDC 65C02, Zilog Z80, ARM (AArch64, AArch32 and Cortex-M0 Thumb), 26-bit ARM (ARMv2a), AVR, RISC-V (RV32IM / RV32IMC) and Motorola 68k (68000 / 68010 / 68020), chosen in Settings; each loads only when selected, and the files, line breakpoints and layout carry across
 - ✅ **Complete MIPS Assembler**: Lexer → Parser → Machine Code Generator, with errors reported on the line that earned them
 - ✅ **Full MIPS Simulator**: The whole MARS instruction table, coprocessors 0 and 1, delayed branching, and device interrupts
-- ✅ **Monaco Editor**: Syntax highlighting, completion offering every instruction with its docs, and a hover saying what each instruction does
+- ✅ **Monaco Editor**: Syntax highlighting, completion offering every instruction with its docs, and consistent source/disassembly instruction hovers with syntax, descriptions and a corner manual-link button
 - ✅ **Source Workspace**: Multiple source tabs, find/replace, multi-file programs, and a Files panel
 - ✅ **Interactive Debugging**: Run, pause, stop, step into/over/out, step back, and source breakpoints
 - ✅ **Execution History**: Every instruction and what it changed, with time travel to any point in it
@@ -25,13 +25,15 @@ A son of MARS (but in a different language). A modern, interactive web-based ass
 - ✅ **Cross-Panel Navigation**: A hovered address or register lights wherever else it appears
 - ✅ **Heat Map and Gutter Columns**: Execution counts, addresses, and code bytes beside the source
 - ✅ **Console I/O**: Output plus in-console input for the interactive syscalls
-- ✅ **Dockable Layout**: Panels dock and tab, and the layout is saved between sessions
+- ✅ **Dockable Layout**: Files opens at the far left of a fresh workspace; panels dock and tab, and the layout is saved between sessions
 - ✅ **Files, Folders and Links**: Autosave, files and `.zip` archives in and out, a folder on disk as the project, share links, GitHub and gists
 - ✅ **Portable Export**: Download assembled text in HexText format
 - ✅ **MARS Tools**: Bitmap display, keyboard/display MMIO, cache simulator, pipeline model, instruction statistics, branch history, MIPS X-Ray, memory reference visualization, Mars Bot, Scavenger Hunt, and the Digital Lab Simulator
 - ✅ **Settings**: Shared display and history preferences, plus each architecture's own options, kept per architecture: the MARS options with the three memory configurations for MIPS, and memory size and the console default for Beta
-- ✅ **Example Programs**: Every CPU offers Sum of Numbers, Factorial, Fibonacci, Loop Counter, Bitwise Operations and Bitmap Display under the same names and order. Targets with a teaching console also offer Hello, THRAX! and Interactive Input. Extra programs demonstrate supported features such as macros, interrupts, compressed instructions, armasm syntax and the Beta TinyOS lab
+- ✅ **Example Programs**: Every CPU offers Sum of Numbers, Factorial, Fibonacci, Ackermann, Loop Counter, Bitwise Operations, Bitmap Display and Mandelbrot Set under the same names and order. Targets with a teaching console also offer Hello, THRAX! and Interactive Input; AVR leaves arithmetic results in registers or SRAM. The menu marks required tool windows and opens them on selection. Extra programs demonstrate supported features such as macros, polling I/O, interrupts, compressed instructions, armasm syntax and the Beta TinyOS lab
 - ✅ **Dark Theme UI**: VS Code-inspired interface
+
+Each Mandelbrot example hardcodes a 16-iteration limit and the MIPS blue-to-white palette, with black for the interior. Integer ports retain their native fixed-point precision. Byte-indexed examples configure the shared Bitmap Display palette when loaded. The machine profile explicitly selects indexed-byte or four-byte RGB pixels and byte order; an example can override that layout. Framebuffer format is independent of CPU word size.
 
 ### Supported Instruction Types
 
@@ -161,7 +163,7 @@ UASM compatibility:
 The CPU model setting selects the original NMOS 6502 (default) or WDC W65C02S.
 Both share the same CPU, assembler, debugger, memory/device model and history.
 
-An NMOS 6502 on a bare board: the 151 documented opcodes in all 13 addressing
+An NMOS 6502 on a bare board: the 151 documented opcodes plus all 105 undocumented encodings, in all 13 addressing
 modes, with exact flags, NMOS decimal mode (Z from the binary sum, N and V from
 the intermediate result on `ADC`; binary flags on `SBC`), the `JMP ($xxFF)`
 page-wrap bug, zero-page and stack wrapping, and cycle counts with the
@@ -174,7 +176,8 @@ The machine:
 - IRQ is a level, taken between instructions while an enabled source holds it and `I` is clear; NMI is taken before the next instruction regardless of `I`. Both take 7 cycles, push PC and P with B clear, and step back like instructions
 - The console and the Keyboard and Display tool share the keyboard queue. A program waiting at `$F001`, polling the status, or with the keyboard IRQ enabled can be typed to while it runs
 - Settings: decimal mode, on by default; off ignores `D`, as the NES 2A03 does
-- Not modelled: undocumented opcodes, which stop the run as illegal instructions; dummy reads and the double write of read-modify-write instructions; the I/O page only answers data accesses, not instruction fetches
+- NMOS undocumented instructions assemble, disassemble and execute, including compound RMW operations, operand NOPs, masked stores and JAM/KIL. Unstable XAA and immediate LAX use a fixed `$EE` magic mask; masked stores include page-cross address corruption. These deterministic choices cannot reproduce chip/temperature-dependent behavior. See [the NMOS notes](src/architectures/mos6502/NMOS.md)
+- Not modelled: dummy reads and the double write of read-modify-write instructions; the I/O page only answers data accesses, not instruction fetches
 
 Assembly follows ca65 where it overlaps:
 - `label:`, `@local:` labels scoped to the label before them, `;` comments, `name = expr`, `name .equ expr`, `.set name, expr`, `* = expr` and `.org`
@@ -208,6 +211,7 @@ The machine:
 - Devices at `$FF00-$FF07`, and on I/O ports `$00-$07` (the low byte of the port address): `+0` write prints a character; `+1` read takes the next typed character, 0 when none; `+2` read is the status (bit 0 a character is waiting, bit 1 output ready, bit 2 the timer fired since the last read), write enables interrupts (bit 0 keyboard, bit 1 timer); `+3` write ends the program with that exit code; `+4` sets the timer period in units of 256 T-states, 0 to stop it; `+5` read takes the next typed character, waiting for one. The rest of the page is RAM
 - Interrupts: the timer, then the keyboard, are taken before an instruction while IFF1 is set, never straight after `EI`. The keyboard puts `$F7` (`RST 30h`) on the bus and the timer `$FF` (`RST 38h`): IM 0 runs that RST, IM 1 goes to `$38`, IM 2 reads the handler from `I * 256 +` that byte. NMI (to `$66`, keeping IFF2 for `RETN`) is modelled but nothing raises it. Interrupts push a call-stack frame and step back like instructions
 - `HALT` waits for an interrupt, skipping to the next timer tick or typed character; with interrupts disabled, or no enabled source that could raise one, it ends the program
+- The shared Keyboard / Display window queues characters and shows device output for both polling and interrupt examples
 - Not modelled: MEMPTR, the `LD A,I` interrupt quirk, IM 0 bus bytes other than RST, and contention or wait states
 
 Assembly is the common subset of zasm and sjasmplus:
@@ -292,7 +296,7 @@ string at R0, 5 reads an integer into R0, and 11 prints a character. Other
 services and unsupported instructions fault. See [the Cortex-M0 notes](src/architectures/armv8/m0/README.md).
 
 ### ARM (26-bit, ARMv2a)
-The 26-bit ARM of the Acorn Archimedes: an ARM2 with the ARM3's `SWP`. R15
+The 26-bit ARM of the Acorn Archimedes: selectable ARM2 and ARM3 (default). R15
 holds the PC in bits 2-25 and N Z C V I F and the mode in the rest; USR, FIQ,
 IRQ and SVC bank R13-R14 (FIQ R8-R14), and the Registers panel shows the
 current view, the status flags, R15 whole, and every banked register on its own
@@ -301,15 +305,17 @@ tab. PC reads 8 ahead (12 with a register-specified shift and when stored);
 all of them in a privileged mode and only NZCV in USR. Data processing with the
 barrel shifter (RRX included), `MUL`/`MLA`, `LDR`/`STR` (byte, word, `T`, pre-
 and post-index, scaled register offsets, unaligned loads rotated), `LDM`/`STM`
-in all four modes with `!` and `^`, `SWP`, `B`/`BL` and `SWI`. No Thumb, no
-`MRS`/`MSR`, no halfword loads and no coprocessors.
+in all four modes with `!` and `^`, `B`/`BL` and `SWI`; ARM3 also supplies `SWP`
+and CP15 `MRC`/`MCR`. No Thumb, `MRS`/`MSR`, halfword loads or external coprocessors.
 
 The machine:
 - RAM from 0 (512 KB to 16 MB, a setting); programs start at `0x8000` in USR mode, with R13_usr at the top of RAM and R13_svc, R13_irq and R13_fiq at `0x8000`, `0x7000` and `0x6000`. A program with bytes at address 0 owns the vectors and starts at reset in SVC with I and F set
 - Exceptions take the vectors at `0x00`-`0x1C` (reset, undefined, SWI, prefetch abort, data abort, address exception for data above 26 bits, IRQ, FIQ) when the vector word is not zero; through an empty vector the run stops with the reason instead
 - With the SWI vector empty, SWIs are RISC OS's console calls: `OS_WriteC` (&00), `OS_WriteS` (&01), `OS_Write0` (&02), `OS_NewLine` (&03), `OS_ReadC` (&04, waits for typed input; a line ends with 10) and `OS_Exit` (&11), the `X` forms alike; `swi OS_Exit` and `swi "OS_Exit"` both assemble
 - The Keyboard and Display tool's registers sit above RAM: `KBD_STATUS` at `0x03FF0000` (bit 0 a key waits, bit 1 enables an IRQ while one does), `KBD_DATA` at `0x03FF0004`, `TTY_STATUS` at `0x03FF0008` and `TTY_DATA` at `0x03FF000C`, all predefined symbols; the tool's own help text names MARS's addresses. The Bitmap Display reads words anywhere in RAM
-- The pipeline tool models fetch, decode and execute: no data stalls, and two instructions discarded behind a taken branch or a write to PC; multi-cycle instructions are not modelled
+- ARM3 adds privileged CP15 cache controls and a functional 4 KB unified cache, with cacheable/updateable/disruptive regions, write-through updates and flushing. ARM2 rejects SWP and CP15. The common Registers window shows clock ticks and an ARM3 CP15 bank
+- The shared pipeline displays actual fetch/decode/execute schedules, including multi-cycle loads/stores, block transfers, register shifts, operand-dependent multiplication and CP15 transfers. Configurable memory latency and sequential transfer costs distinguish S/N/I cycles; ARM3 adds cache-hit/miss timing, overlapping line fills and the datasheet's worst-case clock synchronization
+- A two-word instruction queue performs speculative PC+8 fetches, preserves stale instructions after stores, and defers prefetch aborts until execution. PC redirects discard queued words and refill; CP15 flushing leaves the queue intact. Typed history preserves queue, cache, clock and timing state through rewind, at increased memory cost per entry. The Instruction Prefetch example demonstrates self-modifying code. MEMC, DRAM refresh and electrical clock phase remain outside the model; see [the ARM26 notes](src/architectures/arm26/README.md)
 - `BL` and returns to its link keep the call stack; every effect, banked registers and status bits included, steps back exactly
 
 Two assembler dialects, chosen by file: `.s`/`.S` are GNU as, `.armasm` is armasm, and any other file (`.asm`, new files) by its content when an indented `AREA` or a GNU directive says which, else by the dialect setting:
@@ -538,8 +544,21 @@ architecture modules supply their source programs and feature-specific extras.
 
 1. **Assembly**: the shared engine in `src/core/assembly` handles tokens, expressions, macros, symbols, layout and byte emission; each architecture configures it with its dialect (MARS for MIPS, UASM for Beta) and its encodings
 2. **Activation**: the selected architecture's chunk loads, and its services supply the assembler, machine, profile, disassembly and editor support
-3. **Simulation**: the machine runs in batches, yielding between them, with history recorded in typed-array columns the architecture's schema describes
+3. **Simulation**: one shared execution controller schedules every CPU, handles debugger completion and bounds batches by machine steps and host time. History uses a shared cursor and architecture-declared typed-array columns; byte shifting and typed call-stack storage are shared while CPU state capture, memory maps and call/return detection remain local
 4. **Inspection**: panels read registers, memory, history and the call stack through the contract, without side effects on the machine
+
+Debugger edit transactions, history row adapters and effect presentation share common
+helpers without changing the typed column store. Console transports and the A32/A64
+Linux console environment are reusable; syscall ABIs, IRQ rules and hardware timing
+remain in the CPU modules. Assembler frontends share quote-aware text scanning,
+integer arithmetic and bounded include traversal while retaining their dialects.
+Pipeline dependencies can name multiple destinations, flags and overlapping register
+resources, including separate memory results and base writeback.
+
+Shared views and tools preserve exact nonnegative addresses up to
+`Number.MAX_SAFE_INTEGER`, rather than wrapping them to 32 bits. Wider register
+values use `bigint`; values beyond that address range are displayed without offering
+memory navigation. Each CPU still enforces its own bounded memory map.
 
 ## 📚 Roadmap
 
@@ -613,9 +632,11 @@ web port is documented in [docs/FEATURE_ARCHITECTURE.md](docs/FEATURE_ARCHITECTU
 - A label expression takes one label plus a constant (`arr+4`); differences of two labels are rejected
 - A text segment can be based only before it emits instructions, since pseudo-instructions expand after parsing
 - Every MARS syscall is implemented except the MIDI pair, 31 and 33, which keep their timing and play nothing; an unknown syscall number stops safely with an error
-- A run has no instruction limit; execution yields between batches so runaway code does not block the page, and Pause stops it
+- A run has no instruction limit; execution yields between bounded batches, including code without source mappings. Pause allows Continue; Stop ends the run until a rewind, PC edit or fresh assembly. Step Over checks return address and frame depth so recursive calls finish correctly
 - Sparse virtual memory covers the segments of the selected memory configuration. An address outside all of them faults, as does a load from or store into `.text` unless self-modifying code is enabled
-- The history keeps the last 100,000 instructions by default and can be set as high as 1,000,000. Every architecture uses the same limit and shared typed-buffer storage; memory use and recording cost depend on its history schema and the effects of each instruction. Stepping back past what it holds is not possible, and neither is replaying what came before it
+- The history keeps the last 1,000,000 instructions by default; this is also the maximum configurable limit. Every architecture uses the same limit and shared typed-buffer storage; memory use and recording cost depend on its history schema and the effects of each instruction. Stepping back past what it holds is not possible, and neither is replaying what came before it
+- The History footer shows retained entries, live/allocated typed-buffer bytes and eviction counts for every CPU. The default typed-buffer budget is 256 MiB; payload heap is additional, so the entry limit is a retention target subject to that budget. Expand the footer for details. Runtime/rewind measurements and the reproducible benchmark command are in [the benchmark report](docs/runtime-benchmarks.md).
+- Moving through history preserves later entries on every CPU. Stepping forward replays recorded effects, including console input and manual edits. Changing registers, memory or the PC while rewound discards the previous future and starts a new path
 - Beta memory is one flat region of 64 KB to 16 MB, 1 MB by default. A program and its data must fit in it; an access past the end stops the run
 - Settings are stored per architecture (under `thrax-web.settings.architecture.<id>`); settings saved before there was more than one architecture are read as MIPS settings
 - Only one architecture is active at a time. Switching stops the run and discards registers, memory, history and address breakpoints; source files, line breakpoints and the layout are kept

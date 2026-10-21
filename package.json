@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "bench:runtime": "node --expose-gc scripts/benchmark-runtime.mjs",
     "preview": "vite preview",
     "lint": "eslint src",
     "xray:svg": "esbuild scripts/xray-svg.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/xray-svg.mjs --log-level=error && node node_modules/.cache/xray-svg.mjs",
