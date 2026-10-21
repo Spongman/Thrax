@@ -139,6 +139,7 @@ export type BitmapFormat =
 /** Layout facts the panels need, under the settings in force. */
 export interface MachineProfile {
 	/** Framebuffer layout selected by the machine environment. */
+	readonly bitmap: BitmapFormat
 	/** Registers as a reset leaves them, before any program loads. */
 	readonly resetRegisters: Registers
 	readonly resetPc: number

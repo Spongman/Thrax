@@ -1,3 +1,4 @@
+import { RGB32_LE } from '../core/bitmapFormats'
 import React from 'react'
 import { DockviewDefaultTab, DockviewReact, themeDark, type AddPanelOptions, type DockviewApi, type DockviewReadyEvent, type IDockviewPanel, type IDockviewPanelHeaderProps, type IDockviewPanelProps, type SerializedDockview } from 'dockview-react'
 import 'dockview-react/dist/styles/dockview.css'
@@ -149,11 +150,13 @@ const CallStackPanel = () => {
 }
 
 const BitmapPanel = () => {
+	const palette = useTHRAXStore((state) => state.bitmapPalette)
+	const format = useTHRAXStore((state) => state.bitmapFormat ?? state.targetProfile?.bitmap ?? RGB32_LE)
 	const memory = useTHRAXStore((state) => state.memory)
 	const dataBase = useTHRAXStore((state) => state.targetProfile?.dataBase)
 	const architecture = useTHRAXStore((state) => state.architecture)
 	// Remounting on a switch reads the new target's own stored base.
-	return <div className="dock-panel"><BitmapDisplay key={architecture} memory={memory} defaultBase={dataBase} architecture={architecture} /></div>
+	return <div className="dock-panel"><BitmapDisplay key={architecture} format={format} palette={palette} memory={memory} defaultBase={dataBase} architecture={architecture} /></div>
 }
 
 const KeyboardDisplayPanel = () => {

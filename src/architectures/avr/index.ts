@@ -1,3 +1,4 @@
+import { RGB32_LE } from '../../core/bitmapFormats'
 import { createArchitectureServices } from '../../core/architectureServices'
 import type { TargetSettings } from '../../core/settings'
 import { examples } from './examples'
@@ -27,6 +28,7 @@ const registers: RegisterDescriptor[] = [
 	{ id: 'SREG', name: 'SREG', bank: 'cpu', bits: 8, editable: true, role: 'flags' }
 ]
 const profile: MachineProfile = {
+	bitmap: RGB32_LE,
 	resetRegisters: {
 		...Object.fromEntries(Array.from({ length: 32 }, (_, i) => [`r${i}`, 0])),
 		PC: 0,

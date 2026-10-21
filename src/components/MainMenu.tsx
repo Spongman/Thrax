@@ -1,4 +1,5 @@
 import React from 'react'
+import type { Example } from '../architectures/contracts'
 import { useTHRAXStore } from '../store/thraxStore'
 import { AboutIcon, ExamplesIcon, FileMenuIcon, SettingsIcon, ToolsIcon, WindowIcon, type Icon } from './icons'
 import { menuLabel, panelsIn, type PanelSpec } from './panels'
@@ -28,7 +29,7 @@ export interface MenuAction {
 
 interface MainMenuProps {
 	onSettings: () => void
-	onLoadExample: (code: string) => void
+	onLoadExample: (example: Example) => void
 	onOpenPanel: (id: string) => void
 	/** Panels already on screen, shown as such rather than offered again. */
 	openPanels: readonly string[]
@@ -157,7 +158,7 @@ function MainMenu({ onSettings, onLoadExample, onOpenPanel, openPanels, fileActi
 						)))}
 
 					{section('examples', 'Examples', ExamplesIcon,
-						<ExamplesMenu examples={examples ?? {}} onLoad={code => { onLoadExample(code); close() }} />, true)}
+						<ExamplesMenu examples={examples ?? {}} panels={definition?.panels} onLoad={example => { onLoadExample(example); close() }} />, true)}
 
 					{section('window', 'Window', WindowIcon, panelsIn('window', definition?.panels).map((panel) => panelItem(panel)))}
 					{section('tools', 'Tools', ToolsIcon, panelsIn('tool', definition?.panels).map((panel) => panelItem(panel, true)), true)}

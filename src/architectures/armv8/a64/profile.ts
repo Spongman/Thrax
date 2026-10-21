@@ -1,3 +1,4 @@
+import { RGB32_LE } from '../../../core/bitmapFormats'
 /** The AArch64 machine as the shared panels see it: code, data and stack in one bounded region. */
 
 import type { MachineProfile, Registers } from '../../contracts'
@@ -20,6 +21,7 @@ export function a64Profile(memoryBytes: number): MachineProfile {
 		return [register.id, register.bits === 64 ? 0n : 0]
 	})))
 	profile = Object.freeze({
+		bitmap: RGB32_LE,
 		resetRegisters,
 		resetPc: TEXT_BASE,
 		memorySections: Object.freeze([

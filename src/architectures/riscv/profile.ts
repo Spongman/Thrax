@@ -1,3 +1,4 @@
+import { RGB32_LE } from '../../core/bitmapFormats'
 import type { MachineProfile, RegisterDescriptor } from '../contracts'
 import { ABI, DATA_BASE, MEMORY_BYTES, TEXT_BASE } from './isa'
 export const REGISTERS: readonly RegisterDescriptor[] = [
@@ -13,6 +14,7 @@ export const REGISTERS: readonly RegisterDescriptor[] = [
 	{ id: 'PC', name: 'PC', bank: 'cpu', bits: 32, editable: true, role: 'programCounter' }
 ]
 export const riscvProfile: MachineProfile = {
+	bitmap: RGB32_LE,
 	resetRegisters: {
 		...Object.fromEntries(ABI.map((_, index) => [`x${index}`, index === 2 ? MEMORY_BYTES - 16 : 0])),
 		PC: TEXT_BASE

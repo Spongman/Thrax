@@ -1,4 +1,5 @@
 import React from 'react'
+import type { Example } from '../architectures/contracts'
 import { DEFAULT_GUTTER_COLUMNS, RUN_SPEEDS, useTHRAXStore } from '../store/thraxStore'
 import { AddressIcon, ArchiveIcon, BrowserLoadIcon, BrowserSaveIcon, CodeBytesIcon, DisassemblyIcon, ExportIcon, FilesIcon, GitBranchIcon, GlobeIcon, HeatLinesIcon, HeatMapIcon, LinkIcon, NewFileIcon, OpenFolderIcon, PauseIcon, ResetIcon, RunIcon, SaveAllIcon, SaveIcon, StepBackIcon, StepIntoIcon, StepOutIcon, StepOverIcon, StopIcon } from './icons'
 import { nextToggles } from './toggleGroup'
@@ -28,8 +29,8 @@ function Toolbar({ onRun, onReset }: ToolbarProps) {
 	const [showGitHub, setShowGitHub] = React.useState(false)
 	const [storageMessage, setStorageMessage] = React.useState<string | null>(null)
 
-	const handleLoadExample = (code: string) => {
-		window.dispatchEvent(new CustomEvent('load-example', { detail: { code } }))
+	const handleLoadExample = (example: Example) => {
+		window.dispatchEvent(new CustomEvent('load-example', { detail: example }))
 	}
 
 	const showStorageMessage = (message: string) => {

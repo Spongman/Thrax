@@ -1,3 +1,4 @@
+import { TEACHING_BITMAP } from '../../core/bitmapFormats'
 /** The 6502 machine as the shared panels see it: 64 KiB, its pages named. */
 
 import type { MachineProfile, MemorySection, Registers } from '../contracts'
@@ -24,6 +25,7 @@ const sections: readonly MemorySection[] = Object.freeze([
 ].map((section) => Object.freeze(section)))
 
 export const mos6502Profile: MachineProfile = Object.freeze({
+	bitmap: TEACHING_BITMAP,
 	resetRegisters,
 	resetPc: DEFAULT_ORIGIN,
 	memorySections: sections,

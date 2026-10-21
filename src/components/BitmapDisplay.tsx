@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useRef } from 'react'
-import { formatWord, parseWord } from '../core/format'
-import type { MemoryInspector } from '../architectures/contracts'
+import { formatAddress, parseAddress } from '../core/format'
+import type { BitmapFormat, MemoryInspector } from '../architectures/contracts'
 import { isOneOf, useStoredState } from '../hooks/useStoredState'
 import PanelGroup from './PanelGroup'
 import { pixelBytes, pixelColor } from './bitmapPixels'
 import './BitmapDisplay.css'
 
 interface BitmapDisplayProps {
+	format: BitmapFormat
+	palette?: readonly number[] | null
 	memory: MemoryInspector
 	/** Where the display starts until one is chosen: the target's data base. */
 	defaultBase?: number
@@ -17,14 +19,10 @@ interface BitmapDisplayProps {
 const DISPLAY_SIZES = [128, 256, 512]
 const UNIT_SIZES = [1, 2, 4, 8, 16]
 
-function parseAddress(value: string) {
-	const parsed = parseWord(value)
-	return parsed !== null && parsed >= 0 && parsed <= 0xffffffff ? parsed >>> 0 : null
-}
 
-function BitmapDisplay({ memory, defaultBase = 0, architecture }: BitmapDisplayProps) {
+function BitmapDisplay({ memory, defaultBase = 0, architecture, palette, format }: BitmapDisplayProps) {
 	const canvasRef = useRef<HTMLCanvasElement | null>(null)
-	const [baseAddress, setBaseAddress] = useStoredState(`bitmap.base.${architecture}`, formatWord(defaultBase), (value) => typeof value === 'string')
+	const [baseAddress, setBaseAddress] = useStoredState(`bitmap.base.${architecture}`, formatAddress(defaultBase), (value) => typeof value === 'string')
 	const [unitSize, setUnitSize] = useStoredState('bitmap.unit', 8, isOneOf(UNIT_SIZES))
 	const [width, setWidth] = useStoredState('bitmap.width', 256, isOneOf(DISPLAY_SIZES))
 	const [height, setHeight] = useStoredState('bitmap.height', 256, isOneOf(DISPLAY_SIZES))
@@ -41,23 +39,23 @@ function BitmapDisplay({ memory, defaultBase = 0, architecture }: BitmapDisplayP
 		canvas.height = height
 		context.fillStyle = '#000000'
 		context.fillRect(0, 0, width, height)
-		const stride = pixelBytes(memory)
+		const stride = pixelBytes(format)
 		for (let row = 0; row < rows; row += 1) {
 			for (let column = 0; column < columns; column += 1) {
-				const address = (parsedBaseAddress + ((row * columns + column) * stride)) >>> 0
-				const color = pixelColor(memory, address)
+				const address = parsedBaseAddress + ((row * columns + column) * stride)
+				const color = pixelColor(memory, address, format, palette)
 				if (color === undefined || color === 0) continue
 				context.fillStyle = `#${color.toString(16).padStart(6, '0')}`
 				context.fillRect(column * unitSize, row * unitSize, unitSize, unitSize)
 			}
 		}
-	}, [columns, height, memory, parsedBaseAddress, rows, unitSize, width])
+	}, [columns, format, height, memory, palette, parsedBaseAddress, rows, unitSize, width])
 
 	return (
 		<div className="bitmap-display">
 			<PanelGroup title="Framebuffer" flush>
 				{parsedBaseAddress === null ? (
-					<div className="bitmap-error">Enter a 32-bit decimal or hexadecimal base address.</div>
+					<div className="bitmap-error">Enter a decimal or hexadecimal base address.</div>
 				) : (
 					<canvas className="bitmap-canvas" ref={canvasRef} aria-label="Bitmap display" />
 				)}
@@ -86,9 +84,9 @@ function BitmapDisplay({ memory, defaultBase = 0, architecture }: BitmapDisplayP
 					</select>
 				</label>
 			</div>
-			<p className="bitmap-description">{pixelBytes(memory) === 1
-				? 'Each byte is a pixel whose low four bits pick one of 16 colours, in row-major order.'
-				: 'Each word is a 24-bit RGB pixel (0x00RRGGBB), in row-major order.'}</p>
+			<p className="bitmap-description">{format.kind === 'indexed8'
+				? `Each byte selects a colour from the ${palette ? 'example' : 'configured'} palette, in row-major order.`
+				: 'Each four-byte pixel holds a 24-bit RGB colour (0x00RRGGBB), in row-major order.'}</p>
 		</div>
 	)
 }

@@ -1,3 +1,4 @@
+import { RGB32_LE } from '../../core/bitmapFormats'
 /** The BSim machine as the shared panels see it: one flat memory from address 0. */
 
 import type { MachineProfile, Registers } from '../contracts'
@@ -13,6 +14,7 @@ export function betaProfile(memoryBytes: number): MachineProfile {
 	let profile = profiles.get(memoryBytes)
 	if (profile) return profile
 	profile = Object.freeze({
+		bitmap: RGB32_LE,
 		resetRegisters,
 		// Reset is supervisor mode at address 0; the editor knows the address alone.
 		resetPc: 0,

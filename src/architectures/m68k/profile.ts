@@ -1,3 +1,4 @@
+import { RGB32_BE } from '../../core/bitmapFormats'
 import type { MachineProfile, RegisterDescriptor } from '../contracts'
 import { DATA_BASE, MEMORY_BYTES, REGISTER_NAMES, TEXT_BASE } from './isa'
 
@@ -26,6 +27,7 @@ export const REGISTERS: readonly RegisterDescriptor[] = [
 	}))
 ]
 export const m68kProfile: MachineProfile = {
+	bitmap: RGB32_BE,
 	resetRegisters: {
 		...Object.fromEntries(REGISTER_NAMES.map((name, i) => [name, i === 15 ? MEMORY_BYTES - 16 : 0])),
 		PC: TEXT_BASE,

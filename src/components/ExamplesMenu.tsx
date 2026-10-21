@@ -1,5 +1,6 @@
-import type { Example } from '../architectures/contracts'
+import type { Example, PanelContribution } from '../architectures/contracts'
 import { exampleName, exampleOrder } from '../core/exampleCatalog'
+import { menuLabel, panelById } from './panels'
 import {
 	BitmapIcon,
 	BitwiseIcon,
@@ -59,21 +60,29 @@ export function exampleItems(examples: Readonly<Record<string, Example>>) {
 
 export default function ExamplesMenu({
 	examples,
-	onLoad
+	onLoad,
+	panels,
 }: {
 	examples: Readonly<Record<string, Example>>
-	onLoad: (code: string) => void
+	onLoad: (example: Example) => void
+	panels?: readonly PanelContribution[]
 }) {
 	return exampleItems(examples).map((example) => (
 		<button
 			key={example.id}
 			className="menu-item menu-item-described"
 			role="menuitem"
-			onClick={() => onLoad(example.code)}
+			onClick={() => onLoad(example)}
 		>
 			<example.icon />
 			<span className="item-name">{example.name}</span>
-			<span className="item-desc">{example.description}</span>
+			<span className="item-desc">
+				{example.description}
+				{example.tools?.length ? <span className="example-tools">Opens: {example.tools.map((id) => {
+					const panel = panelById(id, panels)
+					return panel ? menuLabel(panel) : id
+				}).join(', ')}</span> : null}
+			</span>
 		</button>
 	))
 }

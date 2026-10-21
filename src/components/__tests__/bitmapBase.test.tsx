@@ -1,3 +1,4 @@
+import { RGB32_LE } from '../../core/bitmapFormats'
 import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import type { MemoryInspector } from '../../architectures/contracts'
@@ -26,13 +27,13 @@ describe('Bitmap Display base address', () => {
 	it('is remembered per architecture, so another target starts at its own data base', () => {
 		storage.set('thrax-web.settings.bitmap.base', JSON.stringify('0x10010000'))
 		storage.set('thrax-web.settings.bitmap.base.mips', JSON.stringify('0x10010000'))
-		const html = renderToStaticMarkup(<BitmapDisplay memory={memory} defaultBase={0xC000} architecture="z80" />)
+		const html = renderToStaticMarkup(<BitmapDisplay format={RGB32_LE} memory={memory} defaultBase={0xC000} architecture="z80" />)
 		expect(baseShown(html)).toBe('0x0000C000')
 	})
 
 	it('keeps the base chosen for that architecture', () => {
 		storage.set('thrax-web.settings.bitmap.base.z80', JSON.stringify('0x00008000'))
-		const html = renderToStaticMarkup(<BitmapDisplay memory={memory} defaultBase={0xC000} architecture="z80" />)
+		const html = renderToStaticMarkup(<BitmapDisplay format={RGB32_LE} memory={memory} defaultBase={0xC000} architecture="z80" />)
 		expect(baseShown(html)).toBe('0x00008000')
 	})
 })

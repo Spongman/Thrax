@@ -1,7 +1,8 @@
+import type { BitmapFormat } from '../architectures/contracts'
 import { create } from 'zustand'
 import { HOVER_KINDS, NOTHING_HOVERED, type Hovered } from './hover'
 import { ActivationSuperseded, activateArchitecture, activeArchitecture, knownArchitectures, onArchitectureActivated, peekArchitecture } from '../architectures/registry'
-import { EMPTY_HISTORY, EMPTY_MEMORY, variantOf, type ArchitectureActivation, type ArchitectureDefinition, type ArchitectureServices, type ArchitectureVariant, type AssembledProgram, type CallFrame, type CodeRow, type DataDeclaration, type Diagnostic, type HistoryFormatter, type KeyboardDisplayState, type Machine, type MachineHistory, type MachineProfile, type MemoryInspector, type PendingInput, type RegisterValue, type Registers, type SourceFile, type SourceLocation, type SymbolTables } from '../architectures/contracts'
+import { EMPTY_HISTORY, EMPTY_MEMORY, variantOf, type ArchitectureActivation, type ArchitectureDefinition, type ArchitectureServices, type ArchitectureVariant, type AssembledProgram, type CallFrame, type CodeRow, type DataDeclaration, type Diagnostic, type Example, type HistoryFormatter, type KeyboardDisplayState, type Machine, type MachineHistory, type MachineProfile, type MemoryInspector, type PendingInput, type RegisterValue, type Registers, type SourceFile, type SourceLocation, type SymbolTables } from '../architectures/contracts'
 import type { ExecutionObserver } from '../core/observer'
 import { formatDiagnostic, hasErrors } from '../core/diagnostics'
 import { DEFAULT_SETTINGS, isRecord, SETTINGS_VALIDATORS, validSettings, type TargetSettings, type ThraxSettings } from '../core/settings'
@@ -236,6 +237,9 @@ export interface OpenFilesOptions {
 }
 
 interface THRAXStore {
+	bitmapFormat: BitmapFormat | null
+	bitmapPalette: readonly number[] | null
+	loadExample: (example: Example) => void
 	code: string
 	documents: SourceDocument[]
 	activeDocumentId: string
@@ -762,7 +766,7 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 		// The old target's diagnostics describe a build that is gone; the first
 		// activation keeps what startup reported.
 		const diagnostics = get().target ? { diagnostics: [] } : {}
-		set({ target: activation, architecture: activation.definition.id, targetSettings, ...resetExecution(targetSettings), ...debug.view(), ...contributeTools(activation.services), ...diagnostics })
+		set({ bitmapFormat: null, bitmapPalette: null, target: activation, architecture: activation.definition.id, targetSettings, ...resetExecution(targetSettings), ...debug.view(), ...contributeTools(activation.services), ...diagnostics })
 	})
 
 	// `get()` has nothing to return while the initial state is being built.
@@ -813,6 +817,12 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 		branchHistorySettings: toolSettings.branchHistory,
 		pipelineSettings: toolSettings.pipeline,
 		memoryReferenceSettings: toolSettings.memoryReference,
+
+		bitmapFormat: null, bitmapPalette: null,
+		loadExample: (example) => {
+			get().setCode(example.code)
+			set({ bitmapFormat: example.bitmap ?? null, bitmapPalette: example.bitmapPalette ?? null })
+		},
 
 		// An edit leaves the machine alone; refreshAssembly decides what it changes.
 		setCode: (newCode) => {

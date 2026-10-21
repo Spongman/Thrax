@@ -145,3 +145,8 @@
 	color: var(--text-muted);
 }
 
+.example-tools {
+	display: block;
+	margin-top: 3px;
+	color: var(--text-secondary);
+}

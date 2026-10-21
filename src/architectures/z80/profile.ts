@@ -1,3 +1,4 @@
+import { TEACHING_BITMAP } from '../../core/bitmapFormats'
 /** The Z80 machine as the shared panels see it: 64 KiB from address 0, the framebuffer and the device page. */
 
 import type { MachineProfile, Registers } from '../contracts'
@@ -17,6 +18,7 @@ const resetRegisters: Registers = Object.freeze({
 })
 
 export const z80Profile: MachineProfile = Object.freeze({
+	bitmap: TEACHING_BITMAP,
 	resetRegisters,
 	resetPc: 0,
 	memorySections: Object.freeze([
