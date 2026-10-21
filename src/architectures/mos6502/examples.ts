@@ -99,7 +99,7 @@ const VARIABLES = `ptr = $10                   ; 2 bytes: string pointer
 num = $12                   ; 2 bytes: number to print
 rem = $14                   ; remainder while printing`
 
-export const EXAMPLES: Readonly<Record<string, Example>> = {
+const COMMON_EXAMPLES: Readonly<Record<string, Example>> = {
 	input: {
 		name: 'Interactive Input',
 		description: 'Read a line from $F001 into a buffer, then print it',
@@ -879,4 +879,29 @@ mul:
 	},
 }
 
-export const CMOS_EXAMPLES = { ...EXAMPLES, cmos: cmosPrimer }
+export const EXAMPLES: Readonly<Record<string, Example>> = {
+	...COMMON_EXAMPLES,
+	undocumented: {
+		name: 'NMOS Undocumented Instructions',
+		description: 'Compound loads, stores and arithmetic produce 42; JAM stops until reset or rewind.',
+		code: `; NMOS only: these bytes have different meanings on W65C02S.
+${IO}
+${VARIABLES}
+	lda #21
+	sta num
+	lax num                 ; A = X = 21
+	sax $30                 ; store A AND X = 21
+	slo num                 ; memory = 42, A = 21 OR 42 = 63
+	dcp $30                 ; memory = 20, compare sets carry
+	isc $30                 ; memory = 21, A = 63 - 21 = 42
+	sta num
+	lda #0
+	sta num+1
+	jsr print_decimal
+	jam                     ; NMOS KIL, not a CMOS instruction
+
+${PRINT_DECIMAL}`,
+	},
+}
+
+export const CMOS_EXAMPLES = { ...COMMON_EXAMPLES, cmos: cmosPrimer }

@@ -1,6 +1,5 @@
 /**
- * NMOS 6502 CPU core: the 151 documented opcodes with their flags and cycle
- * counts, per the MOS MCS6500 programming manual.
+ * NMOS 6502 and W65C02S CPU cores, including unintended NMOS opcodes.
  *
  * - Memory is a flat 64 KiB; addresses wrap at $FFFF, the stack is page 1 at
  *   $0100 + SP and wraps within it, and zero-page indexing and pointers wrap
@@ -14,7 +13,8 @@
  *   and the double write of read-modify-write instructions are not modelled.
  * - P keeps bit 5 set. B exists only on the stack: PHP and BRK push it set,
  *   interrupts push it clear.
- * - An undocumented opcode faults and changes nothing.
+ * - Unstable NMOS immediate instructions use a deterministic $EE magic mask;
+ *   masked stores use the page-cross corruption observed in Visual6502.
  *
  * Data reads and writes in the I/O page go to `io` instead of memory;
  * instruction and pointer fetches always read memory. A read the device
@@ -29,6 +29,7 @@ import {
 	STA, STX, STY, TAX, TAY, TSX, TXA, TXS, TYA, ZP, ZPX, ZPY,
 } from './isa'
 import { AIX, BBR0, BBS0, BRA, NMOS_MODEL, PHX, PHY, PLX, PLY, RMB0, SMB0, STP, STZ, TRB, TSB, WAI, ZPI, ZPR, type CpuModel } from './isa'
+import { AHX, ALR, ANC, ARR, AXS, DCP, IMP, ISC, KIL, LAS, LAX, RLA, RRA, SAX, SHX, SHY, SLO, SRE, TAS, XAA, maskedStoreAddress } from './isa'
 
 /** Status register bits. */
 export const FLAG_C = 0x01
@@ -176,6 +177,7 @@ export class Mos6502Cpu {
 		const low = memory[(pc + 1) & 0xFFFF]
 		let cycles = this.model.cycles[opcode]
 		let address = 0
+		let base = 0
 		switch (mode) {
 			case IMM: address = (pc + 1) & 0xFFFF; break
 			case ZP: address = low; break
@@ -184,7 +186,7 @@ export class Mos6502Cpu {
 			case ABS: address = low | (memory[(pc + 2) & 0xFFFF] << 8); break
 			case ABX:
 			case ABY: {
-				const base = low | (memory[(pc + 2) & 0xFFFF] << 8)
+				base = low | (memory[(pc + 2) & 0xFFFF] << 8)
 				address = (base + (mode === ABX ? this.x : this.y)) & 0xFFFF
 				if (this.model.penalties[opcode] && (base ^ address) & 0xFF00) cycles++
 				break
@@ -204,7 +206,7 @@ export class Mos6502Cpu {
 			case ZPI: address = memory[low] | (memory[(low + 1) & 0xFF] << 8); break
 			case ZPR: address = low; break
 			case IZY: {
-				const base = memory[low] | (memory[(low + 1) & 0xFF] << 8)
+				base = memory[low] | (memory[(low + 1) & 0xFF] << 8)
 				address = (base + this.y) & 0xFFFF
 				if (this.model.penalties[opcode] && (base ^ address) & 0xFF00) cycles++
 				break
@@ -217,6 +219,48 @@ export class Mos6502Cpu {
 		let target = next
 		if (this.model.cmos && this.decimal && (this.p & FLAG_D) && (insn === ADC || insn === SBC)) cycles++
 		switch (insn) {
+			case LAX: {
+				const value = this.read(address)
+				this.a = this.x = this.nz(mode === IMM ? (this.a | 0xEE) & value : value)
+				break
+			}
+			case SAX: this.write(address, this.a & this.x); break
+			case LAS: this.a = this.x = this.sp = this.nz(this.read(address) & this.sp); break
+			case DCP: case ISC: {
+				const value = (this.read(address) + (insn === ISC ? 1 : -1)) & 255
+				this.write(address, value)
+				if (insn === DCP) this.compare(this.a, value)
+				else this.sbc(value)
+				break
+			}
+			case SLO: case RLA: case SRE: case RRA: {
+				const operation = insn === SLO ? ASL : insn === RLA ? ROL : insn === SRE ? LSR : ROR
+				const value = this.modify(operation, this.read(address))
+				this.write(address, value)
+				if (insn === RRA) this.adc(value)
+				else this.a = this.nz(insn === SLO ? this.a | value : insn === RLA ? this.a & value : this.a ^ value)
+				break
+			}
+			case ANC:
+				this.a = this.nz(this.a & this.read(address))
+				this.p = (this.p & ~FLAG_C) | (this.a >>> 7)
+				break
+			case ALR: this.a = this.modify(LSR, this.a & this.read(address)); break
+			case ARR: this.arr(this.read(address)); break
+			case AXS: {
+				const value = this.read(address), combined = this.a & this.x
+				this.compare(combined, value)
+				this.x = (combined - value) & 255
+				break
+			}
+			case XAA: this.a = this.nz((this.a | 0xEE) & this.x & this.read(address)); break
+			case AHX: case SHX: case SHY: case TAS: {
+				if (insn === TAS) this.sp = this.a & this.x
+				const value = (insn === SHX ? this.x : insn === SHY ? this.y : this.a & this.x) & ((base >>> 8) + 1)
+				this.write(maskedStoreAddress(base, address, value), value)
+				break
+			}
+			case KIL: this.stopped = true; target = pc; break
 			case STZ: this.write(address, 0); break
 			case TRB: case TSB: {
 				const value = this.read(address)
@@ -278,7 +322,9 @@ export class Mos6502Cpu {
 			case CLD: this.p &= ~FLAG_D; break
 			case SED: this.p |= FLAG_D; break
 			case CLV: this.p &= ~FLAG_V; break
-			case NOP: break
+			case NOP:
+				if (mode !== IMP) this.read(address)
+				break
 			case BCC: case BCS: case BEQ: case BNE: case BMI: case BPL: case BVC: case BVS:
 			case BRA:
 				if (this.taken(insn)) {
@@ -455,5 +501,21 @@ export class Mos6502Cpu {
 		if (difference < 0) difference -= 0x60
 		this.a = difference & 0xFF
 		if (this.model.cmos) this.nz(this.a)
+	}
+
+	/** ARR's N/Z/V precede decimal adjustment; its carry is not ROR's bit 0. */
+	private arr(value: number) {
+		const anded = this.a & value
+		let result = (anded >>> 1) | ((this.p & FLAG_C) << 7)
+		this.nz(result)
+		this.p = (this.p & ~(FLAG_C | FLAG_V)) | (((result >>> 6) ^ (result >>> 5)) & 1) * FLAG_V
+		if (this.decimal && (this.p & FLAG_D)) {
+			if ((anded & 15) + (anded & 1) > 5) result = (result & 0xF0) | ((result + 6) & 15)
+			if ((anded & 0xF0) + (anded & 0x10) > 0x50) {
+				result = (result + 0x60) & 255
+				this.p |= FLAG_C
+			}
+		} else this.p |= (result >>> 6) & 1
+		this.a = result
 	}
 }

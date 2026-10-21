@@ -13,6 +13,7 @@ import {
 	PLA, PLP, REL, ROL, ROR, RTI, RTS, SBC, STA, STX, STY, TAX, TAY, TSX, TXA, TXS, TYA, ZP, ZPX, ZPY,
 } from './isa'
 import { AIX, BBR0, BBS0, BRA, NMOS_MODEL, PHX, PHY, PLX, PLY, RMB0, SMB0, STZ, TRB, TSB, ZPI, ZPR, type CpuModel } from './isa'
+import { AHX, ALR, ANC, ARR, AXS, DCP, IMP, ISC, KIL, LAS, LAX, RLA, RRA, SAX, SHX, SHY, SLO, SRE, TAS, XAA, maskedStoreAddress } from './isa'
 
 /** Register indices of `registerNames`. */
 export const REG_A = 0
@@ -24,9 +25,9 @@ const REGISTER_NAMES = Object.freeze(['A', 'X', 'Y', 'SP', 'P'])
 
 const { ALU, BRANCH, JUMP, MEMORY, OTHER, TRAP } = InstructionCategory
 
-const LOADS = new Set([LDA, LDX, LDY, ADC, SBC, AND, ORA, EOR, CMP, CPX, CPY, BIT])
-const STORES = new Set([STA, STX, STY, STZ])
-const MODIFIES = new Set([ASL, LSR, ROL, ROR, INC, DEC, TRB, TSB, ...Array.from({ length: 16 }, (_, i) => RMB0 + i)])
+const LOADS = new Set([LDA, LDX, LDY, ADC, SBC, AND, ORA, EOR, CMP, CPX, CPY, BIT, LAX, LAS, NOP])
+const STORES = new Set([STA, STX, STY, STZ, SAX, AHX, SHX, SHY, TAS])
+const MODIFIES = new Set([ASL, LSR, ROL, ROR, INC, DEC, TRB, TSB, DCP, ISC, SLO, RLA, SRE, RRA, ...Array.from({ length: 16 }, (_, i) => RMB0 + i)])
 const BRANCHES = new Set([BCC, BCS, BEQ, BNE, BMI, BPL, BVC, BVS, BRA, ...Array.from({ length: 16 }, (_, i) => BBR0 + i)])
 
 /** The register each instruction writes, where it writes one. */
@@ -36,6 +37,8 @@ const WRITES: ReadonlyMap<number, number> = new Map([
 	[LDY, REG_Y], [TAY, REG_Y], [INY, REG_Y], [DEY, REG_Y],
 	[TXS, REG_SP], [PLP, REG_P],
 	[PLX, REG_X], [PLY, REG_Y],
+	[LAX, REG_A], [LAS, REG_A], [SLO, REG_A], [RLA, REG_A], [SRE, REG_A], [RRA, REG_A], [ISC, REG_A],
+	[ANC, REG_A], [ALR, REG_A], [ARR, REG_A], [AXS, REG_X], [XAA, REG_A], [TAS, REG_SP],
 ])
 
 /** Registers each instruction reads, index registers of its mode aside. */
@@ -47,17 +50,24 @@ const READS: ReadonlyMap<number, readonly number[]> = new Map([
 	[TSX, [REG_SP]], [PLA, [REG_SP]], [PLP, [REG_SP]], [PHP, [REG_P, REG_SP]], [JSR, [REG_SP]], [RTS, [REG_SP]], [RTI, [REG_SP]], [BRK, [REG_P, REG_SP]],
 	[ROL, [REG_P]], [ROR, [REG_P]],
 	[PHX, [REG_X, REG_SP]], [PHY, [REG_Y, REG_SP]], [PLX, [REG_SP]], [PLY, [REG_SP]], [TRB, [REG_A]], [TSB, [REG_A]],
-	...[...BRANCHES].map((insn): [number, number[]] => [insn, [REG_P]]),
+	[LAX, [REG_A]], [SAX, [REG_A, REG_X]], [LAS, [REG_SP]], [DCP, [REG_A]], [ISC, [REG_A, REG_P]],
+	[SLO, [REG_A]], [RLA, [REG_A, REG_P]], [SRE, [REG_A]], [RRA, [REG_A, REG_P]],
+	[ANC, [REG_A]], [ALR, [REG_A]], [ARR, [REG_A, REG_P]], [AXS, [REG_A, REG_X]], [XAA, [REG_A, REG_X]],
+	[AHX, [REG_A, REG_X]], [SHX, [REG_X]], [SHY, [REG_Y]], [TAS, [REG_A, REG_X]],
+	...[BCC, BCS, BEQ, BNE, BMI, BPL, BVC, BVS].map((insn): [number, number[]] => [insn, [REG_P]]),
 ])
 
 function categoryOf(insn: number): number {
 	if (BRANCHES.has(insn)) return BRANCH
 	if (insn === JMP || insn === JSR || insn === RTS || insn === RTI) return JUMP
-	if (insn === BRK) return TRAP
-	if (insn === LDA || insn === LDX || insn === LDY || STORES.has(insn) || insn === PHA || insn === PHP || insn === PLA || insn === PLP) return MEMORY
+	if (insn === BRK || insn === KIL) return TRAP
+	if (insn === LDA || insn === LDX || insn === LDY || insn === LAX || insn === LAS || STORES.has(insn) || insn === PHA || insn === PHP || insn === PLA || insn === PLP) return MEMORY
 	if (insn === NOP) return OTHER
 	return ALU
 }
+
+const FLAG_WRITES = new Set(['ADC', 'SBC', 'AND', 'ORA', 'EOR', 'CMP', 'CPX', 'CPY', 'BIT', 'ASL', 'LSR', 'ROL', 'ROR', 'INC', 'DEC', 'INX', 'INY', 'DEX', 'DEY', 'LDA', 'LDX', 'LDY', 'PLA', 'PLX', 'PLY', 'TAX', 'TAY', 'TSX', 'TXA', 'TYA', 'CLC', 'SEC', 'CLD', 'SED', 'CLI', 'SEI', 'CLV', 'TRB', 'TSB', 'LAX', 'LAS', 'DCP', 'ISC', 'SLO', 'RLA', 'SRE', 'RRA', 'ANC', 'ALR', 'ARR', 'AXS', 'XAA', 'BRK'])
+const STACK = new Set(['PHA', 'PHP', 'PHX', 'PHY', 'PLA', 'PLP', 'PLX', 'PLY', 'JSR', 'RTS', 'RTI', 'BRK'])
 
 function infoOf(opcode: number, model: CpuModel = NMOS_MODEL): InstructionInfo {
 	const insn = model.instructions[opcode]
@@ -67,13 +77,25 @@ function infoOf(opcode: number, model: CpuModel = NMOS_MODEL): InstructionInfo {
 	if (mode === ZPX || mode === ABX || mode === IZX || mode === AIX) reads.add(REG_X)
 	if (mode === ZPY || mode === ABY || mode === IZY) reads.add(REG_Y)
 	if (mode === ACC) reads.add(REG_A)
+	const mnemonic = ALL_MNEMONICS[insn]
+	const writes = new Set(mode === ACC ? [REG_A] : WRITES.has(insn) ? [WRITES.get(insn)!] : [])
+	if (insn === LAX || insn === LAS) writes.add(REG_X)
+	if (insn === LAS) writes.add(REG_SP)
+	if (STACK.has(mnemonic)) { reads.add(REG_SP); writes.add(REG_SP) }
+	if (FLAG_WRITES.has(mnemonic)) { reads.add(REG_P); writes.add(REG_P) }
+	if (insn === PLP || insn === RTI) writes.add(REG_P)
+	const isLoad = ['PLA', 'PLP', 'PLX', 'PLY', 'RTI'].includes(mnemonic) || mode !== IMM && mode !== IMP && (LOADS.has(insn) || (MODIFIES.has(insn) && mode !== ACC) || mode === ZPR)
+	// Flags computed from loaded data have the same memory latency as the data.
+	// Stack-address updates are ALU results, except LAS which loads SP itself.
+	const loaded = isLoad ? [...writes].filter(r => r !== REG_SP || insn === LAS) : []
 	return {
 		mnemonic: ALL_MNEMONICS[insn],
 		category: categoryOf(insn),
 		encoding: mode,
 		reads: [...reads],
-		writes: [mode === ACC ? REG_A : WRITES.get(insn) ?? -1].filter(r => r >= 0),
-		isLoad: mode !== IMM && (LOADS.has(insn) || (MODIFIES.has(insn) && mode !== ACC) || mode === ZPR),
+		writes: [...writes],
+		loadWrites: loaded,
+		isLoad,
 		isBranch: BRANCHES.has(insn),
 		isJump: insn === JMP || insn === JSR || insn === RTS || insn === RTI,
 	}
@@ -158,7 +180,12 @@ export function classifyAt(cpu: Mos6502Cpu, out: Mos6502Access): Mos6502Access {
 		case REL: out.target = (pc + MODE_BYTES[REL] + ((low << 24) >> 24)) & 0xFFFF; break
 		case IND: case IMM: case ACC: break
 	}
-	const data = mode !== IMM && mode !== ACC && mode !== REL && mode !== IND && insn !== JMP && insn !== JSR
+	const data = mode !== IMM && mode !== IMP && mode !== ACC && mode !== REL && mode !== IND && insn !== JMP && insn !== JSR
+	if (insn === AHX || insn === SHX || insn === SHY || insn === TAS) {
+		const base = mode === IZY ? memory[low] | (memory[(low + 1) & 255] << 8) : word
+		const value = (insn === SHX ? x : insn === SHY ? y : cpu.a & x) & ((base >>> 8) + 1)
+		out.address = maskedStoreAddress(base, out.address, value)
+	}
 	if (data && (LOADS.has(insn) || MODIFIES.has(insn) || mode === ZPR)) out.flags |= ACCESS_READ
 	if (data && (STORES.has(insn) || MODIFIES.has(insn))) out.flags |= ACCESS_WRITE
 	if (BRANCHES.has(insn)) {

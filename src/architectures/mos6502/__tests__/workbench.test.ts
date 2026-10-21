@@ -25,6 +25,7 @@ const lineOf = (code: string, text: string) => code.split('\n').findIndex((line)
 
 /** Examples that run to a halt without input. */
 const OUTPUT: Record<string, string> = {
+	undocumented: '42',
 	hello: 'Hello, THRAX!\n',
 	sum: '8\n',
 	factorial: '120',
@@ -222,11 +223,14 @@ describe('6502 in the workbench', () => {
 		expect(state().halted).toBe(true)
 	})
 
-	it('reports an illegal opcode in the console', async () => {
+	it('jams on an NMOS KIL opcode and can rewind it', async () => {
 		state().setCode('\tlda #1\n\t.byte $02\n')
 		await state().run()
 		expect(state().halted).toBe(true)
-		expect(state().console).toContain('Illegal instruction $02 at $0602')
+		expect(state().console).toBe('')
+		expect(state().pc).toBe(0x0602)
+		state().stepBack()
+		expect(state().halted).toBe(false)
 	})
 
 	it('hands back to MIPS, whose examples still run', async () => {

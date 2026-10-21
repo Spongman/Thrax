@@ -5,6 +5,7 @@ import { findMos6502Definition, mos6502SymbolAt } from '../editor/definition'
 import { MOS6502_DIRECTIVES, mos6502Monarch } from '../editor/grammar'
 import definition from '../index'
 import { DEFAULT_MOS6502_SETTINGS } from '../settings'
+import { NMOS_MODEL } from '../isa'
 
 const memory: MemoryInspector = {
 	wordBytes: 1,
@@ -31,8 +32,9 @@ describe('6502 data tips', () => {
 
 	it('describes mnemonics with their modes', () => {
 		const described = tip('\tldx #1', 'ldx')
-		expect(described?.contents[0]).toBe('**LDX**: Load X (NZ)')
-		expect(described?.contents[1]).toBe('Modes: immediate, zero page, zero page,Y, absolute, absolute,Y')
+		expect(described?.contents[0]).toBe('**LDX**')
+		expect(described?.contents[1]).toBe('Load X (NZ)')
+		expect(described?.contents[3]).toBe('Modes: immediate, zero page, zero page,Y, absolute, absolute,Y')
 	})
 
 	it('says nothing in a comment', () => {
@@ -41,7 +43,7 @@ describe('6502 data tips', () => {
 
 	it('answers for the gutter through the services', () => {
 		const services = definition.createServices()
-		expect(services.describeToken?.('LDA #$05', 0, state)?.contents[0]).toContain('Load A')
+		expect(services.describeToken?.('LDA #$05', 0, state)?.contents[1]).toContain('Load A')
 		services.dispose()
 	})
 })
@@ -68,9 +70,10 @@ describe('6502 go to definition', () => {
 })
 
 describe('6502 editor language', () => {
-	it('knows every directive the assembler takes and all 56 mnemonics in both cases', () => {
+	it('knows every directive, NMOS mnemonic and supported alias in both cases', () => {
 		expect(MOS6502_DIRECTIVES).toEqual(expect.arrayContaining(['org', 'byte', 'word', 'res', 'ascii', 'asciiz', 'include', 'macro', 'endmacro', 'equ']))
-		expect((mos6502Monarch.mnemonics as string[]).length).toBe(112)
+		expect((mos6502Monarch.mnemonics as string[]).length).toBe(NMOS_MODEL.mnemonics.length * 2)
+		expect(mos6502Monarch.mnemonics).toEqual(expect.arrayContaining(['SLO', 'slo', 'JAM', 'jam']))
 	})
 
 	it('offers its settings with a default', () => {

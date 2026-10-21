@@ -25,6 +25,7 @@ function run(code: string, input = '', queued = '') {
 }
 
 const OUTPUT: Record<string, string> = {
+	undocumented: '42',
 	input: 'hello, 6502\n',
 	hello: 'Hello, THRAX!\n',
 	sum: '8\n',

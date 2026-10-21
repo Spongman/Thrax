@@ -4,13 +4,14 @@ import { AIX, NMOS_MODEL, ZPI, ZPR, type CpuModel } from './isa'
 export const hex2 = (value: number) => `$${(value & 0xFF).toString(16).toUpperCase().padStart(2, '0')}`
 export const hex4 = (value: number) => `$${(value & 0xFFFF).toString(16).toUpperCase().padStart(4, '0')}`
 
-/** Bytes an instruction starting with `opcode` takes; 1 for an undocumented one. */
+/** Instruction length under the selected CPU's decode table. */
 export const instructionLength = (opcode: number, model: CpuModel = NMOS_MODEL) => model.instructions[opcode] < 0 ? 1 : MODE_BYTES[model.modes[opcode]]
 
 /**
  * The instruction `bytes` spell at `address` in ca65 syntax, e.g. `LDA ($10),Y`.
  * Branch targets are absolute; `symbolAt` names jump and branch targets where
- * it can. An undocumented opcode reads as the `.byte` that would assemble it.
+ * it can. NMOS unintended instructions use their canonical mnemonics; the
+ * W65C02S table decodes the same bytes as its CMOS replacements.
  */
 export function disassemble(bytes: readonly number[], address = 0, symbolAt?: (address: number) => string | undefined, model: CpuModel = NMOS_MODEL): string {
 	const opcode = bytes[0] & 0xFF

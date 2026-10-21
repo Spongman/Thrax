@@ -1,3 +1,6 @@
+import { stripAssemblyComment } from '../../../core/assembly/text'
+import { labelAt } from '../../../core/inspection'
+import { registerTokenHover } from '../../../services/assemblyLanguage'
 /**
  * Data tips for 6502 sources and disassembly: what a register, number,
  * symbol or mnemonic under the pointer is worth as the program stands.
@@ -6,27 +9,12 @@
 import type * as Monaco from 'monaco-editor'
 import type { DebugInspection, TokenDescription } from '../../contracts'
 import { hex2, hex4 } from '../disassemble'
-import { INSN_BY_NAME, INSN_OPCODE, MODE_NAMES, NMOS_MODEL, type CpuModel } from '../isa'
+import { NMOS_MODEL, type CpuModel } from '../isa'
+import { mos6502InstructionHelp } from '../instructionHelp'
 import { MOS6502_LANGUAGE_ID } from './grammar'
 
 const TOKEN = /\$[0-9a-f]+|%[01]+|0x[0-9a-f]+|\d+|[a-z_.@][\w.@]*/gi
 
-/** What each instruction does, and the flags it sets. */
-const SUMMARIES: Readonly<Record<string, string>> = {
-	ADC: 'Add memory and carry to A (NVZC)', AND: 'AND memory into A (NZ)', ASL: 'Shift left, bit 7 into C (NZC)',
-	BCC: 'Branch if C is clear', BCS: 'Branch if C is set', BEQ: 'Branch if Z is set', BIT: 'Test A AND memory; N and V from memory (NVZ)',
-	BMI: 'Branch if N is set', BNE: 'Branch if Z is clear', BPL: 'Branch if N is clear', BRK: 'Software interrupt through $FFFE (I)',
-	BVC: 'Branch if V is clear', BVS: 'Branch if V is set', CLC: 'Clear carry', CLD: 'Clear decimal mode', CLI: 'Enable IRQ',
-	CLV: 'Clear overflow', CMP: 'Compare A with memory (NZC)', CPX: 'Compare X with memory (NZC)', CPY: 'Compare Y with memory (NZC)',
-	DEC: 'Decrement memory (NZ)', DEX: 'Decrement X (NZ)', DEY: 'Decrement Y (NZ)', EOR: 'Exclusive-OR memory into A (NZ)',
-	INC: 'Increment memory (NZ)', INX: 'Increment X (NZ)', INY: 'Increment Y (NZ)', JMP: 'Jump', JSR: 'Push the return address less one and jump',
-	LDA: 'Load A (NZ)', LDX: 'Load X (NZ)', LDY: 'Load Y (NZ)', LSR: 'Shift right, bit 0 into C (NZC)', NOP: 'No operation',
-	ORA: 'OR memory into A (NZ)', PHA: 'Push A', PHP: 'Push P, with B set', PLA: 'Pull A (NZ)', PLP: 'Pull P',
-	ROL: 'Rotate left through C (NZC)', ROR: 'Rotate right through C (NZC)', RTI: 'Return from interrupt: pull P, then PC',
-	RTS: 'Return from subroutine: pull PC, plus one', SBC: 'Subtract memory and borrow from A (NVZC)', SEC: 'Set carry',
-	SED: 'Set decimal mode', SEI: 'Disable IRQ', STA: 'Store A', STX: 'Store X', STY: 'Store Y', TAX: 'Copy A to X (NZ)',
-	TAY: 'Copy A to Y (NZ)', TSX: 'Copy SP to X (NZ)', TXA: 'Copy X to A (NZ)', TXS: 'Copy X to SP', TYA: 'Copy Y to A (NZ)',
-}
 
 const REGISTERS: Readonly<Record<string, string>> = { a: 'A', x: 'X', y: 'Y', sp: 'SP', pc: 'PC', p: 'P' }
 
@@ -45,10 +33,6 @@ function parseNumber(text: string): number | null {
 	return /^\d+$/.test(text) ? Number(text) : null
 }
 
-function labelAt(labels: ReadonlyMap<string, number>, address: number): string | undefined {
-	for (const [name, at] of labels) if (at === address) return name
-	return undefined
-}
 
 function memoryLine(state: DebugInspection, address: number): string[] {
 	const byte = state.memory.byte(address)
@@ -57,7 +41,7 @@ function memoryLine(state: DebugInspection, address: number): string[] {
 
 /** What the token at `offset` of `line` is worth, or null where nothing is. */
 export function describeMos6502Token(line: string, offset: number, state: DebugInspection, sources: Mos6502TipSources = {}): TokenDescription | null {
-	const comment = line.indexOf(';')
+	const comment = stripAssemblyComment(line, [';']).length
 	if (comment >= 0 && offset >= comment) return null
 	for (const match of line.matchAll(TOKEN)) {
 		const start = match.index
@@ -78,12 +62,8 @@ export function describeMos6502Token(line: string, offset: number, state: DebugI
 			const value = Number(state.registers[register] ?? 0)
 			return { ...span, register, contents: [`**${register}**\n\n\`${formatValue(value)}\``] }
 		}
-		const insn = INSN_BY_NAME.get(text.toUpperCase())
-		const model = sources.model ?? NMOS_MODEL
-		if (insn !== undefined && model.opcodes[insn].some(opcode => opcode >= 0)) {
-			const modes = MODE_NAMES.filter((_, mode) => model.opcodes[insn][mode] >= 0)
-			return { ...span, contents: [`**${text.toUpperCase()}**: ${SUMMARIES[text.toUpperCase()] ?? 'W65C02S instruction'}`, `Modes: ${modes.join(', ')}`] }
-		}
+		const help = mos6502InstructionHelp(text, sources.model ?? NMOS_MODEL)
+		if (help) return { ...span, ...help }
 		const address = state.labels.get(text)
 		if (address !== undefined) {
 			return { ...span, address, contents: [`**Label ${text}**\n\n\`${hex4(address)}\``, ...memoryLine(state, address)] }
@@ -103,19 +83,13 @@ export interface Mos6502HoverSources {
 
 /** Live data tips in 6502 sources. */
 export function registerMos6502DataTips(monaco: typeof Monaco, sources: Mos6502HoverSources, language = MOS6502_LANGUAGE_ID, cpuModel: CpuModel = NMOS_MODEL): Monaco.IDisposable {
-	return monaco.languages.registerHoverProvider(language, {
-		provideHover(model, position) {
-			const state = sources.inspection?.()
-			if (!state) return null
-			const described = describeMos6502Token(model.getLineContent(position.lineNumber), position.column - 1, state, {
-				model: cpuModel,
-				value: (name) => sources.values?.()?.get(name),
-			})
-			if (!described) return null
-			return {
-				range: new monaco.Range(position.lineNumber, described.start + 1, position.lineNumber, described.start + described.length + 1),
-				contents: described.contents.map((value) => ({ value })),
-			}
-		},
+	return registerTokenHover(monaco, language, (line, offset) => {
+		const state = sources.inspection?.()
+		if (!state) return null
+		const described = describeMos6502Token(line, offset, state, {
+			model: cpuModel,
+			value: (name) => sources.values?.()?.get(name),
+		})
+		return described
 	})
 }

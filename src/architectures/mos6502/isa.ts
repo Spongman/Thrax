@@ -1,7 +1,6 @@
 /**
- * The 151 documented NMOS 6502 opcodes as tables indexed by opcode byte, from
- * the MOS MCS6500 programming manual (appendix A) and its cycle tables.
- * Undocumented opcodes are absent: OPCODE_INSN holds -1 for them.
+ * Model-specific 6502 tables: MOS documented instructions, NMOS unintended
+ * instructions, and W65C02S replacements. The two models never share additions.
  */
 
 /** Addressing modes, in the order MODE_BYTES and MODE_NAMES index. */
@@ -43,9 +42,10 @@ export const ALL_MNEMONICS: readonly string[] = Object.freeze([
 	...Array.from({ length: 8 }, (_, bit) => `SMB${bit}`),
 	...Array.from({ length: 8 }, (_, bit) => `BBR${bit}`),
 	...Array.from({ length: 8 }, (_, bit) => `BBS${bit}`),
+	'LAX', 'SAX', 'DCP', 'ISC', 'SLO', 'RLA', 'SRE', 'RRA', 'ANC', 'ALR', 'ARR', 'AXS', 'XAA', 'LAS', 'AHX', 'SHX', 'SHY', 'TAS', 'KIL',
 ])
 
-export const MNEMONICS: readonly string[] = Object.freeze(ALL_MNEMONICS.slice(0, 56))
+export const MNEMONICS: readonly string[] = Object.freeze([...ALL_MNEMONICS.slice(0, 56), ...ALL_MNEMONICS.slice(98)])
 
 // Instruction ids, MNEMONICS' indices.
 export const ADC = 0, AND = 1, ASL = 2, BCC = 3, BCS = 4, BEQ = 5, BIT = 6, BMI = 7, BNE = 8, BPL = 9, BRK = 10, BVC = 11, BVS = 12, CLC = 13
@@ -54,6 +54,8 @@ export const JSR = 28, LDA = 29, LDX = 30, LDY = 31, LSR = 32, NOP = 33, ORA = 3
 export const RTS = 42, SBC = 43, SEC = 44, SED = 45, SEI = 46, STA = 47, STX = 48, STY = 49, TAX = 50, TAY = 51, TSX = 52, TXA = 53, TXS = 54, TYA = 55
 export const BRA = 56, STZ = 57, TRB = 58, TSB = 59, PHX = 60, PLX = 61, PHY = 62, PLY = 63, WAI = 64, STP = 65
 export const RMB0 = 66, SMB0 = 74, BBR0 = 82, BBS0 = 90
+export const LAX = 98, SAX = 99, DCP = 100, ISC = 101, SLO = 102, RLA = 103, SRE = 104, RRA = 105, ANC = 106, ALR = 107
+export const ARR = 108, AXS = 109, XAA = 110, LAS = 111, AHX = 112, SHX = 113, SHY = 114, TAS = 115, KIL = 116
 
 /**
  * `opcode:mode:cycles` per mnemonic; `+` adds a cycle when indexing crosses a
@@ -121,7 +123,7 @@ TYA 98:IMP:2
 
 const MODE_IDS: Readonly<Record<string, number>> = { IMP, ACC, IMM, ZP, ZPX, ZPY, ABS, ABX, ABY, IND, IZX, IZY, REL }
 
-/** Instruction id by opcode, -1 where the opcode is undocumented. */
+/** NMOS instruction id by opcode; undocumented entries are installed below. */
 export const OPCODE_INSN = new Int8Array(256).fill(-1)
 /** Addressing mode by opcode. */
 export const OPCODE_MODE = new Uint8Array(256)
@@ -134,7 +136,7 @@ export const INSN_OPCODE: readonly Int16Array[] = ALL_MNEMONICS.map(() => new In
 
 for (const line of TABLE.trim().split('\n')) {
 	const [mnemonic, ...forms] = line.split(' ')
-	const insn = MNEMONICS.indexOf(mnemonic)
+	const insn = ALL_MNEMONICS.indexOf(mnemonic)
 	for (const form of forms) {
 		const [hex, mode, cycles] = form.split(':')
 		const opcode = Number.parseInt(hex, 16)
@@ -147,7 +149,14 @@ for (const line of TABLE.trim().split('\n')) {
 }
 
 /** Mnemonic id by upper-case name. */
-export const INSN_BY_NAME: ReadonlyMap<string, number> = new Map(ALL_MNEMONICS.map((name, index) => [name, index]))
+export const NMOS_ALIASES: Readonly<Record<string, number>> = Object.freeze({
+	ASO: SLO, LSE: SRE, DCM: DCP, ISB: ISC, INS: ISC, AAC: ANC, ASR: ALR, SBX: AXS,
+	ANE: XAA, LXA: LAX, OAL: LAX, AAX: SAX, SHA: AHX, AXA: AHX, SXA: SHX, SYA: SHY,
+	LAR: LAS, LAE: LAS, SHS: TAS, JAM: KIL, HLT: KIL,
+})
+export const INSN_BY_NAME: ReadonlyMap<string, number> = new Map([
+	...ALL_MNEMONICS.map((name, index): [string, number] => [name, index]), ...Object.entries(NMOS_ALIASES),
+])
 
 /** Branches, all relative. */
 export const isBranch = (insn: number) => INSN_OPCODE[insn][REL] >= 0
@@ -169,7 +178,7 @@ export interface CpuModel {
 export const NMOS_MODEL: CpuModel = {
 	id: 'nmos6502', cmos: false, instructions: OPCODE_INSN, modes: OPCODE_MODE,
 	cycles: OPCODE_CYCLES, penalties: OPCODE_PAGE_PENALTY, opcodes: INSN_OPCODE,
-	mnemonics: MNEMONICS,
+	mnemonics: Object.freeze([...MNEMONICS, ...Object.keys(NMOS_ALIASES)]),
 }
 const instructions = OPCODE_INSN.slice()
 const modes = OPCODE_MODE.slice()
@@ -211,5 +220,50 @@ for (let opcode = 0; opcode < 256; opcode++) if (instructions[opcode] < 0) {
 	else if ([0x5C, 0xDC, 0xFC].includes(opcode)) { mode = ABS; clocks = opcode === 0x5C ? 8 : 4 }
 	add(NOP, mode, opcode, clocks, false, false)
 }
-export const W65C02_MODEL: CpuModel = { id: 'w65c02', cmos: true, instructions, modes, cycles, penalties, opcodes, mnemonics: ALL_MNEMONICS }
+export const W65C02_MODEL: CpuModel = { id: 'w65c02', cmos: true, instructions, modes, cycles, penalties, opcodes, mnemonics: ALL_MNEMONICS.slice(0, 98) }
+
+// Add NMOS-only forms AFTER cloning the documented tables for CMOS. Encodings
+// such as $07 (SLO/RMB0), $CB (AXS/WAI), $DB (DCP/STP) deliberately conflict.
+// Sources: Visual6502/Steil's transistor-level results and groepaz's test report.
+const UNDOCUMENTED = `
+SLO 03:IZX:8 07:ZP:5 0F:ABS:6 13:IZY:8 17:ZPX:6 1B:ABY:7 1F:ABX:7
+RLA 23:IZX:8 27:ZP:5 2F:ABS:6 33:IZY:8 37:ZPX:6 3B:ABY:7 3F:ABX:7
+SRE 43:IZX:8 47:ZP:5 4F:ABS:6 53:IZY:8 57:ZPX:6 5B:ABY:7 5F:ABX:7
+RRA 63:IZX:8 67:ZP:5 6F:ABS:6 73:IZY:8 77:ZPX:6 7B:ABY:7 7F:ABX:7
+SAX 83:IZX:6 87:ZP:3 8F:ABS:4 97:ZPY:4
+LAX A3:IZX:6 A7:ZP:3 AB:IMM:2 AF:ABS:4 B3:IZY:5+ B7:ZPY:4 BF:ABY:4+
+DCP C3:IZX:8 C7:ZP:5 CF:ABS:6 D3:IZY:8 D7:ZPX:6 DB:ABY:7 DF:ABX:7
+ISC E3:IZX:8 E7:ZP:5 EF:ABS:6 F3:IZY:8 F7:ZPX:6 FB:ABY:7 FF:ABX:7
+ANC 0B:IMM:2 2B:IMM:2
+ALR 4B:IMM:2
+ARR 6B:IMM:2
+AXS CB:IMM:2
+XAA 8B:IMM:2
+LAS BB:ABY:4+
+AHX 93:IZY:6 9F:ABY:5
+SHX 9E:ABY:5
+SHY 9C:ABX:5
+TAS 9B:ABY:5
+SBC EB:IMM:2
+NOP 1A:IMP:2 3A:IMP:2 5A:IMP:2 7A:IMP:2 DA:IMP:2 FA:IMP:2 80:IMM:2 82:IMM:2 89:IMM:2 C2:IMM:2 E2:IMM:2 04:ZP:3 44:ZP:3 64:ZP:3 14:ZPX:4 34:ZPX:4 54:ZPX:4 74:ZPX:4 D4:ZPX:4 F4:ZPX:4 0C:ABS:4 1C:ABX:4+ 3C:ABX:4+ 5C:ABX:4+ 7C:ABX:4+ DC:ABX:4+ FC:ABX:4+
+KIL 02:IMP:2 12:IMP:2 22:IMP:2 32:IMP:2 42:IMP:2 52:IMP:2 62:IMP:2 72:IMP:2 92:IMP:2 B2:IMP:2 D2:IMP:2 F2:IMP:2
+`
+for (const line of UNDOCUMENTED.trim().split('\n')) {
+	const [mnemonic, ...forms] = line.split(' ')
+	const insn = ALL_MNEMONICS.indexOf(mnemonic)
+	for (const form of forms) {
+		const [hex, name, clocks] = form.split(':')
+		const opcode = Number.parseInt(hex, 16), mode = MODE_IDS[name]
+		OPCODE_INSN[opcode] = insn
+		OPCODE_MODE[opcode] = mode
+		OPCODE_CYCLES[opcode] = Number.parseInt(clocks, 10)
+		OPCODE_PAGE_PENALTY[opcode] = Number(clocks.endsWith('+'))
+		// Keep documented NOP/SBC, and the first encoding of duplicate forms.
+		if (INSN_OPCODE[insn][mode] < 0) INSN_OPCODE[insn][mode] = opcode
+	}
+}
 export const modelFor = (id?: string): CpuModel => id === 'w65c02' ? W65C02_MODEL : NMOS_MODEL
+
+/** NMOS masked stores replace the address high byte on an indexing page cross. */
+export const maskedStoreAddress = (base: number, address: number, value: number) =>
+	(base ^ address) & 0xFF00 ? (value << 8) | (address & 255) : address

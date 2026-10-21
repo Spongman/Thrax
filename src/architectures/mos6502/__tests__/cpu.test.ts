@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { assembleMos6502 } from '../assembler'
-import { FLAG_C, FLAG_D, FLAG_I, FLAG_N, FLAG_U, FLAG_V, FLAG_Z, faultMessage, Mos6502Cpu, STEP_FAULT, STEP_HALT, STEP_OK } from '../cpu'
+import { FLAG_C, FLAG_D, FLAG_I, FLAG_N, FLAG_U, FLAG_V, FLAG_Z, Mos6502Cpu, STEP_HALT, STEP_OK } from '../cpu'
 import { Mos6502Machine } from '../machine'
 
 /** Assembles `code` and runs it until BRK halts it, as a program with no IRQ vector does. */
@@ -204,14 +204,19 @@ describe('6502 BRK, RTI and faults', () => {
 		expect(cpu.pc).toBe(0x0601)
 	})
 
-	it('faults on an undocumented opcode without changing anything', () => {
+	it('jams on KIL until reset without advancing PC', () => {
 		const cpu = new Mos6502Cpu()
 		cpu.memory[0x0200] = 0x02
 		cpu.pc = 0x0200
 		cpu.a = 5
-		expect(cpu.step()).toBe(STEP_FAULT)
+		expect(cpu.step()).toBe(STEP_OK)
 		expect([cpu.pc, cpu.a]).toEqual([0x0200, 5])
-		expect(faultMessage(cpu.fault, cpu.faultAddress, cpu.opcode)).toBe('Illegal instruction $02 at $0200')
+		expect(cpu.stopped).toBe(true)
+		expect(cpu.step()).toBe(STEP_HALT)
+		cpu.interrupt(0xFFFA)
+		expect(cpu.pc).toBe(0x0200)
+		cpu.reset()
+		expect(cpu.stopped).toBe(false)
 	})
 
 	it('resets with I set, SP $FD and PC from the vector', () => {

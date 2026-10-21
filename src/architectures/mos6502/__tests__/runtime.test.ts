@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { InstructionCategory } from '../../contracts'
 import definition from '../index'
-import { REG_A, REG_X } from '../instructions'
+import { REG_A, REG_P, REG_X } from '../instructions'
 import type { Mos6502Runtime } from '../runtime'
 import { DEFAULT_MOS6502_SETTINGS } from '../settings'
 
@@ -33,11 +33,11 @@ describe('6502 runtime', () => {
 	it('describes opcodes to the tools', () => {
 		const { instructions } = machineFor('nop').toolConfig()
 		const lda = instructions!.describe(0xBD)
-		expect(lda).toMatchObject({ mnemonic: 'LDA', category: InstructionCategory.MEMORY, encoding: 7, writes: [REG_A], isLoad: true })
-		expect(lda.reads).toEqual([REG_X])
+		expect(lda).toMatchObject({ mnemonic: 'LDA', category: InstructionCategory.MEMORY, encoding: 7, writes: [REG_A, REG_P], isLoad: true })
+		expect(lda.reads).toEqual([REG_X, REG_P])
 		expect(instructions!.encodings[lda.encoding]).toBe('absolute,X')
 		expect(instructions!.describe(0xD0)).toMatchObject({ mnemonic: 'BNE', category: InstructionCategory.BRANCH, isBranch: true })
-		expect(instructions!.describe(0x02).mnemonic).toBe('ILLEGAL')
+		expect(instructions!.describe(0x02).mnemonic).toBe('KIL')
 	})
 
 	it('edits registers and flags, refusing B', () => {

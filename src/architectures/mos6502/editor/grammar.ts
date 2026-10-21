@@ -5,7 +5,7 @@
  */
 
 import type * as Monaco from 'monaco-editor'
-import { MNEMONICS } from '../isa'
+import { NMOS_MODEL } from '../isa'
 
 export const MOS6502_LANGUAGE_ID = 'ca65'
 
@@ -17,7 +17,7 @@ export const MOS6502_DIRECTIVES: readonly string[] = Object.freeze([
 /** What a symbol may be spelled with. */
 export const MOS6502_NAME = /[A-Za-z_.@][\w.@]*/
 
-const mnemonics = MNEMONICS.flatMap((name) => [name, name.toLowerCase()])
+const mnemonics = NMOS_MODEL.mnemonics.flatMap((name) => [name, name.toLowerCase()])
 
 export const mos6502Configuration: Monaco.languages.LanguageConfiguration = {
 	comments: { lineComment: ';' },

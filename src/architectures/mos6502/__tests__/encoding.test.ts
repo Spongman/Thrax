@@ -58,9 +58,9 @@ describe('6502 encodings', () => {
 	it('lists every documented opcode once', () => {
 		const opcodes = LISTING.map(([, encoded]) => encoded[0])
 		expect(new Set(opcodes).size).toBe(151)
-		expect(OPCODE_INSN.filter((insn) => insn >= 0).length).toBe(151)
+		expect(OPCODE_INSN.filter((insn) => insn >= 0).length).toBe(256)
 		for (const opcode of opcodes) expect(OPCODE_INSN[opcode]).toBeGreaterThanOrEqual(0)
-		expect(MNEMONICS.length).toBe(56)
+		expect(MNEMONICS.length).toBe(75)
 	})
 
 	it.each(LISTING)('assembles %s', (source, expected) => {

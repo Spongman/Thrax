@@ -9,7 +9,6 @@ import {
 	FLAG_V,
 	FLAG_Z,
 	Mos6502Cpu,
-	STEP_FAULT,
 	STEP_HALT,
 	STEP_INTERRUPT,
 	STEP_OK,
@@ -50,7 +49,7 @@ describe('WDC W65C02S model', () => {
 			0, 0xcb, 0xdb
 		])
 	})
-	it('rejects CMOS forms under NMOS while preserving its illegal-opcode faults', () => {
+	it('rejects CMOS assembly under NMOS while decoding the bytes as NMOS instructions', () => {
 		for (const code of [
 			'stz $10',
 			'bra *',
@@ -64,7 +63,8 @@ describe('WDC W65C02S model', () => {
 			expect(assembleMos6502({ name: 'n.s', code }).diagnostics.length).toBeGreaterThan(0)
 		const cpu = new Mos6502Cpu()
 		cpu.memory[0] = 0x64
-		expect(cpu.step()).toBe(STEP_FAULT)
+		expect(cpu.step()).toBe(STEP_OK) // $64 is a zero-page NOP on NMOS.
+		expect(cpu.pc).toBe(2)
 		expect(modelFor()).toBe(NMOS_MODEL)
 	})
 	it('runs new memory/stack/accumulator operations and reverses them', () => {
@@ -207,7 +207,7 @@ describe('WDC W65C02S model', () => {
 		expect(disassemble([0xb2, 0x10], 0, undefined, W65C02_MODEL)).toBe('LDA ($10)')
 		expect(disassemble([0x7c, 0x34, 0x12], 0, undefined, W65C02_MODEL)).toBe('JMP ($1234,X)')
 		expect(disassemble([0x2f, 0x10, 0xfd], 0x600, undefined, W65C02_MODEL)).toBe('BBR2 $10,$0600')
-		expect(disassemble([0xb2, 0x10])).toBe('.byte $B2')
+		expect(disassemble([0xb2, 0x10])).toBe('KIL')
 		expect(instructionLength(0x2f, W65C02_MODEL)).toBe(3)
 		const result = assemble('bbr0 $10, done\ndone: stp')
 		const program = new Mos6502Assembly(
