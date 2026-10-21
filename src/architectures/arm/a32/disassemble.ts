@@ -126,6 +126,8 @@ export function disassembleA32(word: number, address: number, arch = ARCH_V2A): 
 		case FORMAT_SWI:
 			return `swi${cond} 0x${(word & 0xFFFFFF).toString(16)}`
 		case FORMAT_COPROCESSOR:
+			if ((word & 0x0F000010) === 0x0E000010)
+				return `${word & 0x00100000 ? 'mrc' : 'mcr'}${cond} p${(word >>> 8) & 15}, ${(word >>> 21) & 7}, ${register(word >>> 12)}, c${(word >>> 16) & 15}, c${word & 15}, ${(word >>> 5) & 7}`
 			return `.word 0x${(word >>> 0).toString(16).padStart(8, '0')}  ; coprocessor ${(word >>> 8) & 15}`
 		default:
 			return `.word 0x${(word >>> 0).toString(16).padStart(8, '0')}  ; undefined`

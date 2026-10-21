@@ -7,12 +7,10 @@
  * the sink sees every change as an old word or an old depth, enough to undo.
  */
 
+import { FrameStack, type FrameStackSink } from '../../core/frameStack'
 import { PC_MASK } from './cpu'
 
-export interface Arm26CallStackSink {
-	frameWord(index: number, old: number): void
-	depth(old: number): void
-}
+export type Arm26CallStackSink = FrameStackSink
 
 export interface Arm26Frame {
 	callSite: number
@@ -26,26 +24,8 @@ const CALLEE = 1
 const SP = 2
 const WIDTH = 3
 
-export class Arm26CallStack {
-	sink: Arm26CallStackSink | null = null
-	private count = 0
-	private words = new Int32Array(64 * WIDTH)
-
-	get depth(): number {
-		return this.count
-	}
-
-	setDepth(depth: number) {
-		this.count = depth
-	}
-
-	setFrameWord(index: number, value: number) {
-		this.words[index] = value
-	}
-
-	clear() {
-		this.count = 0
-	}
+export class Arm26CallStack extends FrameStack {
+	constructor() { super(WIDTH, Int32Array) }
 
 	/**
 	 * After an instruction at `pc` ran and left the PC at `next`: `call` when it
@@ -57,13 +37,7 @@ export class Arm26CallStack {
 			return
 		}
 		if (next === ((pc + 4) & PC_MASK)) return
-		for (let index = this.count - 1; index >= 0; index--) {
-			if (this.words[index * WIDTH + RETURN] === next) {
-				this.sink?.depth(this.count)
-				this.count = index
-				return
-			}
-		}
+		this.popTo(next, RETURN)
 	}
 
 	/** Outermost first. */
@@ -82,21 +56,11 @@ export class Arm26CallStack {
 	}
 
 	private push(pc: number, next: number, sp: number) {
-		const base = this.count * WIDTH
-		if (base + WIDTH > this.words.length) {
-			const grown = new Int32Array(this.words.length * 2)
-			grown.set(this.words)
-			this.words = grown
-		}
+		const base = this.allocateFrame()
 		this.write(base + RETURN, (pc + 4) & PC_MASK)
 		this.write(base + CALLEE, next)
 		this.write(base + SP, sp)
-		this.sink?.depth(this.count)
-		this.count += 1
+		this.changeDepth(this.count + 1)
 	}
 
-	private write(index: number, value: number) {
-		this.sink?.frameWord(index, this.words[index])
-		this.words[index] = value
-	}
 }

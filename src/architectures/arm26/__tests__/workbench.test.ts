@@ -24,6 +24,7 @@ const activeTitle = () => state().documents.find((document) => document.id === s
 const lineOf = (code: string, text: string) => code.split('\n').findIndex((line) => line.includes(text)) + 1
 
 const OUTPUT: Record<string, string> = {
+	prefetch: '12',
 	hello: 'Hello, THRAX!\n',
 	sum: '8\n',
 	factorial: '120',
@@ -50,6 +51,27 @@ beforeEach(async () => {
 })
 
 describe('ARM26 in the workbench', () => {
+	it('switches ARM2/ARM3 with common views, CP15 registers and rebuild cleanup', async () => {
+		state().setTargetSetting('cpuModel', 'arm3')
+		expect((state().targetVariant!.registerBanks ?? []).some((bank) => bank.id === 'cp15')).toBe(true)
+		expect(state().registers.CP15_0).toBe(0x41560300)
+		const code = state().targetVariant!.examples.cache.code
+		state().setCode(code)
+		await state().run()
+		expect(state().diagnostics).toEqual([])
+		expect(state().console).toBe('5')
+		expect(state().registers.CP15_2).toBe(3)
+		expect(Number(state().registers.CYCLES)).toBeGreaterThan(state().instructionCount)
+		state().setTargetSetting('cpuModel', 'arm2')
+		expect(state().hasMachine).toBe(false)
+		expect(state().executionHistory.length).toBe(0)
+		expect((state().targetVariant!.registerBanks ?? []).some((bank) => bank.id === 'cp15')).toBe(false)
+		expect(state().code).toBe(code)
+		state().assemble()
+		expect(state().diagnostics.some((diagnostic) => diagnostic.severity === 'error' && diagnostic.message.includes('ARM3'))).toBe(true)
+		state().setTargetSetting('cpuModel', 'arm3')
+	})
+
 	it('is the active target, with its own examples', () => {
 		expect(state().architecture).toBe('arm26')
 		expect(state().target?.definition.name).toBe('ARM (26-bit, ARMv2a)')

@@ -1,3 +1,4 @@
+import { BufferedConsole } from '../../core/console'
 /**
  * The console a program reaches through SWIs while it leaves the SWI vector
  * unprogrammed: a few calls numbered and named as RISC OS numbers them.
@@ -42,17 +43,8 @@ export const SWI_NAMES: ReadonlyMap<string, number> = new Map([
 /** Longest string OS_Write0 and OS_WriteS will print. */
 const MAX_STRING = 65536
 
-export class Arm26Os implements Arm26SwiHandler {
-	output = ''
-	/** Everything ever typed, kept so a rewound run reads the same characters again. */
-	input = ''
-	inputIndex = 0
-	/** True while OS_ReadC waits for input. */
-	waiting = false
+export class Arm26Os extends BufferedConsole implements Arm26SwiHandler {
 
-	feed(text: string) {
-		this.input += text
-	}
 
 	execute(cpu: Arm26Cpu, comment: number): number {
 		switch (comment & ~X_BIT) {

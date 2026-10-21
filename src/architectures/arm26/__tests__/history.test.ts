@@ -17,6 +17,9 @@ function boot(code: string) {
 function snapshot(machine: Arm26Machine) {
 	const { cpu, os, keyboard, callStack } = machine
 	return {
+		clock: Array.from(cpu.clock.state),
+		prefetch: Array.from(cpu.prefetch.words),
+		prefetchTimes: Array.from(cpu.prefetch.times),
 		registers: Array.from(cpu.registers),
 		pc: cpu.pc,
 		psr: cpu.psr,

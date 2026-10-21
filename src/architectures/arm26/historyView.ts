@@ -1,3 +1,4 @@
+import { HistoryView, describeEffect, textChange } from '../../core/historyView'
 /**
  * The ARM26 history as the shared panels and tools read it: records built on
  * request from the typed columns, and the effects taken apart into chips.
@@ -5,11 +6,11 @@
 
 import { formatWord } from '../../core/format'
 import { disassembleA32 } from '../arm/a32/disassemble'
-import type { DescribedEffect, HistoryFormatter, HistoryRecord, MachineHistory } from '../contracts'
+import type { DescribedEffect, HistoryFormatter } from '../contracts'
 import { BANKS, MODE_NAMES } from './cpu'
 import {
 	EFFECT_DISPLAY, EFFECT_FRAME_DEPTH, EFFECT_HALTED, EFFECT_INPUT, EFFECT_KEY, EFFECT_KEY_INTERRUPT, EFFECT_MEMORY, EFFECT_OUTPUT, EFFECT_PC,
-	EFFECT_PSR, EFFECT_REGISTER, EFFECT_WAITING, ENTRY_EDIT, ENTRY_INTERRUPT, type Arm26History,
+	EFFECT_PSR, EFFECT_REGISTER, EFFECT_WAITING, EFFECT_CACHE, ENTRY_EDIT, ENTRY_INTERRUPT, type Arm26History,
 } from './history'
 import type { Arm26Executed } from './instructions'
 import type { Arm26Keyboard } from './keyboard'
@@ -24,40 +25,19 @@ class Arm26Record implements Arm26Executed {
 		readonly kind: 'instruction' | 'edit',
 		readonly word: number,
 		readonly interrupt: boolean,
+		readonly executeCycles: number,
+		readonly passed: boolean,
+		readonly redirected: boolean,
+		readonly timing: readonly number[],
 	) {}
 }
 
 /** Live over the log: entries come and go as the machine runs and rewinds. */
-export class Arm26HistoryView implements MachineHistory {
-	constructor(private readonly log: Arm26History | null) {}
-
-	get length(): number {
-		return this.log?.length ?? 0
-	}
-
-	at(index: number): Arm26Record | undefined {
-		const log = this.log
-		if (!log || index < 0 || index >= log.length) return undefined
+export class Arm26HistoryView extends HistoryView<Arm26History, Arm26Record> {
+	protected record(log: Arm26History, index: number): Arm26Record {
 		const kind = log.kindAt(index)
-		return new Arm26Record(log.idAt(index), log.countAt(index), log.pcAt(index), kind === ENTRY_EDIT ? 'edit' : 'instruction', log.wordAt(index), kind === ENTRY_INTERRUPT)
-	}
-
-	instructionCountAt(index: number): number {
-		return this.log!.countAt(index)
-	}
-
-	slice(from: number, to: number): HistoryRecord[] {
-		const records: HistoryRecord[] = []
-		const end = Math.min(to, this.length)
-		for (let index = Math.max(0, from); index < end; index++) records.push(this.at(index)!)
-		return records
-	}
-
-	indexOfId(id: number): number {
-		const log = this.log
-		if (!log) return -1
-		const index = id - log.firstId
-		return index >= 0 && index < log.length ? index : -1
+		return new Arm26Record(log.idAt(index), log.countAt(index), log.pcAt(index), kind === ENTRY_EDIT ? 'edit' : 'instruction', log.wordAt(index), kind === ENTRY_INTERRUPT,
+			log.executeCyclesAt(index), log.passedAt(index), log.redirectedAt(index), log.timingAt(index))
 	}
 }
 
@@ -70,11 +50,7 @@ export function statusText(psr: number): string {
 }
 
 function described(applied: boolean, parts: Omit<DescribedEffect, 'applied' | 'label'>): DescribedEffect {
-	const held = parts.value === undefined ? parts.text : hex(Number(parts.value))
-	const label = held !== undefined
-		? (applied ? `${parts.subject} → ${held}` : `${parts.subject} ${held} →`)
-		: parts.detail !== undefined ? `${parts.subject} ${parts.detail}` : parts.subject
-	return { ...parts, applied, label }
+	return describeEffect(applied, parts, parts.value === undefined ? parts.text : hex(Number(parts.value)))
 }
 
 /** The descriptor id that shows physical register `index` in `mode`: its plain name when the mode sees it. */
@@ -107,16 +83,19 @@ export function arm26HistoryFormatter(log: Arm26History | null, os: Arm26Os, key
 						at({ subject: id === 'R13' ? 'SP' : id === 'R14' ? 'LR' : id, register: id, value: b })
 						break
 					}
+					case EFFECT_CACHE:
+						if (a >= 2 && a <= 5) at({ subject: `CP15 c${a}`, register: `CP15_${a}`, value: b })
+						break
 					case EFFECT_MEMORY: at({ subject: `[${formatWord(a >>> 0)}]`, address: a >>> 0, value: b }); break
 					case EFFECT_PC: at({ subject: 'PC', register: 'PC', value: b }); break
 					case EFFECT_PSR: at({ subject: 'status', register: 'PSR', text: statusText(b) }); break
-					case EFFECT_OUTPUT: at({ subject: 'console', detail: JSON.stringify(os.output.slice(b, a)) }); break
+					case EFFECT_OUTPUT: at({ subject: 'console', detail: textChange((log.timeline.ahead ? log.outputText.text : os.output), a, b) }); break
 					case EFFECT_INPUT: at({ subject: 'read', detail: JSON.stringify(os.input.charAt(b)) }); break
 					case EFFECT_WAITING: at({ subject: b ? 'input arrived' : 'waiting for input' }); break
 					case EFFECT_HALTED: at({ subject: b ? 'running' : 'halted' }); break
 					case EFFECT_FRAME_DEPTH: at({ subject: 'call depth', text: String(b) }); break
 					case EFFECT_KEY: at({ subject: 'key', detail: JSON.stringify(keyboard.input.charAt(b)) }); break
-					case EFFECT_DISPLAY: at({ subject: 'display', detail: JSON.stringify(keyboard.display.slice(b, a)) }); break
+					case EFFECT_DISPLAY: at({ subject: 'display', detail: textChange((log.timeline.ahead ? log.displayText.text : keyboard.display), a, b) }); break
 					case EFFECT_KEY_INTERRUPT: at({ subject: 'keyboard interrupt', text: b ? 'enabled' : 'disabled' }); break
 				}
 			}

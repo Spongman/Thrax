@@ -80,6 +80,31 @@ down
 `
 
 export const EXAMPLES: Readonly<Record<string, Example>> = {
+	prefetch: {
+		name: 'Instruction Prefetch',
+		description: 'Self-modifying code: a queued instruction stays stale until a branch refills the pipeline',
+		code: `@ ARM2/ARM3 retain two prefetched words. Prints 12.
+	.text
+_start:
+	ldr r0, =0xE3A01002     @ encoding of MOV r1,#2
+	adr r2, target
+	mov r3, #0
+	str r0, [r2]           @ target is already in the instruction pipeline
+target:
+	mov r1, #1             @ first pass executes the prefetched original
+	cmp r3, #0
+	bne done
+	mov r4, r1
+	mov r3, #1
+	b target               @ refetch the modified instruction
+done:
+	add r0, r4, #48
+	swi OS_WriteC
+	add r0, r1, #48
+	swi OS_WriteC
+	swi OS_Exit
+`,
+	},
 	input: {
 		name: 'Interactive Input',
 		description: 'Read a line with OS_ReadC into a buffer, then print it with OS_Write0',
@@ -457,5 +482,35 @@ done
 ${ARMASM_PRINT_DECIMAL}
 	END
 `,
+	},
+}
+
+/** ARM3 starts in SVC here because the program supplies the reset vector. */
+export const ARM3_EXAMPLES: Readonly<Record<string, Example>> = {
+	...EXAMPLES,
+	cache: {
+		name: 'ARM3 Cache Controls',
+		description: 'Read the CPU ID, enable the unified cache, multiply and flush through CP15.',
+		code: `.org 0
+b start
+.org 0x8000
+start:
+mrc p15, 0, r4, c0, c0, 0
+mov r0, #1
+mcr p15, 0, r0, c3, c0, 0
+mcr p15, 0, r0, c4, c0, 0
+mov r0, #0
+mcr p15, 0, r0, c5, c0, 0
+mov r0, #3
+mcr p15, 0, r0, c2, c0, 0
+mov r1, #5
+mov r2, #1
+mul r3, r1, r2
+mcr p15, 0, r0, c1, c0, 0
+mov r0, r3
+add r0, r0, #48
+swi OS_WriteC
+swi OS_Exit
+`
 	},
 }

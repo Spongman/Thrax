@@ -23,6 +23,7 @@ function run(code: string, input = '', keys = '') {
 }
 
 const OUTPUT: Record<string, string> = {
+	prefetch: '12',
 	input: 'hello, arm\n',
 	hello: 'Hello, THRAX!\n',
 	sum: '8\n',
@@ -39,12 +40,12 @@ const OUTPUT: Record<string, string> = {
 }
 
 describe('ARM26 example programs', () => {
-	it('ports every Beta example that is not TinyOS, and adds armasm ones', () => {
+	it('includes the common programs, dialect examples and prefetch demonstration', () => {
 		expect(Object.keys(EXAMPLES).sort()).toEqual(Object.keys(OUTPUT).sort())
 	})
 
 	it.each(Object.keys(OUTPUT))('runs %s to OS_Exit with the expected output', (key) => {
-		const { machine, status } = run(EXAMPLES[key].code, key === 'input' ? 'hello, arm\n' : '', key === 'keyboard' ? 'hi.' : '')
+		const { machine, status } = run(EXAMPLES[key].code, key === 'input' ? 'hello, arm\n' : '', key === 'keyboard' || key === 'mmio' ? 'hi.' : '')
 		expect(status).toBe(STEP_HALT)
 		expect(machine.os.output).toBe(OUTPUT[key])
 	})

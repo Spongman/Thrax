@@ -8,11 +8,11 @@ const schema = definition.settings
 describe('ARM26 settings', () => {
 	it('defaults to 1 MB and GNU as', () => {
 		expect(validSettings(schema, undefined)).toEqual(DEFAULT_ARM26_SETTINGS)
-		expect(DEFAULT_ARM26_SETTINGS).toEqual({ memoryBytes: 1 << 20, dialect: 'gnu' })
+		expect(DEFAULT_ARM26_SETTINGS).toEqual({ cpuModel: 'arm3', sequentialCycles: 1, latencyCycles: 1, memoryBytes: 1 << 20, dialect: 'gnu' })
 	})
 
 	it('keeps valid values and drops the rest', () => {
-		expect(validSettings(schema, { memoryBytes: 4 << 20, dialect: 'armasm' })).toEqual({ memoryBytes: 4 << 20, dialect: 'armasm' })
+		expect(validSettings(schema, { memoryBytes: 4 << 20, dialect: 'armasm' })).toEqual({ ...DEFAULT_ARM26_SETTINGS, memoryBytes: 4 << 20, dialect: 'armasm' })
 		expect(validSettings(schema, { memoryBytes: 12345, dialect: 'masm' })).toEqual(DEFAULT_ARM26_SETTINGS)
 	})
 

@@ -41,6 +41,7 @@ const banked = (index: number): RegisterDescriptor => {
 }
 
 export const ARM26_REGISTERS: readonly RegisterDescriptor[] = Object.freeze([
+	{ id: 'CYCLES', name: 'Cycles', bank: 'registers', group: 'Core timing', bits: 64, editable: false },
 	...Array.from({ length: 15 }, (_unused, index): RegisterDescriptor => Object.freeze({
 		id: `R${index}`,
 		name: NAMES[index] ?? `R${index}`,
@@ -58,3 +59,10 @@ export const ARM26_REGISTERS: readonly RegisterDescriptor[] = Object.freeze([
 	Object.freeze({ id: 'PSR', name: 'R15', bank: 'registers', group: 'R15: status and PC', bits: 32, editable: true, role: 'flags' as const }),
 	...Array.from({ length: PHYSICAL_COUNT - PHYSICAL_USR }, (_unused, offset) => banked(PHYSICAL_USR + offset)),
 ])
+
+export const ARM3_BANKS: readonly RegisterBank[] = [...ARM26_BANKS, { id: 'cp15', label: 'CP15' }]
+export const ARM3_REGISTERS: readonly RegisterDescriptor[] = [
+	...ARM26_REGISTERS,
+	...[{ index: 0, name: 'ID' }, { index: 2, name: 'Control' }, { index: 3, name: 'Cacheable' }, { index: 4, name: 'Updateable' }, { index: 5, name: 'Disruptive' }]
+		.map(({ index, name }) => ({ id: `CP15_${index}`, name, bank: 'cp15', group: 'Cache controls', bits: 32, editable: false })),
+]

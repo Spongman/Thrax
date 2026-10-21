@@ -1,5 +1,5 @@
 /**
- * An ARMv2a core in 26-bit mode: the ARM2 with the ARM3's SWP, as in the
+ * ARM2 and ARM3 cores in 26-bit mode, as in the
  * Acorn Archimedes (ARM Family Data Manual; ARM DDI 0100, ARMv2 notes).
  *
  * R15 holds the PC in bits 25-2, the mode in bits 1-0 (USR, FIQ, IRQ, SVC)
@@ -24,15 +24,19 @@
  *
  * A vector whose word is zero is unprogrammed.  An exception through one is
  * not taken: SWI goes to `swi`, a high-level OS, and anything else stops the
- * run as a fault that changes nothing.  Coprocessor instructions are
- * undefined, as no coprocessor is fitted.
+ * run as a fault. ARM3 supplies privileged CP15 register transfers and its
+ * unified cache; all other coprocessor instructions are undefined.
  */
 
 import { alu, conditionPassed, dataProcessing, multiplyFlags, rotateLoaded, rotatedImmediate, shiftByImmediate, shiftByRegister } from '../arm/a32/alu'
 import {
-	COND_AL, FLAG_C, FLAGS_NZCV, FORMAT_BLOCK, FORMAT_BRANCH, FORMAT_DATA, FORMAT_MULTIPLY, FORMAT_SWAP, FORMAT_SWI, FORMAT_TRANSFER,
+	COND_AL, FLAG_C, FLAGS_NZCV, FORMAT_BLOCK, FORMAT_BRANCH, FORMAT_COPROCESSOR, FORMAT_DATA, FORMAT_MULTIPLY, FORMAT_SWAP, FORMAT_SWI, FORMAT_TRANSFER,
 	R_LR, R_PC, branchOffset, formatOf, isTestOp, popCount,
 } from '../arm/a32/isa'
+import { Arm3Cache, type Arm26Model } from './arm3'
+import { multiplyCycles } from './timing'
+import { Arm26BusClock, READ_EXTERNAL, type Arm26BusTiming } from './busTiming'
+import { Arm26Prefetch } from './prefetch'
 
 export const MODE_USR = 0
 export const MODE_FIQ = 1
@@ -111,6 +115,7 @@ export interface Arm26EffectSink {
 	memory(address: number, oldWord: number): void
 	pc(old: number): void
 	psr(old: number): void
+	cache(index: number, old: number): void
 }
 
 /** Runs SWIs for a program that has not programmed the SWI vector. */
@@ -141,6 +146,17 @@ export function faultMessage(fault: number, address: number): string {
 }
 
 export class Arm26Cpu {
+	readonly cache: Arm3Cache | null
+	readonly clock: Arm26BusClock
+	readonly prefetch = new Arm26Prefetch()
+	/** Fetch start/end, execute start/end, completion, decode entry, in reference ticks. */
+	readonly timing = new Float64Array(6)
+	get cycles() { return this.clock.ticks }
+	set cycles(value: number) { this.clock.ticks = value }
+	private fetchAborted = false
+	executeCycles = 1
+	passed = true
+	redirected = false
 	readonly registers = new Int32Array(PHYSICAL_COUNT)
 	/** Address of the instruction about to run. */
 	pc = VECTOR_RESET
@@ -157,10 +173,13 @@ export class Arm26Cpu {
 	/** The word the last step() fetched. */
 	instruction = 0
 
-	constructor(memoryBytes: number) {
+	constructor(memoryBytes: number, readonly model: Arm26Model = 'arm3', timing?: Readonly<Arm26BusTiming>) {
 		if (!(memoryBytes >= 64 && memoryBytes % 4 === 0 && memoryBytes <= ADDRESS_LIMIT)) throw new RangeError(`Invalid memory size ${memoryBytes}`)
 		this.memory = new Uint8Array(memoryBytes)
 		this.view = new DataView(this.memory.buffer)
+		this.clock = new Arm26BusClock(timing)
+		this.cache = model === 'arm3' ? new Arm3Cache(this.view) : null
+		if (this.cache) this.cache.beforeWrite = (index, old) => this.sink?.cache(index, old)
 	}
 
 	get mode(): number {
@@ -174,6 +193,13 @@ export class Arm26Cpu {
 
 	/** Power-up: SVC mode with interrupts off at the reset vector. Memory is kept. */
 	reset() {
+		this.clock.reset()
+		this.prefetch.words.fill(0)
+		this.prefetch.times.fill(0)
+		this.timing.fill(0)
+		this.executeCycles = 1
+		this.redirected = false
+		this.cache?.reset()
 		this.registers.fill(0)
 		this.pc = VECTOR_RESET
 		this.psr = MODE_SVC | PSR_I | PSR_F
@@ -193,25 +219,62 @@ export class Arm26Cpu {
 
 	/** Executes one instruction; returns a STEP_* code. */
 	step(): number {
+		this.executeCycles = 1
+		this.redirected = false
+		this.passed = false
 		const pc = this.pc
-		if (pc > this.memory.length - 4) return this.trap(VECTOR_PREFETCH_ABORT, MODE_SVC, pc + 4, FAULT_PREFETCH_ABORT, pc)
-		const word = this.view.getInt32(pc, true)
+		this.ensurePrefetch()
+		this.timing[0] = this.prefetch.times[0]
+		this.timing[1] = this.prefetch.times[1]
+		this.timing[2] = this.cycles
+		this.timing[5] = this.prefetch.times[4]
+		const word = this.prefetch.instruction
+		const aborted = this.prefetch.aborted
 		this.instruction = word
+		// Even a taken branch performs this fetch. Its abort is deferred until
+		// the queued word reaches execute, and disappears when the queue is flushed.
+		const fetchStart = this.cycles
+		const ahead = this.fetch((pc + 8) & PC_MASK, this.prefetch.sequential)
+		const aheadAborted = this.fetchAborted
+		const fetchEnd = this.cycles
+		const status = aborted
+			? this.trap(VECTOR_PREFETCH_ABORT, MODE_SVC, pc + 4, FAULT_PREFETCH_ABORT, pc)
+			: this.execute(word, pc)
+		this.timing[3] = this.cycles
+		this.executeCycles = Math.max(1, this.timing[3] - this.timing[2])
+		if (status === STEP_OK || status === STEP_EXCEPTION) {
+			if (this.redirected) this.refill(this.pc)
+			else {
+				this.prefetch.advance(this.pc, ahead, aheadAborted, fetchStart, fetchEnd, this.cycles)
+				// N follows any instruction that used internal or data bus cycles.
+				this.prefetch.sequential = this.cycles === fetchEnd
+			}
+		}
+		this.timing[4] = this.cycles
+		return status
+	}
+
+	private execute(word: number, pc: number): number {
 		const cond = word >>> 28
 		if (cond !== COND_AL && !conditionPassed(cond, this.psr)) return this.next()
+		this.passed = true
 		switch (formatOf(word)) {
 			case FORMAT_DATA: return this.dataProcessing(word)
 			case FORMAT_MULTIPLY: {
+				const internal = multiplyCycles(this.read((word >>> 8) & 15)) - 1
+				for (let cycle = 0; cycle < internal; cycle++) this.internal()
 				let result = Math.imul(this.read(word & 15), this.read((word >>> 8) & 15))
 				if (word & 0x00200000) result = (result + this.read((word >>> 12) & 15)) | 0
 				this.writeRegister((word >>> 16) & 15, result)
 				if (word & 0x00100000) this.setFlags(multiplyFlags(result, this.psr))
 				return ((word >>> 16) & 15) === R_PC ? STEP_OK : this.next()
 			}
-			case FORMAT_SWAP: return this.swap(word)
+			case FORMAT_SWAP: return this.model === 'arm3' ? this.swap(word) : this.trap(VECTOR_UNDEFINED, MODE_SVC, pc + 4, FAULT_UNDEFINED, pc)
+			case FORMAT_COPROCESSOR: return this.coprocessor(word)
 			case FORMAT_TRANSFER: return this.transfer(word)
 			case FORMAT_BLOCK: return this.block(word)
 			case FORMAT_BRANCH:
+				this.redirected = true
 				if (word & 0x01000000) this.writeRegister(R_LR, ((this.psr & PSR_MASK) | ((pc + 4) & PC_MASK)) | 0)
 				this.setPc((pc + 8 + branchOffset(word)) & PC_MASK)
 				return STEP_OK
@@ -224,18 +287,23 @@ export class Arm26Cpu {
 	interrupt(vector: number): boolean {
 		const fiq = vector === VECTOR_FIQ
 		if (this.psr & (fiq ? PSR_F : PSR_I)) return false
+		this.ensurePrefetch()
+		this.fetch((this.pc + 8) & PC_MASK, this.prefetch.sequential)
 		this.exception(vector, fiq ? MODE_FIQ : MODE_IRQ, this.pc + 4)
+		this.refill(this.pc)
 		return true
 	}
 
 	/** Moves the PC, recorded; for a SWI handler that resumes elsewhere. */
 	jump(address: number) {
+		this.redirected = true
 		this.setPc(address & PC_MASK)
 	}
 
 	/** Writes R0-R14 of the current mode, recorded. */
 	writeRegister(index: number, value: number) {
 		if (index === R_PC) {
+			this.redirected = true
 			this.setPc(value & PC_MASK)
 			return
 		}
@@ -252,6 +320,36 @@ export class Arm26Cpu {
 		this.check(address)
 		return this.view.getInt32(address, true)
 	}
+
+	peekInstruction(): number {
+		if (this.prefetch.ready && this.prefetch.address === this.pc) return this.prefetch.instruction
+		return this.cache?.peekWord(this.pc, this.mode === MODE_USR) ?? this.readWord(this.pc)
+	}
+
+	private ensurePrefetch() {
+		if (!this.prefetch.ready || this.prefetch.address !== this.pc) this.refill(this.pc)
+	}
+
+	private refill(address: number) {
+		for (let slot = 0; slot < 2; slot++) {
+			const at = (address + slot * 4) & PC_MASK
+			const start = this.cycles
+			const word = this.fetch(at, slot !== 0)
+			this.prefetch.set(address, word, this.fetchAborted, start, this.cycles, slot !== 0)
+		}
+	}
+
+	private fetch(address: number, sequential: boolean): number {
+		this.fetchAborted = address > this.memory.length - 4
+		let word = 0
+		if (!this.fetchAborted) word = this.cache?.readWord(address, this.mode === MODE_USR) ?? this.view.getInt32(address, true)
+		this.clock.read(address, sequential, this.fetchAborted ? READ_EXTERNAL : this.cache?.lastRead ?? READ_EXTERNAL, this.cacheOn, this.monitor)
+		return word
+	}
+
+	private get cacheOn() { return !!(this.cache && this.cache.readRegister(2) & 1) }
+	private get monitor() { return !!(this.cache && this.cache.readRegister(2) & 4) }
+	private internal() { this.clock.internal(this.cacheOn, this.monitor) }
 
 	writeWord(address: number, value: number) {
 		this.check(address)
@@ -299,6 +397,7 @@ export class Arm26Cpu {
 			a = this.read(rn, (pc + 8) & PC_MASK)
 			b = rotatedImmediate(word & 0xFFF, carry)
 		} else if (word & 0x10) {
+			this.internal()
 			// A register-specified shift takes a cycle more: R15 reads 12 ahead.
 			const ahead = (pc + 12) & PC_MASK
 			a = this.read(rn, ahead)
@@ -318,6 +417,7 @@ export class Arm26Cpu {
 			return this.next()
 		}
 		if (rd === R_PC) {
+			this.redirected = true
 			if (setFlags) this.writeStatus(result)
 			this.setPc(result & PC_MASK)
 			return STEP_OK
@@ -344,6 +444,8 @@ export class Arm26Cpu {
 	}
 
 	private dataTrap(fault: number, address: number): number {
+		this.clock.read(address, false, READ_EXTERNAL, this.cacheOn, this.monitor)
+		this.internal()
 		const vector = fault === FAULT_ADDRESS ? VECTOR_ADDRESS : VECTOR_DATA_ABORT
 		return this.trap(vector, MODE_SVC, this.pc + 8, fault, address)
 	}
@@ -353,34 +455,61 @@ export class Arm26Cpu {
 		return io !== null && address >= io.base && address < io.base + io.size
 	}
 
-	private loadWord(address: number): number {
-		if (this.isIo(address)) return this.io!.read(address & ~3) | 0
-		return this.view.getInt32(address & ~3, true)
+	private loadWord(address: number, external = false, user = this.mode === MODE_USR, sequential = false): number {
+		const io = this.isIo(address)
+		const cached = !external && !io && this.cache
+		const value = io ? this.io!.read(address & ~3) | 0 : cached ? cached.readWord(address, user) : this.view.getInt32(address & ~3, true)
+		this.clock.read(address, sequential, cached ? cached.lastRead : READ_EXTERNAL, this.cacheOn, this.monitor)
+		return value
 	}
 
-	private storeWord(address: number, value: number) {
+	private storeWord(address: number, value: number, user = this.mode === MODE_USR, sequential = false) {
+		this.clock.write(sequential, this.cacheOn, this.monitor)
 		const aligned = address & ~3
 		if (this.isIo(aligned)) {
 			this.io!.write(aligned, value)
+			this.cache?.written(address, value, 4, user)
 			return
 		}
 		this.sink?.memory(aligned, this.view.getInt32(aligned, true))
 		this.view.setInt32(aligned, value, true)
+		this.cache?.written(address, value, 4, user)
 	}
 
-	private loadByte(address: number): number {
-		if (this.isIo(address)) return (this.io!.read(address & ~3) >>> ((address & 3) * 8)) & 0xFF
-		return this.memory[address]
+	private loadByte(address: number, external = false, user = this.mode === MODE_USR): number {
+		return (this.loadWord(address, external, user) >>> ((address & 3) * 8)) & 255
 	}
 
-	private storeByte(address: number, value: number) {
+	private storeByte(address: number, value: number, user = this.mode === MODE_USR) {
+		this.clock.write(false, this.cacheOn, this.monitor)
 		if (this.isIo(address)) {
 			this.io!.write(address & ~3, value & 0xFF)
+			this.cache?.written(address, value, 1, user)
 			return
 		}
 		const aligned = address & ~3
 		this.sink?.memory(aligned, this.view.getInt32(aligned, true))
 		this.memory[address] = value
+		this.cache?.written(address, value, 1, user)
+	}
+
+	private coprocessor(word: number): number {
+		const register = (word >>> 16) & 15
+		const load = (word & 0x00100000) !== 0
+		// Only privileged CP15 register transfers in the documented ARM3 form.
+		if (!this.cache || this.mode === MODE_USR || (word & 0x0FE00FFF) !== 0x0E000F10 ||
+			register > 5 || (load ? register === 1 : register === 0))
+			return this.trap(VECTOR_UNDEFINED, MODE_SVC, this.pc + 4, FAULT_UNDEFINED, this.pc)
+		const rd = (word >>> 12) & 15
+		this.internal()
+		this.clock.transfer(this.cacheOn, this.monitor)
+		if (load) {
+			const value = this.cache.readRegister(register)
+			if (rd === R_PC) this.setFlags(value)
+			else this.writeRegister(rd, value)
+			this.internal()
+		} else this.cache.writeRegister(register, this.read(rd, (this.psr & PSR_MASK) | ((this.pc + 12) & PC_MASK)))
+		return this.next()
 	}
 
 	private swap(word: number): number {
@@ -389,9 +518,10 @@ export class Arm26Cpu {
 		const fault = this.dataFault(address, byte ? 1 : 4)
 		if (fault) return this.dataTrap(fault, address)
 		const source = this.read(word & 15)
-		const old = byte ? this.loadByte(address) : rotateLoaded(this.loadWord(address), address)
+		const old = byte ? this.loadByte(address, true) : rotateLoaded(this.loadWord(address, true), address)
 		if (byte) this.storeByte(address, source)
 		else this.storeWord(address, source)
+		this.internal()
 		this.writeRegister((word >>> 12) & 15, old)
 		return this.next()
 	}
@@ -402,6 +532,7 @@ export class Arm26Cpu {
 		const rd = (word >>> 12) & 15
 		const pre = (word & 0x01000000) !== 0
 		const writeback = !pre || (word & 0x00200000) !== 0
+		const user = this.mode === MODE_USR || (!pre && (word & 0x00200000) !== 0)
 		const byte = (word & 0x00400000) !== 0
 		const base = this.read(rn, (pc + 8) & PC_MASK)
 		let offset = word & 0xFFF
@@ -414,9 +545,11 @@ export class Arm26Cpu {
 		const fault = this.dataFault(address, byte ? 1 : 4)
 		if (fault) return this.dataTrap(fault, address)
 		if (word & 0x00100000) {
-			const value = byte ? this.loadByte(address) : rotateLoaded(this.loadWord(address), address)
+			const value = byte ? this.loadByte(address, false, user) : rotateLoaded(this.loadWord(address, false, user), address)
+			this.internal()
 			if (writeback && rn !== R_PC) this.writeRegister(rn, indexed)
 			if (rd === R_PC) {
+				this.redirected = true
 				this.setPc(value & PC_MASK)
 				return STEP_OK
 			}
@@ -424,8 +557,8 @@ export class Arm26Cpu {
 			return this.next()
 		}
 		const value = this.read(rd, (this.psr & PSR_MASK) | ((pc + 12) & PC_MASK))
-		if (byte) this.storeByte(address, value)
-		else this.storeWord(address, value)
+		if (byte) this.storeByte(address, value, user)
+		else this.storeWord(address, value, user)
 		if (writeback && rn !== R_PC) this.writeRegister(rn, indexed)
 		return this.next()
 	}
@@ -457,9 +590,10 @@ export class Arm26Cpu {
 			let jumped = false
 			for (let register = 0; register < 16; register++) {
 				if (!(mask & (1 << register))) continue
-				const value = this.loadWord(address)
+				const value = this.loadWord(address, false, this.mode === MODE_USR, address !== first)
 				address += 4
 				if (register === R_PC) {
+					this.redirected = true
 					if (psr) this.writeStatus(value)
 					this.setPc(value & PC_MASK)
 					jumped = true
@@ -467,6 +601,7 @@ export class Arm26Cpu {
 					this.writePhysical(bank[register], value)
 				}
 			}
+			this.internal()
 			return jumped ? STEP_OK : this.next()
 		}
 		const lowest = mask & -mask
@@ -477,7 +612,7 @@ export class Arm26Cpu {
 			if (register === R_PC) value = (this.psr & PSR_MASK) | ((pc + 12) & PC_MASK)
 			else if (register === rn && writeback && (1 << register) !== lowest) value = final
 			else value = this.registers[bank[register]]
-			this.storeWord(address, value)
+			this.storeWord(address, value, this.mode === MODE_USR, address !== first)
 			address += 4
 		}
 		if (writeback) this.writeRegister(rn, final)
@@ -504,12 +639,15 @@ export class Arm26Cpu {
 
 	/** Takes the exception when its vector is programmed, or faults with nothing changed. */
 	private trap(vector: number, mode: number, returnAddress: number, fault: number, address: number): number {
+		if (vector === VECTOR_UNDEFINED) this.internal()
 		if (!this.vectorSet(vector)) return this.fail(fault, address)
 		this.exception(vector, mode, returnAddress)
 		return STEP_EXCEPTION
 	}
 
 	private exception(vector: number, mode: number, returnAddress: number) {
+		this.executeCycles = 1
+		this.redirected = true
 		const link = ((this.psr & PSR_MASK) | (returnAddress & PC_MASK)) | 0
 		const masks = PSR_I | (vector === VECTOR_FIQ || vector === VECTOR_RESET ? PSR_F : 0)
 		this.setPsr((this.psr & ~PSR_MODE) | mode | masks)

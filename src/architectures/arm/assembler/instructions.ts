@@ -57,6 +57,7 @@ const K_POP = 14
 const K_SHIFT = 15
 const K_RRX = 16
 const K_NEG = 17
+const K_COPROCESSOR = 38
 // ARMv8 only from here.
 /** LDRH STRH LDRSB LDRSH LDRD STRD; `op` is the EXTRA_* kind. */
 const K_EXTRA = 18
@@ -148,6 +149,8 @@ const FAMILIES: readonly Family[] = [
 	...DP_NAMES.map((base, op): Family => ({ base, kind: K_DATA, op, orders: isTestOp(op) ? [['cond', 'p'], ['p', 'cond']] : COND_S })),
 	{ base: 'mul', kind: K_MUL, orders: COND_S },
 	{ base: 'mla', kind: K_MLA, orders: COND_S },
+	{ base: 'mrc', kind: K_COPROCESSOR, op: 1, orders: COND_ONLY },
+	{ base: 'mcr', kind: K_COPROCESSOR, op: 0, orders: COND_ONLY },
 	{ base: 'ldr', kind: K_LDR, orders: [['cond', 'b', 't'], ['b', 't', 'cond']] },
 	{ base: 'str', kind: K_STR, orders: [['cond', 'b', 't'], ['b', 't', 'cond']] },
 	{ base: 'ldm', kind: K_LDM, orders: [['cond', 'mode'], ['mode', 'cond']] },
@@ -216,7 +219,7 @@ const V8_FAMILIES: readonly Family[] = [
 	{ base: 'isb', kind: K_BARRIER, op: 6, orders: [[]] },
 ]
 
-const FAMILIES_V8: readonly Family[] = [...V8_FAMILIES, ...FAMILIES.filter((family) => family.kind !== K_SWP && family.kind !== K_NOP)]
+const FAMILIES_V8: readonly Family[] = [...V8_FAMILIES, ...FAMILIES.filter((family) => family.kind !== K_SWP && family.kind !== K_NOP && family.kind !== K_COPROCESSOR)]
 
 /** Fills `found` with the suffixes `rest` spells in `order`, or returns false. */
 function matchSlots(rest: string, order: readonly Slot[], found: Map<Slot, string>): boolean {
@@ -987,6 +990,26 @@ export function parseInstruction(mnemonic: Token, cursor: TokenCursor, scope: In
 		return { encode: v8 }
 	}
 	switch (m.kind) {
+		case K_COPROCESSOR: {
+			const named = (prefix: RegExp, maximum: number, what: string): number => {
+				const token = cursor.next()
+				const text = token.text.toLowerCase().replace(prefix, '')
+				if (!/^\d+$/.test(text) || Number(text) > maximum) throw new AssemblyError(`Expected ${what}`, positionOf(token))
+				return Number(text)
+			}
+			const cp = named(/^(?:cp|p)/, 15, 'a coprocessor number from 0 to 15')
+			operands.comma()
+			const op = named(/^#/, 7, 'an opcode from 0 to 7')
+			operands.comma()
+			const rd = operands.register()
+			operands.comma()
+			const crn = named(/^(?:cr|c)/, 15, 'a coprocessor register from c0 to c15')
+			operands.comma()
+			const crm = named(/^(?:cr|c)/, 15, 'a coprocessor register from c0 to c15')
+			const op2 = cursor.accept(',') ? named(/^#/, 7, 'an opcode from 0 to 7') : 0
+			parsed = { encode: () => ((m.cond << 28) | 0x0E000010 | (op << 21) | (m.op << 20) | (crn << 16) | (rd << 12) | (cp << 8) | (op2 << 5) | crm) >>> 0 }
+			break
+		}
 		case K_DATA: parsed = { encode: dataProcessing(m, operands) }; break
 		case K_MUL:
 		case K_MLA: parsed = { encode: multiply(m, operands) }; break

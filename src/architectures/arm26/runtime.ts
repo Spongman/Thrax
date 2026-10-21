@@ -1,10 +1,13 @@
+import { notifyHistorySeek } from '../../core/observer'
+import { rewindHistoryTo } from '../../core/historyCursor'
 /**
  * An Arm26Machine behind the neutral machine contract: the run loop,
  * breakpoints, pacing, observers and user edits the debugger drives.
  */
 
+import { MemoryEdits } from '../../core/memoryEdits'
 import type { ExecutionObserver, MachineConfig } from '../../core/observer'
-import { yieldToHost } from '../../core/yieldToHost'
+import { ExecutionController, ExecutionStep } from '../../core/executionController'
 import { conditionPassed, shiftByImmediate } from '../arm/a32/alu'
 import { FLAG_C, FORMAT_BLOCK, FORMAT_BRANCH, FORMAT_SWAP, FORMAT_TRANSFER, branchOffset, formatOf, popCount } from '../arm/a32/isa'
 import type { ArmAssembly } from '../arm/program'
@@ -14,17 +17,10 @@ import { arm26HistoryFormatter, Arm26HistoryView } from './historyView'
 import { arm26InstructionSet, isCall } from './instructions'
 import { Arm26Machine } from './machine'
 import { FLAG_BITS, PHYSICAL_IDS } from './registers'
+import type { Arm26Model } from './arm3'
+import type { Arm26BusTiming } from './busTiming'
 
 const REGISTER_ID = /^R(\d+)$/
-
-/** Instructions run between yields to the browser. */
-const DEFAULT_BATCH_SIZE = 20_000
-/** Redraws per second when execution is paced, which sets the batch size. */
-const ANIMATION_FRAMES_PER_SECOND = 30
-/** Longest a paced run sleeps without looking at the speed control again. */
-const FRAME_SLICE_MS = 50
-/** How much of a stalled run a paced run will make up once it resumes. */
-const MAX_CATCH_UP_SECONDS = 0.25
 
 const READC_INPUT: PendingInput = Object.freeze({ type: 'string', prompt: 'OS_ReadC is waiting for input' })
 
@@ -64,6 +60,8 @@ class Access {
 
 export interface Arm26RuntimeOptions {
 	memoryBytes: number
+	cpuModel?: Arm26Model
+	timing?: Readonly<Arm26BusTiming>
 	historyLimit: number
 	speed: number | null
 }
@@ -77,17 +75,28 @@ export class Arm26Runtime implements Machine {
 	readonly keyboardDisplay: KeyboardDisplayDevice
 	onProgress: (() => void) | null = null
 	paused = false
-	private running = false
-	/** Ended by the user; only a fresh run carries on. */
-	private stopped = false
 	/** Why the CPU refused the last instruction, which ends the run. */
 	private fault: string | null = null
 	private speed: number | null
 	private pacedAddresses: ReadonlySet<number> | null = null
 	private readonly access = new Access()
 
+	private readonly execution = new ExecutionController(this, {
+		speed: () => this.speed,
+		pacedAddresses: () => this.pacedAddresses,
+		depth: () => this.machine.callStack.depth,
+		step: () => this.advance() === STEP_WAIT ? ExecutionStep.WAIT : ExecutionStep.ADVANCED,
+	})
+
+	private readonly memoryEdits = new MemoryEdits({
+		region: () => ({ start: 0, end: this.machine.cpu.memory.length - 1 }),
+		read: (address) => this.machine.cpu.memory[address],
+		commit: (address, bytes) => this.machine.editBytes(address, bytes),
+		clampLimit: true,
+	})
+
 	constructor(readonly program: ArmAssembly, options: Arm26RuntimeOptions) {
-		this.machine = new Arm26Machine({ memoryBytes: options.memoryBytes, historyLimit: options.historyLimit })
+		this.machine = new Arm26Machine({ memoryBytes: options.memoryBytes, cpuModel: options.cpuModel, timing: options.timing, historyLimit: options.historyLimit })
 		this.machine.load(program.image())
 		this.speed = options.speed
 		this.history = new Arm26HistoryView(this.machine.history)
@@ -96,10 +105,10 @@ export class Arm26Runtime implements Machine {
 	}
 
 	get pc() { return this.machine.cpu.pc }
-	get halted() { return this.machine.halted || this.stopped || this.fault !== null }
+	get halted() { return this.machine.halted || this.execution.stopped || this.fault !== null }
 	get pendingInput() { return !this.halted && this.machine.os.waiting ? READC_INPUT : null }
 	get instructionCount() { return this.machine.instructionCount }
-	get historyCursor() { return this.history.length }
+	get historyCursor() { return this.machine.history?.timeline.index ?? 0 }
 
 	get console() {
 		const output = this.machine.os.output
@@ -121,13 +130,17 @@ export class Arm26Runtime implements Machine {
 
 	/** One instruction, told to the observers when they are listening; returns the STEP_* code. */
 	private advance(): number {
+		if (this.machine.history?.stepForward()) {
+			this.seekObservers()
+			return STEP_OK
+		}
 		const { machine, observers } = this
 		const cpu = machine.cpu
 		const address = cpu.pc
 		let word = 0
 		const listening = observers.length > 0 && address <= cpu.memory.length - 4
 		if (listening) {
-			word = cpu.readWord(address)
+			word = cpu.peekInstruction()
 			this.inspect(word)
 		}
 		const count = machine.instructionCount
@@ -188,7 +201,9 @@ export class Arm26Runtime implements Machine {
 
 	private notify(address: number, word: number, count: number, status: number) {
 		const { observers, access } = this
-		for (const observer of observers) observer.onInstruction?.(address, word, count)
+		const cpu = this.machine.cpu
+		const instruction = { word, executeCycles: cpu.executeCycles, passed: cpu.passed, redirected: cpu.redirected, timing: Array.from(cpu.timing) }
+		for (const observer of observers) observer.onInstruction?.(address, instruction, count)
 		if (access.branch) for (const observer of observers) observer.onBranch?.(address, access.passes, access.target)
 		if (status !== STEP_OK || !access.passes || access.address < 0) return
 		const memory = this.inspectMemory()
@@ -204,7 +219,7 @@ export class Arm26Runtime implements Machine {
 	}
 
 	private seekObservers() {
-		for (const observer of this.observers) observer.onSeek?.(this.machine.instructionCount)
+		notifyHistorySeek(this.observers, this.machine.instructionCount)
 	}
 
 	run() {
@@ -212,50 +227,32 @@ export class Arm26Runtime implements Machine {
 	}
 
 	async continue() {
-		if (this.running) return
+		if (this.execution.running) return
 		this.paused = false
 		await this.run()
 	}
 
-	async runTo(address: number) {
-		this.paused = false
-		await this.runToTemporaryBreakpoint(address, false)
+	runTo(address: number) {
+		return this.execution.runTo(address)
 	}
-
 	async stepOver() {
 		const cpu = this.machine.cpu
 		if (!this.halted && cpu.pc <= cpu.memory.length - 4) {
-			const word = cpu.readWord(cpu.pc)
+			const word = cpu.peekInstruction()
 			// A BL that will run is a call: run back to the word after it.
 			if (isCall(word) && conditionPassed(word >>> 28, cpu.psr)) {
-				await this.runToTemporaryBreakpoint((cpu.pc + 4) & PC_MASK, true)
+				await this.execution.stepOver((cpu.pc + 4) & PC_MASK)
 				return
 			}
 		}
 		this.step()
 	}
 
-	async stepToReturn() {
-		const stack = this.machine.callStack
-		const depth = stack.depth
-		if (depth === 0) {
-			await this.run()
-			return
-		}
-		await this.runUntil(() => stack.depth < depth)
+	stepToReturn() {
+		return this.execution.stepToReturn()
 	}
-
-	pause() {
-		this.paused = true
-		this.running = false
-	}
-
-	stop() {
-		this.running = false
-		this.paused = false
-		this.stopped = true
-	}
-
+	pause() { this.execution.pause() }
+	stop() { this.execution.stop() }
 	stepBack(): boolean {
 		const log = this.machine.history
 		if (!log || !log.stepBack()) return false
@@ -265,25 +262,21 @@ export class Arm26Runtime implements Machine {
 
 	rewindTo(id: number): boolean {
 		const log = this.machine.history
-		const index = this.history.indexOfId(id)
-		if (!log || index < 0) return false
-		log.rewindTo(index)
-		this.resumed()
-		return true
+		return !!log && rewindHistoryTo(this.history, () => this.historyCursor, id, () => log.stepBack(), () => this.resumed())
 	}
 
 	private resumed() {
 		this.fault = null
-		this.stopped = false
+		this.execution.stopped = false
 		this.paused = true
-		this.running = false
+		this.execution.running = false
 		this.seekObservers()
 	}
 
 	setProgramCounter(address: number) {
 		this.machine.editPc(address)
 		this.fault = null
-		this.stopped = false
+		this.execution.stopped = false
 	}
 
 	configure(options: { speed?: number | null, pacedAddresses?: ReadonlySet<number> | null }) {
@@ -307,6 +300,8 @@ export class Arm26Runtime implements Machine {
 		const values: Registers = {}
 		for (let index = 0; index < 15; index++) values[`R${index}`] = cpu.register(index)
 		values.PC = cpu.pc
+		values.CYCLES = BigInt(cpu.cycles)
+		if (cpu.cache) for (const index of [0, 2, 3, 4, 5]) values[`CP15_${index}`] = cpu.cache.readRegister(index) >>> 0
 		for (const [name, bit] of Object.entries(FLAG_BITS)) values[name] = (cpu.psr >>> bit) & 1
 		values.PSR = cpu.r15
 		for (let index = 8; index < PHYSICAL_IDS.length; index++) values[PHYSICAL_IDS[index]] = cpu.registers[index]
@@ -343,111 +338,24 @@ export class Arm26Runtime implements Machine {
 
 	/** Shifts `[address, limit]` up a byte; what is past the last non-zero byte stays. */
 	insertByte(address: number, limit: number, value: number): boolean {
-		const memory = this.machine.cpu.memory
-		const end = Math.min(limit, memory.length - 1)
-		if (address < 0 || end < address) return false
-		const top = Math.min(end, this.lastNonZero(address, end) + 1)
-		const bytes = new Uint8Array(top - address + 1)
-		bytes[0] = value
-		bytes.set(memory.subarray(address, top), 1)
-		return this.machine.editBytes(address, bytes)
+		return this.memoryEdits.insert(address, limit, value)
 	}
 
 	deleteByte(address: number, limit: number): boolean {
-		const memory = this.machine.cpu.memory
-		const end = Math.min(limit, memory.length - 1)
-		if (address < 0 || end < address) return false
-		const top = Math.max(address, this.lastNonZero(address, end))
-		const bytes = new Uint8Array(top - address + 1)
-		bytes.set(memory.subarray(address + 1, top + 1))
-		return this.machine.editBytes(address, bytes)
-	}
-
-	private lastNonZero(from: number, to: number): number {
-		const memory = this.machine.cpu.memory
-		for (let at = to; at >= from; at--) if (memory[at] !== 0) return at
-		return from - 1
+		return this.memoryEdits.delete(address, limit)
 	}
 
 	toolConfig(): MachineConfig {
-		return { delayedBranching: false, instructions: arm26InstructionSet, history: this.history }
+		return { addressing: { instructionBytes: 4, memoryWordBytes: 4 }, delayedBranching: false, instructions: arm26InstructionSet, history: this.history }
 	}
 
 	dispose() {
 		this.onProgress = null
 		this.stop()
+		this.execution.dispose()
 	}
 
-	/** Runs to `address`; a step over lifts the breakpoint it stands on. */
-	private async runToTemporaryBreakpoint(address: number, liftCurrent: boolean) {
-		const current = this.pc
-		const restore = liftCurrent && this.breakpoints.delete(current)
-		const wanted = this.breakpoints.has(address)
-		this.breakpoints.add(address)
-		try {
-			await this.run()
-		} finally {
-			if (restore) this.breakpoints.add(current)
-			if (!wanted) this.breakpoints.delete(address)
-		}
-	}
-
-	private batchSize(): number {
-		if (this.speed === null) return DEFAULT_BATCH_SIZE
-		return Math.max(1, Math.round(this.speed / ANIMATION_FRAMES_PER_SECOND))
-	}
-
-	/** Waits out a frame in slices, so the speed control and Pause are felt promptly. */
-	private async waitFrame(ms: number) {
-		if (ms <= 0) return yieldToHost()
-		const deadline = performance.now() + ms
-		const speed = this.speed
-		while (this.running && !this.halted && this.speed === speed) {
-			const remaining = deadline - performance.now()
-			if (remaining <= 0) return
-			await new Promise((resolve) => setTimeout(resolve, Math.min(remaining, FRAME_SLICE_MS)))
-		}
-	}
-
-	/** Runs until `shouldStop()` holds after an instruction, a breakpoint, input, or the end. */
-	private async runUntil(shouldStop: () => boolean) {
-		this.running = true
-		this.paused = false
-		// Continuing from a breakpoint has to make progress.
-		let first = true
-		let lastTick = performance.now()
-		let owed = 0
-		while (this.running && !this.halted) {
-			const started = performance.now()
-			const batch = this.batchSize()
-			const frameMs = this.speed === null ? 0 : (batch / this.speed) * 1000
-			let allowance = batch
-			if (this.speed === null) {
-				owed = 0
-				lastTick = started
-			} else {
-				owed = Math.min(owed + ((started - lastTick) * this.speed) / 1000, this.speed * MAX_CATCH_UP_SECONDS)
-				lastTick = started
-				allowance = Math.max(1, Math.floor(owed))
-			}
-			let executed = 0
-			while (this.running && !this.halted && executed < allowance) {
-				if (!first && this.breakpoints.has(this.pc)) {
-					this.pause()
-					break
-				}
-				first = false
-				if (this.advance() === STEP_WAIT || shouldStop()) {
-					this.pause()
-					break
-				}
-				if (this.speed !== null && this.pacedAddresses && !this.halted && !this.pacedAddresses.has(this.pc)) continue
-				executed++
-			}
-			owed -= executed
-			this.onProgress?.()
-			if (this.running && !this.halted) await this.waitFrame(Math.max(0, frameMs - (performance.now() - started)))
-		}
-		this.running = false
+	private runUntil(shouldStop: () => boolean) {
+		return this.execution.runUntil(shouldStop)
 	}
 }

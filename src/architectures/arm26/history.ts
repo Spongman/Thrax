@@ -1,27 +1,33 @@
 /**
  * ARM26 execution history: one entry per state-changing step, each owning a
  * run of effects that hold the values the step replaced, in the shared
- * HistoryLog.  A step that changes nothing (an OS_ReadC still waiting, a
- * fault) records no entry.  Rewinding to entry `index` undoes it and every
+ * HistoryLog. Steps that change only fetch/cache/clock state are kept as edits
+ * without retiring an instruction. Rewinding to entry `index` undoes it and every
  * later one, leaving the machine about to run that entry's instruction again.
  */
 
 import { HistoryBufferLayout, type HistoryBufferSchema } from '../../core/historyBuffers'
-import { HistoryLog } from '../../core/historyLog'
+import { ReversibleHistory } from '../../core/reversibleHistory'
+import { HistoryText, exchangeHistoryArray } from '../../core/historyCursor'
 import type { Arm26CallStack, Arm26CallStackSink } from './callStack'
 import { FAULT_NONE, type Arm26Cpu, type Arm26EffectSink } from './cpu'
 import type { Arm26Keyboard } from './keyboard'
 import type { Arm26Os } from './os'
 
-const column = (name: string, type: 'u8' | 'i32' | 'u32' | 'f64') => Object.freeze({ name, type, elements: 1 })
+const column = (name: string, type: 'u8' | 'i32' | 'u32' | 'f64', elements = 1) => Object.freeze({ name, type, elements })
 
 /** Entry: the instruction's address and word (the vector, for an interrupt), its kind and the count before it. */
 export const arm26HistorySchema: HistoryBufferSchema = Object.freeze({
-	entry: Object.freeze([column('pc', 'u32'), column('word', 'i32'), column('kind', 'u8'), column('count', 'f64')]),
+	entry: Object.freeze([
+		column('pc', 'u32'), column('word', 'i32'), column('kind', 'u8'), column('count', 'f64'), column('controlCount', 'f64'),
+		column('cyclesBefore', 'f64'), column('executeCycles', 'u32'), column('passed', 'u8'), column('redirected', 'u8'),
+		column('prefetch', 'u32', 7), column('prefetchTimes', 'f64', 6),
+		column('clock', 'f64', 7), column('timing', 'f64', 6),
+	]),
 	effect: Object.freeze([column('kind', 'u8'), column('a', 'i32'), column('b', 'i32')]),
 })
 
-/** Effect kinds; `b` is always the old value. `a` is the physical register. */
+/** Effect kinds; `b` holds the value exchanged with live state when navigating. `a` is the physical register. */
 export const EFFECT_REGISTER = 0
 /** `a` is the word address. */
 export const EFFECT_MEMORY = 1
@@ -41,6 +47,7 @@ export const EFFECT_KEY = 10
 /** Display output length; `a` is the length after. */
 export const EFFECT_DISPLAY = 11
 export const EFFECT_KEY_INTERRUPT = 12
+export const EFFECT_CACHE = 13
 
 export const ENTRY_INSTRUCTION = 0
 export const ENTRY_EDIT = 1
@@ -60,12 +67,23 @@ const PC = layout.column('entry', 'pc', 'u32')
 const WORD = layout.column('entry', 'word', 'i32')
 const KIND = layout.column('entry', 'kind', 'u8')
 const COUNT = layout.column('entry', 'count', 'f64')
+const CONTROL_COUNT = layout.column('entry', 'controlCount', 'f64')
+const CYCLES = layout.column('entry', 'cyclesBefore', 'f64')
+const EXECUTE = layout.column('entry', 'executeCycles', 'u32')
+const PREFETCH = layout.column('entry', 'prefetch', 'u32', 7)
+const PREFETCH_TIMES = layout.column('entry', 'prefetchTimes', 'f64', 6)
+const CLOCK = layout.column('entry', 'clock', 'f64', 7)
+const TIMING = layout.column('entry', 'timing', 'f64', 6)
+const PASSED = layout.column('entry', 'passed', 'u8')
+const REDIRECTED = layout.column('entry', 'redirected', 'u8')
 const EFFECT_KIND = layout.column('effect', 'kind', 'u8')
 const EFFECT_A = layout.column('effect', 'a', 'i32')
 const EFFECT_B = layout.column('effect', 'b', 'i32')
 
-export class Arm26History implements Arm26EffectSink, Arm26CallStackSink {
-	private readonly log = new HistoryLog(layout)
+export class Arm26History extends ReversibleHistory implements Arm26EffectSink, Arm26CallStackSink {
+	private cyclesBefore = 0
+	readonly outputText = new HistoryText()
+	readonly displayText = new HistoryText()
 	private start = 0
 	private pcBefore = 0
 	private outputLength = 0
@@ -80,25 +98,27 @@ export class Arm26History implements Arm26EffectSink, Arm26CallStackSink {
 	private instructionCount = 0
 
 	constructor(private readonly target: Arm26HistoryTarget, limit: number) {
-		this.log.limit = limit
-	}
-
-	get length(): number {
-		return this.log.length
-	}
-
-	get firstId(): number {
-		return this.log.first
+		super(layout, limit)
 	}
 
 	/** Opens an entry; call before the CPU steps, or before an edit with ENTRY_EDIT. */
 	begin(kind = ENTRY_INSTRUCTION) {
+		this.timeline.branch()
 		const { cpu, os, keyboard } = this.target
 		this.kind = kind
 		this.instructionCount = this.target.instructionCount
 		this.log.openEntryWith(this.log.end)
 		this.start = this.log.openEffectStart
 		this.pcBefore = cpu.pc
+		this.cyclesBefore = cpu.cycles
+		const position = this.log.openEntry
+		if (position >= 0) {
+			const columns = this.log.entries.block(position).arrays
+			const slot = position % this.log.entries.capacity
+			columns[PREFETCH].set(cpu.prefetch.words, slot * 7)
+			columns[PREFETCH_TIMES].set(cpu.prefetch.times, slot * 6)
+			columns[CLOCK].set(cpu.clock.state, slot * 7)
+		}
 		this.outputLength = os.output.length
 		this.inputIndex = os.inputIndex
 		this.waiting = os.waiting
@@ -111,6 +131,11 @@ export class Arm26History implements Arm26EffectSink, Arm26CallStackSink {
 	interrupted(vector: number) {
 		this.kind = ENTRY_INTERRUPT
 		this.vector = vector
+	}
+
+	/** Waiting or a rejected instruction may change cache/input state without retiring. */
+	notRetired() {
+		this.kind = ENTRY_EDIT
 	}
 
 	/** Closes the entry; returns whether the step changed anything and so was kept. */
@@ -126,7 +151,7 @@ export class Arm26History implements Arm26EffectSink, Arm26CallStackSink {
 		const log = this.log
 		const position = log.openEntry
 		if (position < 0) return false
-		if (log.effects.end === this.start) {
+		if (log.effects.end === this.start && cpu.cycles === this.cyclesBefore) {
 			log.discard()
 			return false
 		}
@@ -136,6 +161,12 @@ export class Arm26History implements Arm26EffectSink, Arm26CallStackSink {
 		columns[WORD][slot] = this.kind === ENTRY_INTERRUPT ? this.vector : cpu.instruction
 		columns[KIND][slot] = this.kind
 		columns[COUNT][slot] = this.instructionCount
+		columns[CONTROL_COUNT][slot] = this.instructionCount
+		columns[CYCLES][slot] = this.cyclesBefore
+		columns[EXECUTE][slot] = cpu.executeCycles
+		columns[PASSED][slot] = +cpu.passed
+		columns[REDIRECTED][slot] = +cpu.redirected
+		columns[TIMING].set(cpu.timing, slot * 6)
 		log.close()
 		return true
 	}
@@ -154,6 +185,19 @@ export class Arm26History implements Arm26EffectSink, Arm26CallStackSink {
 
 	psr(old: number) {
 		this.push(EFFECT_PSR, 0, old)
+	}
+
+	cache(index: number, old: number) {
+		this.push(EFFECT_CACHE, index, old)
+	}
+
+	executeCyclesAt(index: number): number { return this.column(index, EXECUTE) }
+	passedAt(index: number): boolean { return this.column(index, PASSED) !== 0 }
+	redirectedAt(index: number): boolean { return this.column(index, REDIRECTED) !== 0 }
+	timingAt(index: number): number[] {
+		const position = this.log.first + index
+		const slot = position % this.log.entries.capacity
+		return Array.from(this.log.entries.block(position).arrays[TIMING].subarray(slot * 6, slot * 6 + 6))
 	}
 
 	frameWord(index: number, old: number) {
@@ -204,50 +248,39 @@ export class Arm26History implements Arm26EffectSink, Arm26CallStackSink {
 		return this.effect(position, EFFECT_B)
 	}
 
-	stepBack(): boolean {
-		if (this.log.length === 0) return false
-		this.rewindTo(this.log.length - 1)
-		return true
-	}
-
-	/** Undoes entry `index` and every later one, then forgets them. */
-	rewindTo(index: number) {
+	protected exchange = (index: number, forward: boolean) => {
 		const log = this.log
-		if (!Number.isInteger(index) || index < 0 || index > log.length) throw new RangeError(`No history entry ${index}`)
-		if (index === log.length) return
 		const { cpu, os, keyboard, callStack } = this.target
-		const stop = this.effectStartAt(index)
-		const count = this.countAt(index)
-		const capacity = log.effects.capacity
-		for (let position = log.effects.end - 1; position >= stop; position--) {
-			const columns = log.effects.block(position).arrays
-			const slot = position % capacity
-			const a = columns[EFFECT_A][slot]
-			const b = columns[EFFECT_B][slot]
+		const start = log.effectStart(index), count = log.effectCount(index)
+		for (let offset = 0; offset < count; offset++) {
+			const position = start + (forward ? offset : count - offset - 1)
+			const columns = log.effects.block(position).arrays, slot = position % log.effects.capacity
+			const a = columns[EFFECT_A][slot], b = columns[EFFECT_B][slot]
 			switch (columns[EFFECT_KIND][slot]) {
-				case EFFECT_REGISTER: cpu.setPhysical(a, b); break
-				case EFFECT_MEMORY: cpu.writeWord(a, b); break
-				case EFFECT_PC: cpu.pc = b >>> 0; break
-				case EFFECT_PSR: cpu.psr = b; break
-				case EFFECT_OUTPUT: os.output = os.output.slice(0, b); break
-				case EFFECT_INPUT: os.inputIndex = b; break
-				case EFFECT_WAITING: os.waiting = b !== 0; break
-				case EFFECT_HALTED: this.target.halted = b !== 0; break
-				case EFFECT_FRAME_WORD: callStack.setFrameWord(a, b); break
-				case EFFECT_FRAME_DEPTH: callStack.setDepth(b); break
-				case EFFECT_KEY: keyboard.inputIndex = b; break
-				case EFFECT_DISPLAY: keyboard.display = keyboard.display.slice(0, b); break
-				case EFFECT_KEY_INTERRUPT: keyboard.interruptEnable = b !== 0; break
+				case EFFECT_REGISTER: columns[EFFECT_B][slot] = cpu.registers[a]; cpu.setPhysical(a, b); break
+				case EFFECT_CACHE: columns[EFFECT_B][slot] = cpu.cache!.state[a]; cpu.cache!.state[a] = b; break
+				case EFFECT_MEMORY: columns[EFFECT_B][slot] = cpu.readWord(a); cpu.writeWord(a, b); break
+				case EFFECT_PC: columns[EFFECT_B][slot] = cpu.pc; cpu.pc = b >>> 0; break
+				case EFFECT_PSR: columns[EFFECT_B][slot] = cpu.psr; cpu.psr = b; break
+				case EFFECT_OUTPUT: columns[EFFECT_B][slot] = os.output.length; columns[EFFECT_A][slot] = b; os.output = this.outputText.exchange(os.output, b); break
+				case EFFECT_INPUT: columns[EFFECT_B][slot] = os.inputIndex; os.inputIndex = b; break
+				case EFFECT_WAITING: columns[EFFECT_B][slot] = +os.waiting; os.waiting = b !== 0; break
+				case EFFECT_HALTED: columns[EFFECT_B][slot] = +this.target.halted; this.target.halted = b !== 0; break
+				case EFFECT_FRAME_WORD: columns[EFFECT_B][slot] = callStack.frameWordAt(a); callStack.setFrameWord(a, b); break
+				case EFFECT_FRAME_DEPTH: columns[EFFECT_B][slot] = callStack.depth; callStack.setDepth(b); break
+				case EFFECT_KEY: columns[EFFECT_B][slot] = keyboard.inputIndex; keyboard.inputIndex = b; break
+				case EFFECT_DISPLAY: columns[EFFECT_B][slot] = keyboard.display.length; columns[EFFECT_A][slot] = b; keyboard.display = this.displayText.exchange(keyboard.display, b); break
+				case EFFECT_KEY_INTERRUPT: columns[EFFECT_B][slot] = +keyboard.interruptEnable; keyboard.interruptEnable = b !== 0; break
 			}
 		}
+		const entrySlot = (log.first + index) % log.entries.capacity
+		const entries = log.entries.block(log.first + index).arrays
+		exchangeHistoryArray(entries[PREFETCH] as Uint32Array, entrySlot * 7, cpu.prefetch.words)
+		exchangeHistoryArray(entries[PREFETCH_TIMES] as Float64Array, entrySlot * 6, cpu.prefetch.times)
+		exchangeHistoryArray(entries[CLOCK] as Float64Array, entrySlot * 7, cpu.clock.state)
 		cpu.fault = FAULT_NONE
 		cpu.faultAddress = 0
-		this.target.instructionCount = count
-		log.truncate(index)
-	}
-
-	clear() {
-		this.log.clear()
+		{ const held = this.target.instructionCount; this.target.instructionCount = entries[CONTROL_COUNT][entrySlot]; entries[CONTROL_COUNT][entrySlot] = held }
 	}
 
 	private push(kind: number, a: number, b: number) {
@@ -259,13 +292,4 @@ export class Arm26History implements Arm26EffectSink, Arm26CallStackSink {
 		columns[EFFECT_B][slot] = b
 	}
 
-	private column(index: number, column: number): number {
-		if (!(index >= 0 && index < this.log.length)) throw new RangeError(`No history entry ${index}`)
-		const position = this.log.first + index
-		return this.log.entries.block(position).arrays[column][position % this.log.entries.capacity]
-	}
-
-	private effect(position: number, column: number): number {
-		return this.log.effects.block(position).arrays[column][position % this.log.effects.capacity]
-	}
 }

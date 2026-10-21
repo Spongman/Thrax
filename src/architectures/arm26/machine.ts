@@ -1,3 +1,4 @@
+import { deltaHistoryEdit } from '../../core/editTransaction'
 /**
  * The 26-bit machine: a CPU with RAM from address 0, the RISC OS-style SWI
  * console, the memory-mapped keyboard, a shadow call stack and history.
@@ -18,6 +19,8 @@ import {
 import { Arm26History, ENTRY_EDIT } from './history'
 import { Arm26Keyboard } from './keyboard'
 import { Arm26Os } from './os'
+import type { Arm26Model } from './arm3'
+import type { Arm26BusTiming } from './busTiming'
 
 /** Where each mode's stack starts. */
 export const SVC_STACK = 0x8000
@@ -32,6 +35,8 @@ export const DISPLAY_BASE = 0x10000
 
 export interface Arm26MachineOptions {
 	memoryBytes: number
+	cpuModel?: Arm26Model
+	timing?: Readonly<Arm26BusTiming>
 	/** Entries of history to keep; 0 for none. */
 	historyLimit?: number
 }
@@ -46,7 +51,7 @@ export class Arm26Machine {
 	instructionCount = 0
 
 	constructor(options: Arm26MachineOptions) {
-		this.cpu = new Arm26Cpu(options.memoryBytes)
+		this.cpu = new Arm26Cpu(options.memoryBytes, options.cpuModel, options.timing)
 		this.cpu.swi = this.os
 		this.cpu.io = this.keyboard
 		const limit = options.historyLimit ?? 0
@@ -106,7 +111,9 @@ export class Arm26Machine {
 			const call = (word & 0x0F000000) === 0x0B000000 && conditionPassed(word >>> 28, psr)
 			this.callStack.observe(call, pc, cpu.pc, cpu.register(13))
 		}
-		if (status !== STEP_WAIT && status !== STEP_FAULT) this.instructionCount++
+		if (status !== STEP_WAIT && status !== STEP_FAULT) {
+			this.instructionCount++
+		} else history?.notRetired()
 		history?.end()
 		return status
 	}
@@ -131,6 +138,7 @@ export class Arm26Machine {
 		return this.edit(() => {
 			this.history?.pc(this.cpu.pc)
 			this.cpu.pc = address & PC_MASK
+			this.cpu.prefetch.invalidate()
 			this.halted = false
 		})
 	}
@@ -140,6 +148,7 @@ export class Arm26Machine {
 		return this.edit(() => {
 			this.history?.psr(this.cpu.psr)
 			this.cpu.psr = (value & PSR_MASK) | 0
+			this.cpu.prefetch.invalidate()
 		})
 	}
 
@@ -152,13 +161,12 @@ export class Arm26Machine {
 			const last = (address + bytes.length - 1) & ~3
 			for (let word = first; word <= last; word += 4) this.history?.memory(word, this.cpu.readWord(word))
 			memory.set(Array.from(bytes, (byte) => byte & 0xFF), address)
+			this.cpu.cache?.flush()
+			this.cpu.prefetch.invalidate()
 		})
 	}
 
 	private edit(change: () => void): boolean {
-		this.history?.begin(ENTRY_EDIT)
-		change()
-		this.history?.end()
-		return true
+		return deltaHistoryEdit(change, this.history, () => { this.history?.begin(ENTRY_EDIT) })
 	}
 }
