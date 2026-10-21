@@ -1,5 +1,13 @@
+import { describeValueEffect, textChange } from '../../core/historyView'
+import { parseIntegerInput, readCString } from '../../core/console'
+import { HistoryText } from '../../core/historyCursor'
+import { notifyHistorySeek } from '../../core/observer'
+import { editTransaction } from '../../core/editTransaction'
+import { rewindHistoryTo } from '../../core/historyCursor'
+import { MemoryEdits } from '../../core/memoryEdits'
+import { historyNeighbour } from '../../core/historyCursor'
 import type { ExecutionObserver } from '../../core/observer'
-import { yieldToHost } from '../../core/yieldToHost'
+import { ExecutionController } from '../../core/executionController'
 import type {
 	CallFrame,
 	DescribedEffect,
@@ -31,13 +39,13 @@ export const instructionSet: InstructionSet = {
 				mnemonic: d.compressedName ?? d.name,
 				category: branch ? 2 : jump ? 1 : load || d.format === 'S' ? 3 : ['ecall', 'ebreak'].includes(d.name) ? 5 : 0,
 				encoding: this.encodings.indexOf(d.size === 2 ? 'C' : d.format),
-				reads: (d.format === 'R' || d.format === 'S' || branch
+				reads: d.name === 'ecall' ? [17, 10] : (d.format === 'R' || d.format === 'S' || branch
 					? [d.rs1, d.rs2]
 					: d.format === 'I'
 						? [d.rs1]
 						: []
 				).filter((r) => r !== 0),
-				writes: [d.format === 'S' || branch || ['ecall', 'ebreak', 'fence'].includes(d.name) || d.rd === 0 ? -1 : d.rd].filter(r => r >= 0),
+				writes: d.name === 'ecall' ? [10] : d.format === 'S' || branch || ['ecall', 'ebreak', 'fence'].includes(d.name) || d.rd === 0 ? [] : [d.rd],
 				isLoad: load,
 				isBranch: branch,
 				isJump: jump
@@ -62,12 +70,14 @@ export class RiscvRuntime implements Machine {
 	readonly historyFormat: HistoryFormatter
 	onProgress: (() => void) | null = null
 	pc = 0
-	halted = false
+	private cpuHalted = false
+	get halted() { return this.cpuHalted || this.execution.stopped }
+	set halted(value: boolean) { this.cpuHalted = value }
 	paused = false
 	instructionCount = 0
 	console = ''
+	private readonly outputText = new HistoryText()
 	private waiting = false
-	private running = false
 	private disposed = false
 	private speed: number | null
 	private paced: ReadonlySet<number> | null = null
@@ -79,6 +89,24 @@ export class RiscvRuntime implements Machine {
 		outputLength: 0,
 		pending: false
 	}
+	private readonly execution = new ExecutionController(this, {
+		speed: () => this.speed,
+		pacedAddresses: () => this.paced,
+		depth: () => this.callStack.length,
+		ready: () => !this.waiting || this.history.timeline.ahead,
+	})
+
+	private readonly memoryEdits = new MemoryEdits({
+		region: () => this.disposed ? null : ({ start: 0, end: 0 + this.memory.length - 1 }),
+		read: (address) => this.memory[address - 0],
+		commit: (address, bytes) => {
+			this.edit(() => {
+				for (let i = 0; i < bytes.length; i++) this.put(address + i, bytes[i])
+			})
+			return true
+		},
+	})
+
 	constructor(
 		readonly program: RiscvAssembly,
 		options: MachineOptions
@@ -104,14 +132,10 @@ export class RiscvRuntime implements Machine {
 					slot = pos % log.entries.capacity
 				const effects: DescribedEffect[] = []
 				const add = (effect: Omit<DescribedEffect, 'label' | 'applied'>) =>
-					effects.push({
-						...effect,
-						applied,
-						label: `${effect.subject} ${applied ? '→' : '←'} ${effect.text ?? effect.value ?? effect.detail ?? ''}`
-					})
-				const nextPos = pos + 1,
-					next = index + 1 < log.length ? log.entries.block(nextPos).buffers.columns : null,
-					nextSlot = nextPos % log.entries.capacity
+					effects.push(describeValueEffect(applied, { ...effect }, 32))
+				const neighbour = historyNeighbour(log, this.historyCursor, index),
+					next = neighbour?.columns,
+					nextSlot = neighbour?.slot ?? 0
 				for (let r = 1; r < 32; r++) {
 					const before = columns.registers[slot * 32 + r],
 						after = next ? next.registers[nextSlot * 32 + r] : this.registers[r]
@@ -126,9 +150,9 @@ export class RiscvRuntime implements Machine {
 				if (columns.outputLength[slot] !== afterLength)
 					add({
 						subject: 'console',
-						detail: JSON.stringify(this.console.slice(columns.outputLength[slot], afterLength))
+						detail: textChange(this.history.timeline.ahead ? this.outputText.text : this.console, columns.outputLength[slot], afterLength)
 					})
-				if (columns.halted[slot] !== (next ? next.halted[nextSlot] : +this.halted)) add({ subject: 'halted' })
+				if (columns.halted[slot] !== (next ? next.halted[nextSlot] : +this.cpuHalted)) add({ subject: 'halted' })
 				return effects
 			}
 		}
@@ -137,7 +161,7 @@ export class RiscvRuntime implements Machine {
 		return this.waiting && !this.halted ? { type: 'integer' as const, prompt: 'ECALL read integer (a7=5)' } : null
 	}
 	get historyCursor() {
-		return this.history.length
+		return this.history.timeline.index
 	}
 	private range(address: number, size: number) {
 		if (!Number.isInteger(address) || address < 0 || address + size > MEMORY_BYTES)
@@ -151,17 +175,28 @@ export class RiscvRuntime implements Machine {
 		const state = this.snapshot
 		state.pc = this.pc
 		state.count = this.instructionCount
-		state.halted = this.halted
+		state.halted = this.cpuHalted
 		state.outputLength = this.console.length
 		state.pending = this.waiting
 		return state
+	}
+	private moveHistory(forward = false): boolean {
+		if (forward && !this.history.timeline.ahead) return false
+		if (!this.history.timeline.ahead) this.outputText.text = this.console
+		const moved = this.history.undo(this.restore, (address, value) => {
+			const old = this.memory[address - 0]
+			this.memory[address - 0] = value
+			return old
+		}, this.saved(), this.callStack, forward)
+		if (moved && forward) notifyHistorySeek(this.observers, this.instructionCount)
+		return moved
 	}
 	private restore = (s: SavedState) => {
 		this.pc = s.pc
 		this.instructionCount = s.count
 		this.registers.set(s.registers)
 		this.halted = s.halted
-		this.console = this.console.slice(0, s.outputLength)
+		this.console = this.outputText.exchange(this.console, s.outputLength)
 		if (s.frameAction === 1) this.callStack.pop()
 		else if (s.frameAction === 2 && s.frame) this.callStack.push(s.frame)
 		this.waiting = s.pending
@@ -178,7 +213,9 @@ export class RiscvRuntime implements Machine {
 		return decode(this.view.getUint32(this.pc, true), this.program.compressed)
 	}
 	step() {
-		if (this.halted || this.waiting || this.disposed) return
+		if (this.disposed) return
+		if (this.moveHistory(true)) return
+		if (this.halted || this.waiting) return
 		const d = this.instruction()
 		if (!d.name)
 			throw new Error(`Illegal ${this.program.compressed ? 'RV32IMC' : 'RV32IM'} instruction 0x${d.word.toString(16)}`)
@@ -194,10 +231,9 @@ export class RiscvRuntime implements Machine {
 			this.history.close()
 		} catch (error) {
 			this.history.close()
-			this.history.undo(this.restore, (a, v) => {
-				this.memory[a] = v
-			})
-			for (const o of this.observers) o.onSeek?.(this.instructionCount)
+			this.moveHistory()
+			this.history.timeline.branch()
+			notifyHistorySeek(this.observers, this.instructionCount)
 			throw error
 		}
 	}
@@ -376,15 +412,10 @@ export class RiscvRuntime implements Machine {
 				if (service === 1) this.console += String(arg)
 				else if (service === 11) this.console += String.fromCharCode(arg & 255)
 				else if (service === 4) {
-					let p = arg >>> 0,
-						text = ''
-					for (;;) {
-						this.range(p, 1)
-						const byte = this.memory[p++]
-						if (!byte) break
-						text += String.fromCharCode(byte)
-					}
-					this.console += text
+					this.console += readCString(arg >>> 0, this.memory.length + 1, address => {
+						this.range(address, 1)
+						return this.memory[address]
+					})
 				} else if (service === 10 || service === 93) this.halted = true
 				else throw new Error(`Unsupported educational ECALL ${service}`)
 				break
@@ -399,9 +430,9 @@ export class RiscvRuntime implements Machine {
 		this.pc = next
 	}
 	provideInput(input: string) {
-		if (!this.waiting || !/^[+-]?\d+$/.test(input.trim())) return false
-		const value = Number(input.trim())
-		if (!Number.isSafeInteger(value) || value < -2147483648 || value > 2147483647) return false
+		if (!this.waiting || this.disposed) return false
+		const value = parseIntegerInput(input, 32)
+		if (value === null) return false
 		this.history.begin(this.saved(), 0x73)
 		for (const o of this.observers) o.onInstruction?.(this.pc, decode(0x73), this.instructionCount)
 		this.registers[10] = value
@@ -411,51 +442,8 @@ export class RiscvRuntime implements Machine {
 		this.history.close()
 		return true
 	}
-	private async runUntil(done: () => boolean) {
-		if (this.running || this.disposed) return
-		this.running = true
-		this.paused = false
-		try {
-			let first = true
-			while (this.running && !this.halted && !this.waiting && !this.disposed) {
-				const start = performance.now()
-				let steps = 0,
-					visible = 0
-				const batch = this.speed === null ? 20000 : Math.max(1, Math.ceil(this.speed / 30))
-				while (
-					steps < 20000 &&
-					visible < batch &&
-					performance.now() - start < 16 &&
-					this.running &&
-					!this.halted &&
-					!this.waiting
-				) {
-					if (!first && (done() || this.breakpoints.has(this.pc))) {
-						this.paused = true
-						return
-					}
-					first = false
-					const paced = !this.paced || this.paced.has(this.pc)
-					this.step()
-					steps++
-					if (paced) visible++
-				}
-				this.onProgress?.()
-				await yieldToHost()
-				if (this.speed !== null) {
-					const speed = this.speed,
-						due = (visible / Math.max(1, speed)) * 1000
-					let delay = due - (performance.now() - start)
-					while (delay > 0 && this.running && this.speed === speed) {
-						const slice = Math.min(50, delay)
-						await new Promise((resolve) => setTimeout(resolve, slice))
-						delay -= slice
-					}
-				}
-			}
-		} finally {
-			this.running = false
-		}
+	private runUntil(done: () => boolean) {
+		return this.execution.runUntil(done)
 	}
 	run() {
 		return this.runUntil(() => false)
@@ -464,47 +452,49 @@ export class RiscvRuntime implements Machine {
 		return this.run()
 	}
 	runTo(address: number) {
-		return this.runUntil(() => this.pc === address)
+		return this.execution.runTo(address)
 	}
 	async stepOver() {
 		if (this.disposed || this.halted) return
 		const d = this.instruction()
 		if ((d.name === 'jal' || d.name === 'jalr') && (d.rd === 1 || d.rd === 5)) {
-			const depth = this.callStack.length,
-				target = this.pc + d.size
-			await this.runUntil(() => this.pc === target && this.callStack.length <= depth)
+			const target = this.pc + d.size
+			await this.execution.stepOver(target)
 		} else this.step()
 	}
 	stepToReturn() {
-		const depth = this.callStack.length
-		return this.runUntil(() => depth > 0 && this.callStack.length < depth)
+		return this.execution.stepToReturn()
 	}
-	pause() {
-		this.running = false
-		this.paused = true
-	}
-	stop() {
-		this.running = false
-		this.halted = true
-	}
+	pause() { this.execution.pause() }
+	stop() { this.execution.stop() }
 	stepBack() {
+		if (this.disposed || this.historyCursor <= 0) return false
 		this.pause()
-		const undone = this.history.undo(this.restore, (a, v) => {
-			this.memory[a] = v
-		})
-		if (undone) for (const o of this.observers) o.onSeek?.(this.instructionCount)
+		const undone = this.moveHistory()
+		if (undone) {
+			this.execution.stopped = false
+			notifyHistorySeek(this.observers, this.instructionCount)
+		}
 		return undone
 	}
-	rewindTo(id: number) {
-		const index = this.history.indexOfId(id)
-		if (index < 0) return false
-		while (this.history.length > index) this.stepBack()
-		return true
+	rewindTo(id: number): boolean {
+		return rewindHistoryTo(this.history, () => this.historyCursor, id, () => this.moveHistory(), () => {
+			this.execution.stopped = false
+			this.pause()
+			notifyHistorySeek(this.observers, this.instructionCount)
+		})
 	}
 	private edit(change: () => void) {
-		this.history.begin(this.saved(), 0, true)
-		change()
-		this.history.close()
+		if (this.disposed) return
+		editTransaction(change, {
+			begin: () => this.history.begin(this.saved(), 0, true),
+			commit: () => { this.history.close() },
+			rollback: () => {
+				this.history.close()
+				this.moveHistory()
+				this.history.timeline.branch()
+			},
+		})
 	}
 	setProgramCounter(address: number) {
 		this.aligned(address, this.program.compressed ? 2 : 4)
@@ -513,6 +503,7 @@ export class RiscvRuntime implements Machine {
 			this.halted = false
 			this.waiting = false
 		})
+		this.execution.stopped = false
 	}
 	registerValues(): Registers {
 		return { ...Object.fromEntries(Array.from(this.registers, (value, i) => [`x${i}`, value])), PC: this.pc }
@@ -542,35 +533,11 @@ export class RiscvRuntime implements Machine {
 		this.edit(() => this.put(address, value))
 		return true
 	}
-	insertByte(address: number, limit: number, value: number) {
-		if (
-			!Number.isInteger(address) ||
-			!Number.isInteger(limit) ||
-			address < 0 ||
-			limit >= MEMORY_BYTES ||
-			address > limit
-		)
-			return false
-		this.edit(() => {
-			for (let a = limit; a > address; a--) this.put(a, this.memory[a - 1])
-			this.put(address, value)
-		})
-		return true
+	insertByte(address: number, limit: number, value: number): boolean {
+		return this.memoryEdits.insert(address, limit, value)
 	}
-	deleteByte(address: number, limit: number) {
-		if (
-			!Number.isInteger(address) ||
-			!Number.isInteger(limit) ||
-			address < 0 ||
-			limit >= MEMORY_BYTES ||
-			address > limit
-		)
-			return false
-		this.edit(() => {
-			for (let a = address; a < limit; a++) this.put(a, this.memory[a + 1])
-			this.put(limit, 0)
-		})
-		return true
+	deleteByte(address: number, limit: number): boolean {
+		return this.memoryEdits.delete(address, limit)
 	}
 	configure(options: { speed?: number | null; pacedAddresses?: ReadonlySet<number> | null }) {
 		if (options.speed !== undefined) this.speed = options.speed
@@ -586,11 +553,12 @@ export class RiscvRuntime implements Machine {
 		return this.breakpoints
 	}
 	toolConfig() {
-		return { delayedBranching: false, instructions: instructionSet, history: this.history }
+		return { addressing: { instructionBytes: this.program.compressed ? 2 : 4, memoryWordBytes: 4 }, delayedBranching: false, instructions: instructionSet, history: this.history }
 	}
 	dispose() {
 		this.disposed = true
-		this.running = false
+		this.execution.dispose()
+		this.execution.running = false
 		this.onProgress = null
 		this.observers.length = 0
 		this.history.log.clear()

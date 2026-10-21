@@ -1,3 +1,6 @@
+import { visitSourceLines, type SourceLine } from '../../core/assembly/sourceLines'
+import { integerArithmetic } from '../../core/assembly/integerArithmetic'
+import { splitOperands, stripAssemblyComment } from '../../core/assembly/text'
 import {
 	assembleStatements,
 	defaultLimits,
@@ -13,35 +16,7 @@ import { DATA_BASE, MEMORY_BYTES, register, TEXT_BASE } from './isa'
 import { RiscvAssembly } from './program'
 import { encodeCompressed } from './compressed'
 
-const arithmetic: Arithmetic = {
-	unary: (op, v) => (op === Op.Neg ? -v : op === Op.Not ? ~v : v),
-	binary(op, a, b, at) {
-		switch (op) {
-			case Op.Add:
-				return a + b
-			case Op.Sub:
-				return a - b
-			case Op.Mul:
-				return a * b
-			case Op.Div:
-				if (b === 0) throw new AssemblyError('Division by zero', at)
-				return Math.trunc(a / b)
-			case Op.Mod:
-				if (b === 0) throw new AssemblyError('Division by zero', at)
-				return a % b
-			case Op.And:
-				return a & b
-			case Op.Or:
-				return a | b
-			case Op.Xor:
-				return a ^ b
-			case Op.Shl:
-				return a << b
-			default:
-				return a >> b
-		}
-	}
-}
+const arithmetic: Arithmetic = integerArithmetic
 const syntax = {
 	binary: new Map([
 		['|', { op: Op.Or, precedence: 1 }],
@@ -228,129 +203,117 @@ export function encodeInstruction(name: string, args: string[], c: HookContext, 
 
 export function assembleRiscv(sources: AssemblySources, compressed = false): RiscvAssembly {
 	const statements: Statement[] = [],
-		diagnostics: RiscvAssembly['diagnostics'] = [],
-		files = new Map(sources.files.map((f) => [f.name, f]))
+		diagnostics: RiscvAssembly['diagnostics'] = []
 	let reservedBytes = 0
 	let allowCompressed = compressed
 	const reserve = (bytes: number) => {
 		reservedBytes += bytes
 		if (reservedBytes > MEMORY_BYTES) throw new Error('Assembly exceeds the 1 MiB output limit')
 	}
-	let visitedLines = 0,
-		expansions = 0
-	const visit = (name: string, chain: string[]) => {
-		if (chain.includes(name) || chain.length >= 64) throw new Error(`Recursive include '${name}'`)
-		if (++expansions > 4096) throw new Error('Source include expansion limit exceeded')
-		const file = files.get(name)
-		if (!file) throw new Error(`File '${name}' not found`)
-		for (const [index, original] of file.code.split(/\r?\n/).entries()) {
-			if (diagnostics.length >= 100) return
-			if (statements.length > 100000) throw new Error('Expanded source exceeds 100000 statements')
-			if (++visitedLines > 100000) throw new Error('Expanded source exceeds 100000 lines')
-			const at = { file: name, line: index + 1, column: 1 }
-			try {
-				let line = original.replace(/#(?=(?:[^"\\]*(?:\\.[^"\\]*)*"[^"\\]*(?:\\.[^"\\]*)*")*[^"\\]*$).*$/, '').trim()
-				while (/^[\w.$]+:/.test(line)) {
-					if (statements.length >= 100000) throw new Error('Expanded source exceeds 100000 statements')
-					const label = /^[\w.$]+/.exec(line)![0]
-					statements.push({ kind: K.Label, name: label, at })
-					line = line.slice(label.length + 1).trim()
-				}
-				if (!line) continue
-				const match = /^(\S+)\s*(.*)$/.exec(line)!,
-					op = match[1].toLowerCase(),
-					rest = match[2],
-					args = rest ? rest.split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/).map((x) => x.trim()) : []
-				if (op === '.include') {
-					const included = JSON.parse(rest)
-					const relative = name.includes('/') ? name.slice(0, name.lastIndexOf('/') + 1) + included : included
-					visit(files.has(relative) ? relative : included, [...chain, name])
-					continue
-				}
-				if (['.globl', '.global', '.type', '.size'].includes(op)) continue
-				if (op === '.option') {
-					if (rest === 'rvc' && compressed) allowCompressed = true
-					else if (rest === 'norvc') allowCompressed = false
-					else if (!['nopic', 'norelax'].includes(rest))
-						throw new Error(`Unsupported .option '${rest}' for the selected instruction set`)
-					continue
-				}
-				if (op === '.text' || op === '.data' || op === '.bss' || op === '.section') {
-					const section = op === '.section' ? rest.split(',')[0] : op
-					if (!['.text', '.data', '.rodata', '.bss'].includes(section))
-						throw new Error(`Unsupported section '${section}'`)
-					statements.push({ kind: K.Section, section: section === '.text' ? 0 : 1, at })
-					continue
-				}
-				if (op === '.equ' || op === '.set') {
-					if (args.length !== 2) throw new Error('Expected name, value')
-					statements.push({ kind: K.Assign, name: args[0], value: expression(args[1], at), at })
-					continue
-				}
-				if (op === '.org') {
-					statements.push({ kind: K.Origin, value: expression(rest, at), at })
-					continue
-				}
-				if (op === '.align' || op === '.p2align' || op === '.balign') {
-					const power = Number(rest)
-					if (!Number.isInteger(power) || power < 0 || power > (op === '.balign' ? 4096 : 12))
-						throw new Error('Invalid alignment')
-					statements.push({ kind: K.Align, boundary: { kind: 0, value: op === '.balign' ? power : 2 ** power }, at })
-					continue
-				}
-				if (['.ascii', '.asciz', '.string'].includes(op)) {
-					const string = args.map((a) => JSON.parse(a)).join('')
-					if (typeof string !== 'string') throw new Error('Expected quoted string')
-					const bytes = new TextEncoder().encode(string + (op === '.ascii' ? '' : '\0'))
-					reserve(bytes.length)
-					statements.push({ kind: K.Bytes, bytes, at })
-					continue
-				}
-				if (op === '.space' || op === '.zero') {
-					const count = Number(args[0])
-					if (!Number.isInteger(count) || count < 0 || count > MEMORY_BYTES) throw new Error('Invalid space size')
-					reserve(count)
-					statements.push({ kind: K.Bytes, bytes: new Uint8Array(count), at })
-					continue
-				}
-				const size = ({ '.byte': 1, '.half': 2, '.2byte': 2, '.word': 4, '.4byte': 4 } as Record<string, number>)[op]
-				if (size) {
-					reserve(size * args.length)
-					for (const arg of args) statements.push({ kind: K.Emit, size, value: expression(arg, at), at })
-					continue
-				}
-				const short = op.startsWith('c.')
-				if (short && !allowCompressed) throw new Error('Compressed instructions require RV32IMC and .option rvc')
-				const instructionSize = short ? 2 : op === 'li' || op === 'la' ? 8 : 4
-				reserve(instructionSize)
-				statements.push({
-					kind: K.Fragment,
-					size: instructionSize,
-					provenance: 'instruction',
-					at,
-					encode: (c) => {
-						try {
-							if (c.dot % (compressed ? 2 : 4))
-								throw new Error(`Instructions must be aligned to ${compressed ? 'two' : 'four'} bytes`)
-							if (short) {
-								const half = encodeCompressed(op, args, c.dot, register, (text) => c.value(expression(text, at), true)!)
-								return Uint8Array.of(half & 255, half >>> 8)
-							}
-							return encodeInstruction(op, args, c, at)
-						} catch (error) {
-							throw new AssemblyError((error as Error).message, at)
-						}
-					}
-				})
-			} catch (error) {
-				diagnostics.push({ severity: 'error', message: String((error as Error).message), ...at })
+	const visit = ({ text: original, at }: SourceLine): string | undefined => {
+		if (diagnostics.length >= 100) return
+		if (statements.length > 100000) throw new Error('Expanded source statement limit exceeded')
+		try {
+			let line = stripAssemblyComment(original, ['#']).trim()
+			while (/^[\w.$]+:/.test(line)) {
+				if (statements.length >= 100000) throw new Error('Expanded source exceeds 100000 statements')
+				const label = /^[\w.$]+/.exec(line)![0]
+				statements.push({ kind: K.Label, name: label, at })
+				line = line.slice(label.length + 1).trim()
 			}
+			if (!line) return
+			const match = /^(\S+)\s*(.*)$/.exec(line)!,
+				op = match[1].toLowerCase(),
+				rest = match[2],
+				args = splitOperands(rest, { brackets: ['()'], unclosed: 'Unclosed string or operand' })
+			if (op === '.include') {
+				const included = JSON.parse(rest)
+				if (typeof included !== 'string') throw new Error('Expected quoted include path')
+				return included
+			}
+			if (['.globl', '.global', '.type', '.size'].includes(op)) return
+			if (op === '.option') {
+				if (rest === 'rvc' && compressed) allowCompressed = true
+				else if (rest === 'norvc') allowCompressed = false
+				else if (!['nopic', 'norelax'].includes(rest))
+					throw new Error(`Unsupported .option '${rest}' for the selected instruction set`)
+				return
+			}
+			if (op === '.text' || op === '.data' || op === '.bss' || op === '.section') {
+				const section = op === '.section' ? rest.split(',')[0] : op
+				if (!['.text', '.data', '.rodata', '.bss'].includes(section))
+					throw new Error(`Unsupported section '${section}'`)
+				statements.push({ kind: K.Section, section: section === '.text' ? 0 : 1, at })
+				return
+			}
+			if (op === '.equ' || op === '.set') {
+				if (args.length !== 2) throw new Error('Expected name, value')
+				statements.push({ kind: K.Assign, name: args[0], value: expression(args[1], at), at })
+				return
+			}
+			if (op === '.org') {
+				statements.push({ kind: K.Origin, value: expression(rest, at), at })
+				return
+			}
+			if (op === '.align' || op === '.p2align' || op === '.balign') {
+				const power = Number(rest)
+				if (!Number.isInteger(power) || power < 0 || power > (op === '.balign' ? 4096 : 12))
+					throw new Error('Invalid alignment')
+				statements.push({ kind: K.Align, boundary: { kind: 0, value: op === '.balign' ? power : 2 ** power }, at })
+				return
+			}
+			if (['.ascii', '.asciz', '.string'].includes(op)) {
+				const string = args.map((a) => JSON.parse(a)).join('')
+				if (typeof string !== 'string') throw new Error('Expected quoted string')
+				const bytes = new TextEncoder().encode(string + (op === '.ascii' ? '' : '\0'))
+				reserve(bytes.length)
+				statements.push({ kind: K.Bytes, bytes, at })
+				return
+			}
+			if (op === '.space' || op === '.zero') {
+				const count = Number(args[0])
+				if (!Number.isInteger(count) || count < 0 || count > MEMORY_BYTES) throw new Error('Invalid space size')
+				reserve(count)
+				statements.push({ kind: K.Bytes, bytes: new Uint8Array(count), at })
+				return
+			}
+			const size = ({ '.byte': 1, '.half': 2, '.2byte': 2, '.word': 4, '.4byte': 4 } as Record<string, number>)[op]
+			if (size) {
+				reserve(size * args.length)
+				for (const arg of args) statements.push({ kind: K.Emit, size, value: expression(arg, at), at })
+				return
+			}
+			const short = op.startsWith('c.')
+			if (short && !allowCompressed) throw new Error('Compressed instructions require RV32IMC and .option rvc')
+			const instructionSize = short ? 2 : op === 'li' || op === 'la' ? 8 : 4
+			reserve(instructionSize)
+			statements.push({
+				kind: K.Fragment,
+				size: instructionSize,
+				provenance: 'instruction',
+				at,
+				encode: (c) => {
+					try {
+						if (c.dot % (compressed ? 2 : 4))
+							throw new Error(`Instructions must be aligned to ${compressed ? 'two' : 'four'} bytes`)
+						if (short) {
+							const half = encodeCompressed(op, args, c.dot, register, (text) => c.value(expression(text, at), true)!)
+							return Uint8Array.of(half & 255, half >>> 8)
+						}
+						return encodeInstruction(op, args, c, at)
+					} catch (error) {
+						throw new AssemblyError((error as Error).message, at)
+					}
+				}
+			})
+		} catch (error) {
+			diagnostics.push({ severity: 'error', message: String((error as Error).message), ...at })
 		}
 	}
 	try {
-		visit(sources.entries[0] ?? sources.files[0]?.name ?? '', [])
+		visitSourceLines(sources.files, sources.entries[0] ?? sources.files[0]?.name ?? '', { expansions: 4096, depth: 64, lines: 100000 }, visit)
 	} catch (error) {
-		diagnostics.push({ severity: 'error', message: (error as Error).message })
+		diagnostics.push(error instanceof AssemblyError ? error.diagnostic : { severity: 'error', message: (error as Error).message })
 	}
 	if (diagnostics.length) return new RiscvAssembly(sources.entries[0] ?? '', null, diagnostics, compressed)
 	const result = assembleStatements(statements, {

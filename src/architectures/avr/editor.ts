@@ -1,45 +1,34 @@
+import { stripAssemblyComment } from '../../core/assembly/text'
 import type * as Monaco from 'monaco-editor'
-import type { Disposable, EditorHost } from '../contracts'
+import type { DebugInspection, EditorHost, TokenDescription } from '../contracts'
+import { disposableGroup } from '../../core/disposableScope'
+import { registerAssemblyLanguage, registerTokenHover } from '../../services/assemblyLanguage'
 import { MNEMONICS } from './isa'
+import { avrInstructionHelp } from './instructionHelp'
 
-let registered = false
-
-export function installEditor(monaco: typeof Monaco, host: EditorHost): Disposable {
-	const parts: Disposable[] = []
-	if (!registered) {
-		monaco.languages.register({ id: 'avr', extensions: ['.asm', '.s'] })
-		registered = true
+export function describeAvrToken(line: string, offset: number, state: DebugInspection): TokenDescription | null {
+	const comment = stripAssemblyComment(line, [';']).length
+	if (comment >= 0 && offset >= comment) return null
+	for (const match of line.matchAll(/[A-Za-z_.$][\w.$]*/g)) {
+		if (offset < match.index || offset >= match.index + match[0].length) continue
+		const token = match[0], span = { start: match.index, length: token.length }
+		const key = /^r\d+$/i.test(token) ? token.toLowerCase() : token.toUpperCase()
+		const value = state.registers[key]
+		if (value !== undefined) return { ...span, register: key, contents: [`**${token}** = ${value} (0x${value.toString(16)})`] }
+		const address = state.labels.get(token)
+		if (address !== undefined) return { ...span, address, contents: [`**${token}** = ${address} (0x${address.toString(16)})`] }
+		const contents = avrInstructionHelp(token)
+		return contents ? { ...span, ...contents } : null
 	}
-	parts.push(
-		monaco.languages.registerCompletionItemProvider('avr', {
-			provideCompletionItems(model, position) {
-				const word = model.getWordUntilPosition(position)
-				const range = new monaco.Range(
-					position.lineNumber,
-					word.startColumn,
-					position.lineNumber,
-					position.column
-				)
-				return {
-					suggestions: MNEMONICS.map((name) => ({
-						label: name,
-						insertText: name,
-						kind: monaco.languages.CompletionItemKind.Keyword,
-						range
-					}))
-				}
-			}
-		})
-	)
-	parts.push(
-		monaco.languages.setLanguageConfiguration('avr', {
-			comments: { lineComment: ';' },
-			brackets: [['(', ')']],
-			wordPattern: /[A-Za-z_.$][\w.$]*/
-		})
-	)
-	parts.push(
-		monaco.languages.setMonarchTokensProvider('avr', {
+	return null
+}
+
+export function installEditor(monaco: typeof Monaco, host: EditorHost) {
+	return disposableGroup((scope) => {
+		scope.add(registerAssemblyLanguage(monaco, {
+			id: 'avr', extensions: ['.asm', '.s'],
+			configuration: { comments: { lineComment: ';' }, brackets: [['(', ')']], wordPattern: /[A-Za-z_.$][\w.$]*/ },
+			tokens: {
 			ignoreCase: true,
 			mnemonics: MNEMONICS,
 			tokenizer: {
@@ -52,27 +41,9 @@ export function installEditor(monaco: typeof Monaco, host: EditorHost): Disposab
 					[/[A-Za-z_.$][\w.$]*/, { cases: { '@mnemonics': 'keyword', '@default': 'identifier' } }]
 				]
 			}
-		})
-	)
-	parts.push(
-		monaco.languages.registerHoverProvider('avr', {
-			provideHover(model, position) {
-				const word = model.getWordAtPosition(position)
-				if (!word) return null
-				const token = word.word,
-					inspection = host.inspection()
-				const key = /^r\d+$/i.test(token) ? token.toLowerCase() : token.toUpperCase()
-				const value = inspection.registers[key] ?? inspection.labels.get(token)
-				if (value === undefined) return null
-				return { contents: [{ value: `**${token}** = ${value} (0x${value.toString(16)})` }] }
-			}
-		})
-	)
-	return {
-		dispose: () =>
-			parts
-				.splice(0)
-				.reverse()
-				.forEach((part) => part.dispose())
-	}
+		},
+			completions: MNEMONICS.map((name) => ({ label: name, insertText: name, kind: monaco.languages.CompletionItemKind.Keyword })),
+		}))
+		scope.add(registerTokenHover(monaco, 'avr', (line, offset) => describeAvrToken(line, offset, host.inspection())))
+	})
 }

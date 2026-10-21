@@ -1,12 +1,17 @@
+import { describeAvrInstruction, DEPENDENCY_NAMES } from './instructions'
+import { historyCount, historySlice, describeValueEffect } from '../../core/historyView'
+import { editTransaction } from '../../core/editTransaction'
+import { notifyHistorySeek } from '../../core/observer'
+import { MemoryEdits } from '../../core/memoryEdits'
 import { HistoryBufferLayout, type HistoryBufferSchema } from '../../core/historyBuffers'
 import { HistoryLog } from '../../core/historyLog'
+import { rewindHistoryTo, HistoryCursor } from '../../core/historyCursor'
 import type { ExecutionObserver, MachineConfig } from '../../core/observer'
-import { yieldToHost } from '../../core/yieldToHost'
+import { ExecutionController } from '../../core/executionController'
 import type {
 	CallFrame,
 	HistoryFormatter,
 	HistoryRecord,
-	InstructionInfo,
 	Machine,
 	MachineOptions,
 	MemoryInspector,
@@ -20,6 +25,7 @@ export const avrHistorySchema: HistoryBufferSchema = {
 	entry: [
 		{ name: 'state', type: 'u16', elements: 35 },
 		{ name: 'pc', type: 'u32', elements: 1 },
+		{ name: 'controlPc', type: 'u32', elements: 1 },
 		{ name: 'count', type: 'f64', elements: 1 },
 		{ name: 'word', type: 'u32', elements: 1 },
 		{ name: 'kind', type: 'u8', elements: 1 }
@@ -34,6 +40,7 @@ export const avrHistorySchema: HistoryBufferSchema = {
 const layout = new HistoryBufferLayout(avrHistorySchema)
 const STATE = layout.column('entry', 'state', 'u16', 35)
 const PC = layout.column('entry', 'pc', 'u32')
+const CONTROL_PC = layout.column('entry', 'controlPc', 'u32')
 const COUNT = layout.column('entry', 'count', 'f64')
 const WORD = layout.column('entry', 'word', 'u32')
 const KIND = layout.column('entry', 'kind', 'u8')
@@ -54,22 +61,77 @@ export class AvrRuntime implements Machine {
 	readonly observers: ExecutionObserver[] = []
 	readonly breakpoints = new Set<number>()
 	readonly log = new HistoryLog(layout)
+	private readonly timeline = new HistoryCursor(this.log)
 	readonly callStack: CallFrame[] = []
 	pc = 0
 	sp = 65535
 	sreg = 0
-	halted = false
+	private cpuHalted = false
+	get halted() { return this.cpuHalted || this.execution.stopped }
+	set halted(value: boolean) { this.cpuHalted = value }
 	paused = false
 	instructionCount = 0
 	readonly pendingInput = null
 	readonly console = ''
 	onProgress: (() => void) | null = null
 	private speed: number | null
-	private running = false
 	private disposed = false
 	private nextId = 0
 	private readonly decoded = new Map<number, Instruction>()
 	private paced: ReadonlySet<number> | null = null
+	private readonly execution = new ExecutionController(this, {
+		speed: () => this.speed,
+		pacedAddresses: () => this.paced,
+		depth: () => this.callStack.length,
+	})
+
+	private readonly memoryEdits = new MemoryEdits({
+		region: (address) => this.editRegion(address),
+		read: (address) => address < 65536 ? this.flash[address] : this.read(address - 65536, false),
+		commit: (address, bytes) => this.editBytes(address, bytes),
+	})
+
+	private editRegion(address: number) {
+		if (this.disposed) return null
+		if (address < 65536) return { start: 0, end: 65535 }
+		if (address < 65568) return { start: 65536, end: 65567 }
+		if (address >= 65629 && address <= 65631) return { start: 65629, end: 65631 }
+		if (address >= 65792 && address < 131072) return { start: 65792, end: 131071 }
+		return null
+	}
+
+	private edit(change: () => void): boolean {
+		return editTransaction(change, {
+			begin: () => this.begin(true),
+			commit: () => this.log.close(),
+			rollback: () => {
+				this.log.close()
+				this.undo()
+				this.timeline.branch()
+			},
+		})
+	}
+
+	private editBytes(address: number, bytes: Uint8Array): boolean {
+		const region = this.editRegion(address)
+		if (!Number.isInteger(address) || !region || address < region.start || address + bytes.length - 1 > region.end) return false
+		return this.edit(() => {
+			for (let i = 0; i < bytes.length; i++) {
+				const at = address + i, value = bytes[i]
+				if (at < 65536) {
+					const slot = this.log.pushEffect()
+					if (slot >= 0) {
+						const arrays = this.log.effects.tail!.arrays
+						arrays[ADDRESS][slot] = at
+						arrays[OLD][slot] = this.flash[at]
+						arrays[NEW][slot] = value
+					}
+					this.flash[at] = value
+				} else this.write(at - 65536, value)
+			}
+		})
+	}
+
 	constructor(
 		readonly program: AvrProgram,
 		options: MachineOptions
@@ -86,16 +148,17 @@ export class AvrRuntime implements Machine {
 		this.pc = program.image().entryAddress ?? 0
 	}
 	get historyCursor() {
-		return this.log.length
+		return this.timeline.index
 	}
 	readonly history = {
+		get retention() { return this.owner.log.retention },
 		get length() {
 			return this.owner.log.length
 		},
 		owner: this,
 		at(index: number): HistoryRecord | undefined {
 			const log = this.owner.log
-			if (index < 0 || index >= log.length) return undefined
+			if (!Number.isInteger(index) || index < 0 || index >= log.length) return undefined
 			const p = log.first + index,
 				slot = p % log.entries.capacity,
 				a = log.entries.block(p).arrays
@@ -106,16 +169,12 @@ export class AvrRuntime implements Machine {
 				kind: a[KIND][slot] ? 'edit' : 'instruction'
 			}
 		},
-		slice(from: number, to: number) {
-			const rows: HistoryRecord[] = []
-			for (let i = Math.max(0, from); i < Math.min(to, this.length); i++) rows.push(this.at(i)!)
-			return rows
-		},
+		slice(from: number, to: number) { return historySlice(this, from, to) },
 		indexOfId(id: number) {
 			return this.owner.log.indexOfId(id)
 		},
 		instructionCountAt(index: number) {
-			return this.at(index)?.instructionCount ?? 0
+			return historyCount(this.owner.log, index, COUNT)
 		}
 	}
 	readonly historyFormat: HistoryFormatter = {
@@ -138,8 +197,11 @@ export class AvrRuntime implements Machine {
 			const p = this.log.first + index,
 				slot = p % this.log.entries.capacity
 			const before = this.log.entries.block(p).arrays[STATE]
-			const next = index + 1 < this.log.length ? this.log.entries.block(p + 1).arrays[STATE] : null
-			const nextSlot = ((p + 1) % this.log.entries.capacity) * 35
+			const ahead = index >= this.historyCursor
+			const neighbour = ahead ? index - 1 : index + 1
+			const atCursor = ahead ? index === this.historyCursor : neighbour === this.historyCursor
+			const next = atCursor ? null : this.log.entries.block(this.log.first + neighbour).arrays[STATE]
+			const nextSlot = ((this.log.first + neighbour) % this.log.entries.capacity) * 35
 			const effects = []
 			for (let register = 0; register < 35; register++) {
 				const old = before[slot * 35 + register]
@@ -151,7 +213,7 @@ export class AvrRuntime implements Machine {
 							? this.sp
 							: register === 33
 								? this.sreg
-								: Number(this.halted)
+								: Number(this.cpuHalted)
 				if (old === after) continue
 				const name =
 					register < 32
@@ -161,14 +223,12 @@ export class AvrRuntime implements Machine {
 							: register === 33
 								? 'SREG'
 								: 'Halted'
-				const value = applied ? old : after
-				effects.push({
+				const value = old
+				effects.push(describeValueEffect(applied, {
 					subject: name,
 					register: register < 34 ? name : undefined,
-					value,
-					applied,
-					label: `${name} = 0x${value.toString(16)}`
-				})
+					value
+				}, 16))
 			}
 			const start = this.log.effectStart(index)
 			for (let offset = 0; offset < this.log.effectCount(index); offset++) {
@@ -176,15 +236,13 @@ export class AvrRuntime implements Machine {
 					a = this.log.effects.block(position).arrays,
 					s = position % this.log.effects.capacity
 				const address = a[ADDRESS][s],
-					value = a[applied ? OLD : NEW][s]
-				effects.push({
+					value = a[applied ? NEW : OLD][s]
+				effects.push(describeValueEffect(applied, {
 					subject: `[0x${address.toString(16)}]`,
 					register: undefined,
 					address,
-					value,
-					applied,
-					label: `[0x${address.toString(16)}] = 0x${value.toString(16)}`
-				})
+					value
+				}, 16))
 			}
 			return effects
 		}
@@ -207,13 +265,15 @@ export class AvrRuntime implements Machine {
 		return instruction
 	}
 	private begin(edit: boolean, word = 0) {
+		this.timeline.branch()
 		const slot = this.log.openEntryWith(this.nextId++)
 		const arrays = this.log.entries.tail!.arrays
 		arrays[STATE].set(this.registers, slot * 35)
 		arrays[STATE][slot * 35 + 32] = this.sp
 		arrays[STATE][slot * 35 + 33] = this.sreg
-		arrays[STATE][slot * 35 + 34] = Number(this.halted)
+		arrays[STATE][slot * 35 + 34] = Number(this.cpuHalted)
 		arrays[PC][slot] = this.pc
+		arrays[CONTROL_PC][slot] = this.pc
 		arrays[COUNT][slot] = this.instructionCount
 		arrays[WORD][slot] = word
 		arrays[KIND][slot] = Number(edit)
@@ -285,6 +345,10 @@ export class AvrRuntime implements Machine {
 	}
 	step() {
 		if (this.disposed || this.halted) return
+		if (this.timeline.forward(this.exchange)) {
+			notifyHistorySeek(this.observers, this.instructionCount)
+			return
+		}
 		const i = this.instruction()
 		const address = this.pc,
 			word = this.word(address) | ((i.size === 4 ? this.word(address + 2) : 0) << 16)
@@ -299,7 +363,8 @@ export class AvrRuntime implements Machine {
 		} catch (error) {
 			this.log.close()
 			this.undo()
-			for (const observer of this.observers) observer.onSeek?.(this.instructionCount)
+			this.timeline.branch()
+			notifyHistorySeek(this.observers, this.instructionCount)
 			throw error
 		}
 	}
@@ -492,50 +557,61 @@ export class AvrRuntime implements Machine {
 		throw new Error(`Unsupported AVR execution ${i.name}`)
 	}
 	private undo(): boolean {
-		const index = this.log.length - 1
-		if (index < 0) return false
+		return this.timeline.back(this.exchange)
+	}
+	private exchange = (index: number, forward: boolean) => {
 		const p = this.log.first + index,
 			slot = p % this.log.entries.capacity,
 			arrays = this.log.entries.block(p).arrays
-		for (
-			let effect = this.log.effectStart(index) + this.log.effectCount(index) - 1;
-			effect >= this.log.effectStart(index);
-			effect--
-		) {
+		const start = this.log.effectStart(index), count = this.log.effectCount(index)
+		for (let offset = 0; offset < count; offset++) {
+			const effect = start + (forward ? offset : count - offset - 1)
 			const e = this.log.effects.block(effect).arrays,
 				s = effect % this.log.effects.capacity,
 				address = e[ADDRESS][s]
-			if (address < 65536) this.flash[address] = e[OLD][s]
-			else this.data[address - 65536] = e[OLD][s]
+			if (address < 65536) this.flash[address] = e[forward ? NEW : OLD][s]
+			else this.data[address - 65536] = e[forward ? NEW : OLD][s]
 		}
-		this.registers.set(arrays[STATE].subarray(slot * 35, slot * 35 + 32))
-		this.sp = arrays[STATE][slot * 35 + 32]
-		this.sreg = arrays[STATE][slot * 35 + 33]
-		this.halted = !!arrays[STATE][slot * 35 + 34]
-		this.pc = arrays[PC][slot]
-		this.instructionCount = arrays[COUNT][slot]
+		const state = arrays[STATE], base = slot * 35
+		for (let register = 0; register < 32; register++) {
+			const value = this.registers[register]
+			this.registers[register] = state[base + register]
+			state[base + register] = value
+		}
+		const sp = this.sp, sreg = this.sreg, halted = this.cpuHalted, pc = this.pc
+		this.sp = state[base + 32]
+		this.sreg = state[base + 33]
+		this.halted = !!state[base + 34]
+		this.pc = arrays[CONTROL_PC][slot]
+		state[base + 32] = sp
+		state[base + 33] = sreg
+		state[base + 34] = +halted
+		arrays[CONTROL_PC][slot] = pc
+		this.instructionCount = arrays[COUNT][slot] + (forward && !arrays[KIND][slot] ? 1 : 0)
 		const frames = this.log.entries.payload(p) as { depth: number; frame?: CallFrame } | undefined
 		if (frames) {
+			const inverse = { depth: this.callStack.length, frame: this.callStack.length > frames.depth ? this.callStack[this.callStack.length - 1] : undefined }
 			if (frames.frame && this.callStack.length < frames.depth) this.callStack.push(frames.frame)
 			this.callStack.length = frames.depth
+			this.log.entries.setPayload(p, inverse)
 		}
-		this.log.truncate(index)
-		return true
 	}
 	stepBack() {
-		if (this.disposed) return false
+		if (this.disposed || this.historyCursor <= 0) return false
 		const result = this.undo()
 		if (result) {
+			this.execution.stopped = false
 			this.pause()
-			for (const observer of this.observers) observer.onSeek?.(this.instructionCount)
+			notifyHistorySeek(this.observers, this.instructionCount)
 		}
 		return result
 	}
-	rewindTo(id: number) {
-		const index = this.log.indexOfId(id)
-		if (index < 0) return false
-		while (this.log.length > index) this.stepBack()
-		return true
+	rewindTo(id: number): boolean {
+		return rewindHistoryTo(this.history, () => this.historyCursor, id, () => this.undo(), () => {
+			this.execution.stopped = false
+			this.pause()
+			notifyHistorySeek(this.observers, this.instructionCount)
+		})
 	}
 	registerValues(): Registers {
 		return {
@@ -557,15 +633,15 @@ export class AvrRuntime implements Machine {
 			(id === 'PC' && value % 2)
 		)
 			return false
-		this.begin(true)
-		if (index >= 0) this.registers[index] = value
-		else if (id === 'PC') {
-			this.pc = value
-			this.halted = false
-		} else if (id === 'SP') this.sp = value
-		else this.sreg = value
-		this.log.close()
-		return true
+		return this.edit(() => {
+			if (index >= 0) this.registers[index] = value
+			else if (id === 'PC') {
+				this.execution.stopped = false
+				this.pc = value
+				this.halted = false
+			} else if (id === 'SP') this.sp = value
+			else this.sreg = value
+		})
 	}
 	inspectMemory(): MemoryInspector {
 		return {
@@ -595,35 +671,13 @@ export class AvrRuntime implements Machine {
 		}
 	}
 	writeByte(address: number, value: number) {
-		if (
-			this.disposed ||
-			!Number.isInteger(address) ||
-			address < 0 ||
-			address >= 131072 ||
-			!Number.isFinite(value)
-		)
-			return false
-		if (address >= 65568 && address < 65792 && ![65629, 65630, 65631].includes(address))
-			return false
-		this.begin(true)
-		if (address < 65536) {
-			const s = this.log.pushEffect(),
-				a = this.log.effects.tail!.arrays
-			if (s >= 0) {
-				a[ADDRESS][s] = address
-				a[OLD][s] = this.flash[address]
-				a[NEW][s] = value & 255
-			}
-			this.flash[address] = value & 255
-		} else this.write(address - 65536, value)
-		this.log.close()
-		return true
+		return Number.isFinite(value) && this.editBytes(address, Uint8Array.of(value))
 	}
-	insertByte() {
-		return false
+	insertByte(address: number, limit: number, value: number): boolean {
+		return this.memoryEdits.insert(address, limit, value)
 	}
-	deleteByte() {
-		return false
+	deleteByte(address: number, limit: number): boolean {
+		return this.memoryEdits.delete(address, limit)
 	}
 	provideInput() {
 		return false
@@ -644,14 +698,8 @@ export class AvrRuntime implements Machine {
 	getBreakpoints() {
 		return this.breakpoints.values()
 	}
-	pause() {
-		this.paused = true
-		this.running = false
-	}
-	stop() {
-		this.pause()
-		this.halted = true
-	}
+	pause() { this.execution.pause() }
+	stop() { this.execution.stop() }
 	run() {
 		return this.runUntil(() => false)
 	}
@@ -659,80 +707,30 @@ export class AvrRuntime implements Machine {
 		return this.run()
 	}
 	runTo(address: number) {
-		return this.runUntil(() => this.pc === address)
+		return this.execution.runTo(address)
 	}
 	async stepOver() {
 		if (this.disposed || this.halted) return
 		const i = this.instruction()
 		if (i.name.includes('call')) {
-			const target = this.pc + i.size,
-				depth = this.callStack.length
-			await this.runUntil(() => this.pc === target && this.callStack.length <= depth)
+			const target = this.pc + i.size
+			await this.execution.stepOver(target)
 		} else this.step()
 	}
 	stepToReturn() {
-		const depth = this.callStack.length
-		return this.runUntil(() => depth > 0 && this.callStack.length < depth)
+		return this.execution.stepToReturn()
 	}
-	private async runUntil(done: () => boolean) {
-		if (this.running || this.disposed || this.halted) return
-		this.running = true
-		this.paused = false
-		let first = true
-		try {
-			while (this.running && !this.halted && !this.disposed) {
-				const start = performance.now(),
-					batch =
-						this.speed === null ? 20000 : Math.max(1, Math.round(Math.max(1, this.speed) / 30))
-				let visible = 0
-				for (let n = 0; n < 20000 && visible < batch && this.running && !this.halted; n++) {
-					if (!first && this.breakpoints.has(this.pc)) {
-						this.pause()
-						break
-					}
-					const address = this.pc
-					first = false
-					this.step()
-					if (done()) {
-						this.pause()
-						break
-					}
-					if (!this.paced || this.paced.has(address)) visible++
-				}
-				if (this.disposed) break
-				this.onProgress?.()
-				if (this.running && !this.halted) {
-					if (this.speed === null) await yieldToHost()
-					else {
-						const speed = this.speed
-						const deadline =
-							performance.now() +
-							Math.max(0, (visible * 1000) / Math.max(1, speed) - (performance.now() - start))
-						await yieldToHost()
-						while (
-							this.running &&
-							!this.disposed &&
-							this.speed === speed &&
-							performance.now() < deadline
-						)
-							await new Promise((resolve) =>
-								setTimeout(resolve, Math.min(50, deadline - performance.now()))
-							)
-					}
-				}
-			}
-		} finally {
-			this.running = false
-		}
+	private runUntil(done: () => boolean) {
+		return this.execution.runUntil(done)
 	}
 	toolConfig(): MachineConfig {
 		return {
-			delayedBranching: false,
+			addressing: { instructionBytes: 2, memoryWordBytes: 1 }, delayedBranching: false,
 			history: this.history,
 			instructions: {
 				encodings: ['AVR'],
-				registerNames: Array.from({ length: 32 }, (_, i) => `r${i}`),
-				describe: (opaque) => describe(opaque as Instruction),
+				registerNames: DEPENDENCY_NAMES,
+				describe: (opaque) => describeAvrInstruction(opaque as Instruction),
 				decodeExecuted: (entry) => {
 					const index = this.log.indexOfId(entry.id)
 					if (index < 0 || entry.kind === 'edit') return null
@@ -745,29 +743,10 @@ export class AvrRuntime implements Machine {
 	}
 	dispose() {
 		this.disposed = true
-		this.running = false
+		this.execution.dispose()
+		this.execution.running = false
 		this.onProgress = null
 		this.observers.length = 0
 		this.log.clear()
-	}
-}
-function describe(i: Instruction): InstructionInfo {
-	const load = ['ld', 'lds', 'lpm', 'pop', 'in'].includes(i.name),
-		memory = load || ['st', 'sts', 'push', 'out'].includes(i.name),
-		branch = ['branch', 'cpse', 'sbrc', 'sbrs'].includes(i.name),
-		jump = ['rjmp', 'rcall', 'jmp', 'call', 'ijmp', 'icall', 'ret'].includes(i.name)
-	return {
-		mnemonic: i.name,
-		category: memory ? 3 : branch ? 2 : jump ? 1 : i.name === 'break' ? 5 : 0,
-		encoding: 0,
-		reads: [i.d, i.r].filter((r): r is number => r !== undefined),
-		writes: [i.d === undefined ||
-			branch ||
-			['cp', 'cpc', 'cpi', 'sts', 'st', 'out', 'push', 'bst'].includes(i.name)
-				? -1
-				: i.d].filter(r => r >= 0),
-		isLoad: load,
-		isBranch: branch,
-		isJump: jump
 	}
 }

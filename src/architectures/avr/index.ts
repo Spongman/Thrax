@@ -1,14 +1,15 @@
+import { createArchitectureServices } from '../../core/architectureServices'
+import type { TargetSettings } from '../../core/settings'
 import { examples } from './examples'
 import { defineSettings } from '../../core/settings'
 import type {
 	ArchitectureDefinition,
 	ArchitectureServices,
-	Disposable,
 	MachineProfile,
 	RegisterDescriptor
 } from '../contracts'
 import { assembleAvr } from './assembler'
-import { installEditor } from './editor'
+import { describeAvrToken, installEditor } from './editor'
 import { manifest } from './manifest'
 import { AvrProgram, disassembly } from './program'
 import { AvrRuntime } from './runtime'
@@ -48,49 +49,34 @@ const definition: ArchitectureDefinition = {
 	examples,
 	settings: defineSettings({ defaults: {}, fields: [] }),
 	createServices(): ArchitectureServices {
-		let machine: AvrRuntime | undefined
-		let disposed = false
-		const contributions: Disposable[] = []
-		const check = () => {
-			if (disposed) throw new Error('Architecture services have been disposed')
-		}
-		return {
-			assemble(sources) {
-				check()
-				const result = assembleAvr(sources)
-				return new AvrProgram(
-					result.image,
-					result.diagnostics,
-					sources.entries[0] ?? sources.files[0]?.name ?? 'main.asm'
-				)
-			},
-			createMachine(program, _settings, options) {
-				check()
-				if (
-					!(program instanceof AvrProgram) ||
-					program.diagnostics.some((diagnostic) => diagnostic.severity === 'error')
-				)
-					throw new Error('Not a valid AVR program')
-				const next = new AvrRuntime(program, options)
-				machine?.dispose()
-				machine = next
-				return next
-			},
-			profile: () => profile,
-			disassembly,
-			async installEditor(monaco, host) {
-				check()
-				const contribution = installEditor(monaco, host)
-				contributions.push(contribution)
-				return contribution
-			},
-			dispose() {
-				if (disposed) return
-				disposed = true
-				machine?.dispose()
-				for (const contribution of contributions.splice(0).reverse()) contribution.dispose()
+		return createArchitectureServices<TargetSettings>(() => {
+			return {
+				assemble(sources) {
+					const result = assembleAvr(sources)
+					return new AvrProgram(
+						result.image,
+						result.diagnostics,
+						sources.entries[0] ?? sources.files[0]?.name ?? 'main.asm'
+					)
+				},
+				createMachine(program, _settings, options) {
+					if (
+						!(program instanceof AvrProgram) ||
+						program.diagnostics.some((diagnostic) => diagnostic.severity === 'error')
+					)
+						throw new Error('Not a valid AVR program')
+					const next = new AvrRuntime(program, options)
+					return next
+				},
+				profile: () => profile,
+				disassembly,
+				describeToken: describeAvrToken,
+				async installEditor(monaco, host) {
+					const contribution = installEditor(monaco, host)
+					return contribution
+				},
 			}
-		}
+		})
 	}
 }
 export default definition

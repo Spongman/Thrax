@@ -15,8 +15,8 @@ function runtime(code: string) {
 }
 function finish(machine: RiscvRuntime) {
 	let count = 0
-	while (!machine.halted && !machine.pendingInput && count++ < 1000) machine.step()
-	expect(count).toBeLessThan(1000)
+	while (!machine.halted && !machine.pendingInput && count++ < 200_000) machine.step()
+	expect(count).toBeLessThan(200_000)
 }
 function encodings(code: string) {
 	const program = assemble(code)
@@ -102,7 +102,9 @@ describe('RV32IM runtime', () => {
 			bitwise: '8\n14\n6\n',
 			input: '-17',
 			memory: '-128',
-			bitmap: ''
+			bitmap: '',
+			mandelbrot: '',
+			ackermann: '61'
 		}
 		expect(m.console).toBe(expected[key])
 		expect(m.halted).toBe(true)

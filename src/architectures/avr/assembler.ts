@@ -1,3 +1,6 @@
+import { resolveRelativeSource } from '../../core/assembly/sourceLines'
+import { integerArithmetic } from '../../core/assembly/integerArithmetic'
+import { splitOperands, stripAssemblyComment } from '../../core/assembly/text'
 import {
 	assembleStatements,
 	defaultLimits,
@@ -48,57 +51,12 @@ const syntax: ExpressionSyntax = {
 	dot: '.'
 }
 const arithmetic: Arithmetic = {
-	unary: (op, value) =>
-		op === Op.Neg
-			? -value
-			: op === Op.Not
-				? ~value
-				: op === 100
-					? value & 255
-					: op === 101
-						? (value >> 8) & 255
-						: value,
-	binary(op, a, b, at) {
-		switch (op) {
-			case Op.Add:
-				return a + b
-			case Op.Sub:
-				return a - b
-			case Op.Mul:
-				return a * b
-			case Op.Div:
-				if (!b) throw new AssemblyError('Division by zero', at)
-				return Math.trunc(a / b)
-			case Op.And:
-				return a & b
-			case Op.Or:
-				return a | b
-			case Op.Xor:
-				return a ^ b
-			case Op.Shl:
-				return a << b
-			case Op.Shr:
-				return a >> b
-		}
-		throw new AssemblyError('Unsupported operator', at)
-	}
+	unary: (op, value) => op === 100 ? value & 255 : op === 101 ? (value >> 8) & 255 : integerArithmetic.unary(op, value),
+	binary: (op, a, b, at) => integerArithmetic.binary(op === Op.Shr ? Op.Sar : op, a, b, at),
 }
 const number = (value: number): Expr => ({ kind: 0, value })
 const own = (object: object, key: string) => Object.prototype.hasOwnProperty.call(object, key)
-function withoutComment(text: string) {
-	let quote = ''
-	for (let index = 0; index < text.length; index++) {
-		const character = text[index]
-		if (quote && character === '\\') {
-			index++
-			continue
-		}
-		if (character === quote) quote = ''
-		else if (!quote && (character === "'" || character === '"')) quote = character
-		else if (!quote && character === ';') return text.slice(0, index).trim()
-	}
-	return text.trim()
-}
+const withoutComment = (text: string) => stripAssemblyComment(text, [';']).trim()
 function expression(text: string, at: Position): Expr {
 	const tokens: Token[] = []
 	const re = /\s+|0x[\da-f]+|0b[01]+|\d+|'(?:[^'\\]|\\.)'|[A-Za-z_.$][\w.$]*|<<|>>|./gi
@@ -250,8 +208,7 @@ export function assembleAvr({ files, entries }: AssemblySources) {
 				return m ? { name: m[1], nextIndex: index + 1 } : null
 			},
 			resolve: (name, from, token) => {
-				const path = from.name.slice(0, from.name.lastIndexOf('/') + 1) + name
-				const file = files.find((file) => file.name === path || file.name === name)
+				const file = resolveRelativeSource(files, name, from)
 				if (!file) throw new AssemblyError(`Include file not found: ${name}`, token.at)
 				return file
 			},
@@ -285,7 +242,7 @@ export function assembleAvr({ files, entries }: AssemblySources) {
 			const match = /^(\S+)(?:\s+(.*))?$/.exec(text)!
 			const name = match[1].toLowerCase()
 			const tail = match[2] ?? ''
-			const args = tail ? tail.split(',').map((arg) => arg.trim()) : []
+			const args = splitOperands(tail, { brackets: ['()'], unclosed: 'Unclosed string or operand' })
 			if (name === '.cseg' || name === '.text' || name === '.dseg' || name === '.data') {
 				data = name === '.dseg' || name === '.data'
 				statements.push({ kind: S.Section, section: data ? 1 : 0, at })

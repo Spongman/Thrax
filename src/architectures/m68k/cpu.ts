@@ -1,3 +1,5 @@
+import { parseIntegerInput, readCString } from '../../core/console'
+import { HistoryText } from '../../core/historyCursor'
 import type { CallFrame } from '../contracts'
 import type { ExecutionObserver } from '../../core/observer'
 import { decodeInstruction, type Decoded, type Operand } from './decode'
@@ -23,6 +25,8 @@ export class M68kCpu {
 	pending = false
 	count = 0
 	output = ''
+	get fullOutput() { return this.history.timeline.ahead ? this.outputText.text : this.output }
+	private readonly outputText = new HistoryText()
 	private readonly snapshot: SavedState = {
 		pc: 0,
 		count: 0,
@@ -72,14 +76,20 @@ export class M68kCpu {
 		this.registers.set(state.registers)
 		this.halted = state.halted
 		this.pending = state.pending
-		this.output = this.output.slice(0, state.outputLength)
+		this.output = this.outputText.exchange(this.output, state.outputLength)
 		if (state.frameAction === 1) this.callStack.pop()
 		else if (state.frameAction === 2 && state.frame) this.callStack.push(state.frame)
 	}
-	undo() {
-		return this.history.undo(this.restore, (address, value) => {
+	undo(forward = false) {
+		if (forward && !this.history.timeline.ahead) return false
+		if (!this.history.timeline.ahead) this.outputText.text = this.output
+		const moved = this.history.undo(this.restore, (address, value) => {
+			const old = this.memory[address]
 			this.memory[address] = value
-		})
+			return old
+		}, this.saved(), this.callStack, forward)
+		if (moved && forward) for (const observer of this.observers) observer.onSeek?.(this.count)
+		return moved
 	}
 	putByte(address: number, value: number) {
 		this.history.memory(address, this.memory[address])
@@ -194,6 +204,7 @@ export class M68kCpu {
 		this.pc = target
 	}
 	step(): void {
+		if (this.undo(true)) return
 		if (this.halted || this.pending) return
 		const d = this.decode()
 		if (d.name === 'trap' && d.value === 15 && this.registers[0] === 5) {
@@ -209,6 +220,7 @@ export class M68kCpu {
 		} catch (error) {
 			this.history.log.close()
 			this.undo()
+			this.history.timeline.branch()
 			for (const observer of this.observers) observer.onSeek?.(this.count)
 			throw error
 		}
@@ -231,14 +243,7 @@ export class M68kCpu {
 			else if (service === 3) this.output += String(this.registers[1])
 			else if (service === 6) this.output += String.fromCharCode(this.registers[1] & 255)
 			else if (service === 14) {
-				let at = this.registers[9] >>> 0,
-					text = ''
-				for (;;) {
-					const byte = this.readMemory(at++, 1)
-					if (!byte) break
-					text += String.fromCharCode(byte)
-				}
-				this.output += text
+				this.output += readCString(this.registers[9] >>> 0, this.memory.length + 1, address => this.readMemory(address, 1))
 			} else throw new Error(`Unsupported TRAP #15 service ${service}`)
 			return
 		}
@@ -503,9 +508,9 @@ export class M68kCpu {
 		this.write({ kind: 'data', index: d.reg! }, size, value)
 	}
 	provideInput(input: string) {
-		if (!this.pending || !/^[+-]?\d+$/.test(input.trim())) return false
-		const value = Number(input.trim())
-		if (!Number.isSafeInteger(value) || value < -2147483648 || value > 2147483647) return false
+		if (!this.pending) return false
+		const value = parseIntegerInput(input, 32)
+		if (value === null) return false
 		const d = this.decode()
 		this.history.begin(this.saved(), d)
 		for (const observer of this.observers) observer.onInstruction?.(this.pc, d, this.count)

@@ -14,10 +14,10 @@ function runtime(code: string, model: CpuModel = '68000') {
 	expect(program.diagnostics).toEqual([])
 	return new M68kRuntime(program, { historyLimit: 10000, speed: null })
 }
-function finish(machine: M68kRuntime) {
+function finish(machine: M68kRuntime, limit = 20_000) {
 	let steps = 0
-	while (!machine.halted && !machine.pendingInput && steps++ < 3000) machine.step()
-	expect(steps).toBeLessThan(3000)
+	while (!machine.halted && !machine.pendingInput && steps++ < limit) machine.step()
+	expect(steps).toBeLessThan(limit)
 }
 function words(code: string, model: CpuModel = '68000') {
 	const p = assemble(code, model)
@@ -101,7 +101,7 @@ describe('Motorola 68k integer execution', () => {
 	])('runs MC%s example %s with the expected registers, memory and output', (model, key) => {
 		const examples = model === '68020' ? EXAMPLES_68020 : model === '68010' ? EXAMPLES_68010 : EXAMPLES
 		const m = runtime(examples[key].code, model)
-		finish(m)
+		finish(m, key === 'mandelbrot' ? 500_000 : 20_000)
 		if (key === 'input') {
 			expect(m.pendingInput?.type).toBe('integer')
 			expect(m.provideInput('-42')).toBe(true)
@@ -117,6 +117,8 @@ describe('Motorola 68k integer execution', () => {
 			bitwise: '8\n14\n6\n',
 			input: '-42',
 			bitmap: '',
+			mandelbrot: '',
+			ackermann: '61',
 			returnArguments: '42',
 			scaledTable: '30'
 		}
@@ -153,15 +155,15 @@ describe('Motorola 68k integer execution', () => {
 			expect(m.cpu.registers[1]).toBe(-42)
 			expect(word(0x10000)).toBe(-42)
 		} else if (key === 'bitmap') {
-			expect(m.cpu.registers[8]).toBe(0x10100)
-			expect([word(0x10000), word(0x100fc)]).toEqual([0x0040ff, 0x007fff])
+			expect(m.cpu.registers[8]).toBe(0x11000)
+			expect([word(0x10000), word(0x10ffc)]).toEqual([0, 0xf800f8])
 		} else if (key === 'stack') {
 			expect([m.cpu.registers[1], m.cpu.registers[2]]).toEqual([42, -7])
 			expect(word(MEMORY_BYTES - 28)).toBe(42)
 		} else if (key === 'returnArguments') {
 			expect(m.cpu.registers[1]).toBe(42)
 			expect(word(MEMORY_BYTES - 20)).toBe(42)
-		} else {
+		} else if (key === 'scaledTable') {
 			expect([m.cpu.registers[1], m.cpu.registers[2]]).toEqual([30, -128])
 			expect([word(0x10000), word(0x10004), word(0x10008), word(0x1000c)]).toEqual([10, 20, 30, 40])
 		}
@@ -399,6 +401,6 @@ describe('Motorola 68k integer execution', () => {
 		const jump = instructions.describe(m.cpu.decode())
 		expect([jump.isBranch, jump.isJump, jump.category]).toEqual([false, true, 1])
 		const cmp = runtime('cmpi.w #1,d0')
-		expect(cmp.toolConfig().instructions!.describe(cmp.cpu.decode()).writes).toBe(-1)
+		expect(cmp.toolConfig().instructions!.describe(cmp.cpu.decode()).writes).toEqual([16])
 	})
 })
