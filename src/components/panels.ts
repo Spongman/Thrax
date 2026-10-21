@@ -18,8 +18,8 @@ import { BitmapIcon, BranchHistoryIcon, CacheIcon, CallStackIcon, ConsoleIcon, F
 
 export type PanelGroup = 'window' | 'tool'
 
-/** Which of the two groups a panel joins when the menu opens it. */
-export type PanelDock = 'side' | 'bottom'
+/** Which group a panel joins when the menu opens it. */
+export type PanelDock = 'left' | 'side' | 'bottom'
 
 export interface PanelSpec {
 	id: string
@@ -50,7 +50,7 @@ export interface PanelSpec {
 export const PANELS: readonly PanelSpec[] = [
 	{ id: 'registers', icon: RegistersIcon, title: 'Registers', group: 'window', dock: 'side', initial: true },
 	{ id: 'callStack', icon: CallStackIcon, title: 'Call Stack', group: 'window', dock: 'side', initial: true },
-	{ id: 'files', icon: FilesIcon, title: 'Files', group: 'window', dock: 'side', initial: true },
+	{ id: 'files', icon: FilesIcon, title: 'Files', group: 'window', dock: 'left', initial: true },
 	{ id: 'symbols', icon: SymbolsIcon, title: 'Symbols', menuTitle: 'Symbol Table', group: 'window', dock: 'side', initial: true },
 	{ id: 'memory', icon: MemoryIcon, title: 'Memory', group: 'window', dock: 'bottom', initial: true },
 	{ id: 'console', icon: ConsoleIcon, title: 'Console', group: 'window', dock: 'bottom', initial: true },
@@ -82,7 +82,7 @@ export const PANELS: readonly PanelSpec[] = [
 	},
 	{
 		id: 'pipeline', icon: PipelineIcon, title: 'Pipeline', menuTitle: 'Pipeline Model', group: 'tool', dock: 'bottom',
-		description: 'Where each instruction would sit in a classic five-stage pipeline, what the machine holds on a chosen cycle, and what the hazards between them cost.',
+		description: 'Instruction flow through the architecture’s pipeline, what each stage holds on a chosen cycle, and what hazards and multi-cycle operations cost.',
 	},
 ]
 

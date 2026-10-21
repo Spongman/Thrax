@@ -282,11 +282,11 @@ const LAYOUT_KEY = 'thrax-web.dock-layout'
 const LAYOUT_VERSION = 3
 
 /**
- * Where a panel lands: beside the registers, or below the source with the
- * memory.  The group leaders are placed against the file panels first, so a
- * panel opened later has something of its own kind to join.
+ * Files get the outer left edge. Other panels join the registers at the right
+ * or the memory below the source. Leaders are placed first so later panels
+ * have something of their own kind to join.
  */
-const DOCK_LEADER: Record<'side' | 'bottom', string> = { side: 'registers', bottom: 'memory' }
+const DOCK_LEADER = { left: 'files', side: 'registers', bottom: 'memory' } as const
 
 function panelOptions(id: string, anchor: string): AddPanelOptions | null {
 	const panel = panelById(id, contributions())
@@ -294,6 +294,7 @@ function panelOptions(id: string, anchor: string): AddPanelOptions | null {
 	ensureComponent(panel.id)
 	const leader = DOCK_LEADER[panel.dock]
 	const options = { id: panel.id, component: panel.id, title: panel.title }
+	if (panel.dock === 'left') return { ...options, position: { direction: 'left' }, initialWidth: 220 }
 	// The console asks for attention through its tab, so it draws its own.
 	const tab = panel.id === 'console' ? { tabComponent: 'console' } : {}
 	if (panel.id === leader) {
@@ -312,6 +313,7 @@ function panelOptions(id: string, anchor: string): AddPanelOptions | null {
  */
 function initialPanels(anchor: string): AddPanelOptions[] {
 	const order = [...INITIAL_PANELS].sort((left, right) =>
+		Number(right.dock === 'left') - Number(left.dock === 'left') ||
 		Number(right.id === DOCK_LEADER[right.dock]) - Number(left.id === DOCK_LEADER[left.dock]))
 	return order.map((panel) => panelOptions(panel.id, anchor)).filter((options): options is AddPanelOptions => options !== null)
 }
@@ -352,7 +354,7 @@ function saveLayout(api: DockviewApi) {
  * name files this session does not have, and files can be opened and closed
  * while it is running, so both directions are reconciled here.
  */
-function syncFilePanels(api: DockviewApi, documents: readonly SourceDocument[], removing: Set<string>) {
+export function syncFilePanels(api: DockviewApi, documents: readonly SourceDocument[], removing: Set<string>, activeId?: string, reveal = false, pendingRemoval?: ReadonlySet<string>) {
 	// A file put away keeps its place in the project and gives up its tab.
 	const wanted = new Map(shownDocuments(documents).map((document) => [filePanelId(document.id), document]))
 	for (const panel of api.panels) {
@@ -363,12 +365,16 @@ function syncFilePanels(api: DockviewApi, documents: readonly SourceDocument[], 
 	}
 
 	let anchor = api.panels.find(isFilePanel)
+	let addedActive = false
 	for (const [id, document] of wanted) {
 		const existing = api.getPanel(id)
 		if (existing) {
 			if (existing.title !== fileTitle(document)) existing.api.setTitle(fileTitle(document))
 			continue
 		}
+		// Selection can change before Dockview’s deferred close/move decision.
+		// Leave a missing panel alone until that decision updates the file state.
+		if (pendingRemoval?.has(id)) continue
 		const panel = api.addPanel({
 			id,
 			component: 'source',
@@ -379,7 +385,9 @@ function syncFilePanels(api: DockviewApi, documents: readonly SourceDocument[], 
 			inactive: true,
 		})
 		anchor ??= panel
+		if (document.id === activeId) addedActive = true
 	}
+	if (activeId && (reveal || addedActive)) api.getPanel(filePanelId(activeId))?.api.setActive()
 	return anchor
 }
 
@@ -392,6 +400,7 @@ function syncFilePanels(api: DockviewApi, documents: readonly SourceDocument[], 
 function editorPlacement(api: DockviewApi): AddPanelOptions['position'] {
 	if (api.getPanel(DOCK_LEADER.bottom)) return { referencePanel: DOCK_LEADER.bottom, direction: 'above' }
 	if (api.getPanel(DOCK_LEADER.side)) return { referencePanel: DOCK_LEADER.side, direction: 'left' }
+	if (api.getPanel(DOCK_LEADER.left)) return { referencePanel: DOCK_LEADER.left, direction: 'right' }
 	return undefined
 }
 
@@ -417,7 +426,7 @@ export function buildLayout(api: DockviewApi, removing: Set<string>) {
 	for (const options of initialPanels(anchor?.id ?? '')) {
 		if (api.getPanel(options.id)) continue
 		const reference = options.position && 'referencePanel' in options.position ? options.position.referencePanel : undefined
-		if (!restored || (typeof reference === 'string' && api.getPanel(reference))) {
+		if (!restored || reference === undefined || (typeof reference === 'string' && api.getPanel(reference))) {
 			api.addPanel(options)
 			continue
 		}
@@ -469,12 +478,14 @@ function publishOpenPanels(api: DockviewApi) {
 
 function DockLayout() {
 	const apiRef = React.useRef<DockviewApi | null>(null)
-	const { activeDocumentId, cancelCloseDocument, confirmCloseDocument, console: output, consoleAttention, documents, focusedMemory, focusedRegister, focusedSource, pendingClose, pendingInput, runToken, setConsoleAttention } = useTHRAXStore()
+	const { activeDocumentId, documentSelection, cancelCloseDocument, confirmCloseDocument, console: output, consoleAttention, documents, focusedMemory, focusedRegister, focusedSource, pendingClose, pendingInput, runToken, setConsoleAttention } = useTHRAXStore()
 	const switchedForRun = React.useRef<number | null>(null)
 	const deliveredOutput = React.useRef('')
 	/** File panels this component is removing, which are not files being closed. */
 	const removingPanels = React.useRef(new Set<string>())
+	const pendingRemoval = React.useRef(new Set<string>())
 	const shownDocument = React.useRef<string | null>(null)
+	const deliveredSelection = React.useRef(documentSelection)
 
 	const saveHandle = React.useRef(0)
 	const subscriptions = React.useRef<{ dispose: () => void }[]>([])
@@ -489,7 +500,8 @@ function DockLayout() {
 		subscriptions.current.push(event.api.onDidActivePanelChange(({ panel }) => {
 			if (!panel || !isFilePanel(panel)) return
 			shownDocument.current = documentIdOf(panel)
-			useTHRAXStore.getState().selectDocument(documentIdOf(panel))
+			const state = useTHRAXStore.getState()
+			if (state.activeDocumentId !== documentIdOf(panel)) state.selectDocument(documentIdOf(panel))
 		}))
 
 		// Dockview also removes a panel to move it, so a file is closed only once
@@ -497,9 +509,12 @@ function DockLayout() {
 		subscriptions.current.push(event.api.onDidRemovePanel((panel) => {
 			if (!isFilePanel(panel)) return
 			const { id } = panel
+			const documentId = documentIdOf(panel)
+			pendingRemoval.current.add(id)
 			window.setTimeout(() => {
-				if (removingPanels.current.delete(id) || apiRef.current?.getPanel(id)) return
-				useTHRAXStore.getState().requestCloseDocument(documentIdOf(panel))
+				pendingRemoval.current.delete(id)
+				if (apiRef.current !== event.api || removingPanels.current.delete(id) || event.api.getPanel(id)) return
+				useTHRAXStore.getState().requestCloseDocument(documentId)
 			}, 0)
 		}))
 		// Dragging and resizing fire in bursts, so the layout is written once things settle.
@@ -528,13 +543,13 @@ function DockLayout() {
 	React.useEffect(() => {
 		const api = apiRef.current
 		if (!api) return
-		syncFilePanels(api, documents, removingPanels.current)
-		// Only a change of file moves the tabs, so running a program leaves
-		// whichever panel the user is looking at in front.
-		if (shownDocument.current === activeDocumentId) return
+		// Explicit opens reveal even the current file. Ordinary source edits and
+		// running a program leave whichever tool the user is watching in front.
+		const reveal = shownDocument.current !== activeDocumentId || deliveredSelection.current !== documentSelection
+		deliveredSelection.current = documentSelection
+		syncFilePanels(api, documents, removingPanels.current, activeDocumentId, reveal, pendingRemoval.current)
 		shownDocument.current = activeDocumentId
-		api.getPanel(filePanelId(activeDocumentId))?.api.setActive()
-	}, [activeDocumentId, documents])
+	}, [activeDocumentId, documentSelection, documents])
 
 	// The first console traffic of a run brings the panel forward; later traffic
 	// only flashes the tab, and a request for input keeps flashing until it shows.
@@ -582,11 +597,6 @@ function DockLayout() {
 		const target = open.find((document) => document.title === focusedSource.file)
 		if (!target) return
 		selectDocument(target.id)
-		// Selecting a file that is already the active one changes nothing in the
-		// store, so the effect that follows the active document stays quiet and the
-		// tab stays behind whatever is in front of it.  A navigation has to bring
-		// it forward either way.
-		apiRef.current?.getPanel(filePanelId(target.id))?.api.setActive()
 	}, [focusedSource])
 
 	const pending = documents.find((document) => document.id === pendingClose)

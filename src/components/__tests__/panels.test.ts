@@ -18,8 +18,7 @@ describe('the panel catalogue', () => {
 	it('gives each dock group a leader that is open from the start', () => {
 		// A panel opened later joins its leader's group, so the leader has to be
 		// one of the panels that is already there.
-		for (const dock of ['side', 'bottom'] as const) {
-			const leader = dock === 'side' ? 'registers' : 'memory'
+		for (const [dock, leader] of [['side', 'registers'], ['bottom', 'memory'], ['left', 'files']] as const) {
 			expect(panelById(leader)?.dock).toBe(dock)
 			expect(panelById(leader)?.initial).toBe(true)
 		}

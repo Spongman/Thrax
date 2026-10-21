@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { AddPanelOptions, DockviewApi, IDockviewPanel, SerializedDockview } from 'dockview-react'
+import type { SourceDocument } from '../thraxStore'
 
 const storage = new Map<string, string>()
 
@@ -38,10 +39,11 @@ function fakeApi() {
 	const added: AddPanelOptions[] = []
 	let restoredFrom: SerializedDockview | null = null
 	let cleared = 0
+	const activated: string[] = []
 	const panel = (id: string, title?: string) => ({
 		id,
 		title,
-		api: { setActive: () => {}, setTitle: () => {} },
+		api: { setActive: () => { activated.push(id) }, setTitle: () => {} },
 	} as unknown as IDockviewPanel)
 	const api = {
 		get panels() { return panels },
@@ -62,22 +64,78 @@ function fakeApi() {
 	return {
 		api: api as unknown as DockviewApi,
 		added,
+		activated,
 		ids: () => panels.map((candidate) => candidate.id),
 		restored: () => restoredFrom,
 		cleared: () => cleared,
 	}
 }
 
-const { buildLayout } = await import('../../components/DockLayout')
+const { buildLayout, syncFilePanels } = await import('../../components/DockLayout')
 
 describe('dock layout', () => {
+	it('does not recreate a closing editor when Dockview activates its neighbour before close completes', () => {
+		const dock = fakeApi(), removing = new Set<string>()
+		const documents: SourceDocument[] = ['first.asm', 'second.asm'].map((title, index) => ({ id: String(index), title, code: 'nop', dirty: false }))
+		syncFilePanels(dock.api, documents, removing, '0')
+		dock.api.removePanel(dock.api.getPanel('file:0')!)
+		const pending = new Set(['file:0'])
+		// Dockview selects the second tab before its deferred remove notification
+		// can hide the first document. The store still lists both at this point.
+		syncFilePanels(dock.api, documents, removing, '1', true, pending)
+		expect(dock.ids()).toEqual(['file:1'])
+		expect(dock.activated[dock.activated.length - 1]).toBe('file:1')
+		pending.clear()
+		syncFilePanels(dock.api, [{ ...documents[0], hidden: true }, documents[1]], removing, '1')
+		expect(dock.ids()).toEqual(['file:1'])
+	})
+
+	it('keeps a panel that Dockview removes and re-adds while moving it', () => {
+		const dock = fakeApi(), removing = new Set<string>()
+		const document: SourceDocument = { id: 'one', title: 'one.asm', code: 'nop', dirty: false }
+		syncFilePanels(dock.api, [document], removing, 'one')
+		dock.api.removePanel(dock.api.getPanel('file:one')!)
+		dock.api.addPanel({ id: 'file:one', component: 'source', title: 'one.asm' })
+		syncFilePanels(dock.api, [document], removing, 'one', false, new Set(['file:one']))
+		expect(dock.ids()).toEqual(['file:one'])
+		expect(removing.size).toBe(0)
+	})
+
+	it('reveals a reopened file after every editor panel has closed', () => {
+		const dock = fakeApi()
+		dock.api.addPanel({ id: 'memory', component: 'memory' })
+		const document = { id: 'one', title: 'one.asm', code: '', dirty: false } as SourceDocument
+		syncFilePanels(dock.api, [document], new Set(), 'one')
+		expect(dock.added[dock.added.length - 1]?.position).toEqual({ referencePanel: 'memory', direction: 'above' })
+		expect(dock.activated).toEqual(['file:one'])
+		syncFilePanels(dock.api, [{ ...document, hidden: true }], new Set(), 'one')
+		expect(dock.api.getPanel('file:one')).toBeUndefined()
+		syncFilePanels(dock.api, [document], new Set(), 'one')
+		expect(dock.activated).toEqual(['file:one', 'file:one'])
+	})
+
+	it('reveals an existing editor on selection, while source updates leave tools in front', () => {
+		const dock = fakeApi()
+		const document = { id: 'one', title: 'one.asm', code: '', dirty: false } as SourceDocument
+		syncFilePanels(dock.api, [document], new Set(), 'one')
+		dock.activated.length = 0
+		syncFilePanels(dock.api, [{ ...document, code: 'new code' }], new Set(), 'one')
+		expect(dock.activated).toEqual([])
+		syncFilePanels(dock.api, [document], new Set(), 'one', true)
+		expect(dock.activated).toEqual(['file:one'])
+	})
+
 	it('opens the windows a run is watched through, and no tool', () => {
 		storage.clear()
 		const dock = fakeApi()
 		buildLayout(dock.api, new Set())
 
 		const opened = dock.added.filter((options) => options.component !== 'source').map((options) => options.id)
-		expect(opened).toEqual(['registers', 'memory', 'callStack', 'files', 'symbols', 'console', 'history'])
+		expect(opened).toEqual(['files', 'registers', 'memory', 'callStack', 'symbols', 'console', 'history'])
+		const files = dock.added.find((options) => options.id === 'files')!
+		// No reference panel: split the whole workspace, including its bottom row.
+		expect(files.position).toEqual({ direction: 'left' })
+		expect(files.initialWidth).toBe(220)
 		// A tool is opened from the menu, so nothing fetches its code on load.
 		for (const id of ['cache', 'xray', 'marsBot', 'digitalLab']) expect(dock.ids()).not.toContain(id)
 	})

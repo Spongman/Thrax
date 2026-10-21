@@ -243,6 +243,8 @@ interface THRAXStore {
 	code: string
 	documents: SourceDocument[]
 	activeDocumentId: string
+	/** Explicit file-open selections, including selecting the current file again. */
+	documentSelection: number
 	/**
 	 * The file the program is assembled from.  It follows the tab bar only until
 	 * the program starts, so switching tabs mid-run leaves it running.
@@ -786,6 +788,7 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 		code: initialActive.code,
 		documents: initialDocuments,
 		activeDocumentId: initialActive.id,
+		documentSelection: 0,
 		entryDocumentId: initialActive.id,
 		settings: initialSettings,
 		architecture: autosaved?.architecture ?? DEFAULT_ARCHITECTURE,
@@ -927,6 +930,7 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 				code: active.code,
 				documents,
 				activeDocumentId: active.id,
+				documentSelection: state.documentSelection + 1,
 				entryDocumentId: active.id,
 				settings,
 				...resetExecution(),
@@ -986,11 +990,11 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 				? { documents: get().documents.map(({ hidden, ...rest }) => rest.id === documentId || !hidden ? rest : { ...rest, hidden }) }
 				: {}
 			if (document.id === get().activeDocumentId) {
-				if (document.hidden) set(shown)
+				set({ ...shown, documentSelection: get().documentSelection + 1 })
 				return
 			}
 			const started = (debug.machine?.instructionCount ?? 0) > 0
-			set({ ...shown, activeDocumentId: document.id, code: document.code, ...(started ? {} : { entryDocumentId: document.id }) })
+			set({ ...shown, activeDocumentId: document.id, documentSelection: get().documentSelection + 1, code: document.code, ...(started ? {} : { entryDocumentId: document.id }) })
 			if (!started) get().refreshAssembly()
 		},
 

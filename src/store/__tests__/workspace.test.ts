@@ -83,6 +83,18 @@ describe('cache settings', () => {
 })
 
 describe('file titles', () => {
+	it('publishes a reveal request when selecting the current file again', () => {
+		openTwoFiles('one.asm', 'two.asm')
+		const previous = state().documentSelection
+		state().selectDocument('one')
+		expect(state().documentSelection).toBe(previous + 1)
+		state().hideDocument('one')
+		state().hideDocument('two')
+		state().selectDocument('two')
+		expect(shownDocuments(state().documents).map((file) => file.id)).toEqual(['two'])
+		expect(state().documentSelection).toBe(previous + 2)
+	})
+
 	it('gives a new file a title no open file has', () => {
 		openTwoFiles('untitled-3.asm', 'other.asm')
 		state().createDocument()
@@ -188,6 +200,18 @@ describe('removing a file', () => {
 })
 
 describe('opening files', () => {
+	it('requests visibility when opening the current file again, including after all tabs close', () => {
+		openTwoFiles('one.asm', 'two.asm')
+		const previous = state().documentSelection
+		state().openFiles([{ title: 'one.asm', code: '# reload\n' }])
+		expect(state().documentSelection).toBe(previous + 1)
+		state().hideDocument('one')
+		state().hideDocument('two')
+		state().openFiles([{ title: 'two.asm', code: '# reopen\n' }])
+		expect(state().documentSelection).toBe(previous + 2)
+		expect(shownDocuments(state().documents).map((file) => file.id)).toEqual(['two'])
+	})
+
 	it('adds files to the project and brings the first forward', () => {
 		openTwoFiles('one.asm', 'two.asm')
 		state().openFiles([{ title: 'lib.asm', code: '# lib\n' }, { title: 'more.asm', code: '' }])
