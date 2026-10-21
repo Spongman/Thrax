@@ -12,25 +12,27 @@ const MNEMONICS: readonly string[] =
 
 export const MIPS_LANGUAGE_ID = 'mips'
 
-let registered = false
+import { registerAssemblyLanguage } from '../../../services/assemblyLanguage'
 
 export function registerMipsLanguage(): monaco.IDisposable {
-	const disposables: monaco.IDisposable[] = []
-	// Monaco language identities are permanent; live providers are disposable.
-	if (!registered) {
-		monaco.languages.register({ id: 'mips' })
-		registered = true
-	}
 
-	disposables.push(monaco.languages.setLanguageConfiguration('mips', {
+	const registers = [
+		'$zero', '$at', '$v0', '$v1',
+		'$a0', '$a1', '$a2', '$a3',
+		'$t0', '$t1', '$t2', '$t3', '$t4', '$t5', '$t6', '$t7',
+		'$s0', '$s1', '$s2', '$s3', '$s4', '$s5', '$s6', '$s7',
+		'$t8', '$t9', '$k0', '$k1',
+		'$gp', '$sp', '$fp', '$ra', '$pc', '$hi', '$lo',
+		...Array.from({ length: 32 }, (_unused, index) => `$f${index}`),
+	]
+	return registerAssemblyLanguage(monaco, {
+		id: MIPS_LANGUAGE_ID, configuration: {
 		comments: { lineComment: '#' },
 		// A word runs through `.` and `$`, so `add.s` and `$t0` are each one
 		// word: what completion replaces, and what a double click selects.  It
 		// is what a name may be spelled with (`gotoDefinition.ts:23`).
 		wordPattern: /[A-Za-z_.$][\w.$]*/,
-	}))
-
-	disposables.push(monaco.languages.setMonarchTokensProvider('mips', {
+	}, tokens: {
 		tokenizer: {
 			root: [
 				// Comments
@@ -76,48 +78,13 @@ export function registerMipsLanguage(): monaco.IDisposable {
 				[/\s+/, 'white'],
 			],
 		},
-	}))
-
-	// Completion items
-	disposables.push(monaco.languages.registerCompletionItemProvider('mips', {
-		provideCompletionItems: (model, position) => {
-			// The word already typed is replaced rather than added to, so
-			// completing `ad` gives `add` and not `adadd`.  A mnemonic keeps its
-			// format suffix and a register its `$`, which is what the word
-			// pattern above is for.
-			const word = model.getWordUntilPosition(position)
-			const range = new monaco.Range(position.lineNumber, word.startColumn, position.lineNumber, position.column)
-
-			const registers = [
-				'$zero', '$at', '$v0', '$v1',
-				'$a0', '$a1', '$a2', '$a3',
-				'$t0', '$t1', '$t2', '$t3', '$t4', '$t5', '$t6', '$t7',
-				'$s0', '$s1', '$s2', '$s3', '$s4', '$s5', '$s6', '$s7',
-				'$t8', '$t9', '$k0', '$k1',
-				'$gp', '$sp', '$fp', '$ra', '$pc', '$hi', '$lo',
-				...Array.from({ length: 32 }, (_unused, index) => `$f${index}`),
-			]
-
-			return {
-				suggestions: [
-					...MNEMONICS.map((mnemonic) => ({
-						label: mnemonic,
-						kind: monaco.languages.CompletionItemKind.Keyword,
-						insertText: mnemonic,
-						range,
-						detail: instructionSignature(mnemonic),
-						documentation: { value: (instructionHelp(mnemonic) ?? []).join('\n\n') },
-					})),
-					...registers.map((reg) => ({
-						label: reg,
-						kind: monaco.languages.CompletionItemKind.Variable,
-						insertText: reg,
-						range,
-						documentation: `Register: ${reg}`,
-					})),
-				],
-			}
-		},
-	}))
-	return { dispose: () => disposables.splice(0).reverse().forEach((item) => item.dispose()) }
+	},
+		completions: [
+			...MNEMONICS.map((mnemonic) => ({
+				label: mnemonic, kind: monaco.languages.CompletionItemKind.Keyword, insertText: mnemonic,
+				detail: instructionSignature(mnemonic), documentation: { value: (instructionHelp(mnemonic)?.contents ?? []).join('\n\n') },
+			})),
+			...registers.map((name) => ({ label: name, insertText: name, kind: monaco.languages.CompletionItemKind.Variable, documentation: `Register: ${name}` })),
+		],
+	})
 }

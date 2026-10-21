@@ -8,7 +8,7 @@ import { cp0RegisterNumber, fpRegisterNumber } from '../core/coprocessor'
 import { basicForms, type IsaOperandKind } from '../core/isa'
 import { registerNumber } from '../core/registers'
 import { AssemblyError, atInstruction, type SourcePosition } from '../../../core/diagnostics'
-import type { LabelArgument, MipsArgument, MipsInstruction } from '../../../core/types'
+import type { LabelArgument, MipsArgument, MipsInstruction } from '../core/types'
 import { describeArgument, matchesSignature } from './operands'
 
 /** Instructions taking an `rt, offset(base)` operand pair. */

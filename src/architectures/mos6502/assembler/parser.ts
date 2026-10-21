@@ -11,7 +11,7 @@ import { StatementKind, type HookContext, type Statement } from '../../../core/a
 import { Op, parseExpression, type Expr, type ExpressionSyntax } from '../../../core/assembly/expressions'
 import { TokenCursor, TokenKind, positionOf, type Position, type Token } from '../../../core/assembly/tokens'
 import { AssemblyError } from '../../../core/diagnostics'
-import type { Diagnostic } from '../../../core/types'
+import type { Diagnostic } from '../../contracts'
 import { ABS, ABX, ABY, ACC, IMM, IMP, IND, INSN_BY_NAME, INSN_OPCODE, IZX, IZY, ALL_MNEMONICS, MODE_BYTES, REL, ZP, ZPX, ZPY, isBranch, takesAccumulator } from '../isa'
 import { AIX, NMOS_MODEL, ZPI, ZPR, type CpuModel } from '../isa'
 import { PC_SYMBOL } from './tokenizer'

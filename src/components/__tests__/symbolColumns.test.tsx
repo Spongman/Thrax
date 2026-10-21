@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
-import type { DataEntry, SymbolTables } from '../../core/types'
+import type { DataDeclaration as DataEntry, SymbolTables } from '../../architectures/contracts'
 import { WordMemory } from '../../architectures/mips/machine'
 import SymbolTableView, { symbolSite, type SymbolRow } from '../SymbolTableView'
 

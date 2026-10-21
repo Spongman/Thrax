@@ -18,7 +18,7 @@ import { location, type ExpansionFrame } from '../../../../core/assembly/macroEn
 import type { AssemblySource } from '../../../../core/assembly/sources'
 import { TokenKind, positionOf, type Position } from '../../../../core/assembly/tokens'
 import { AssemblyError } from '../../../../core/diagnostics'
-import type { Diagnostic } from '../../../../core/types'
+import type { Diagnostic } from '../../../contracts'
 import { DATA_BASE, TEXT_BASE } from '../layout'
 import { encoderFor, isMnemonic, type EncodeContext, type PoolSlot } from './encoder'
 import { parseOperands, parseValue, type Value } from './operands'

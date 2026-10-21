@@ -19,7 +19,7 @@ import type {
 	Segment,
 	TextSegment,
 	TokenData,
-} from '../../../core/types'
+} from '../core/types'
 
 /** Segments data directives lay out in. */
 export type DataSegment = 'data' | 'kdata'

@@ -33,8 +33,6 @@ export interface DevicePort {
 	/** Requests an architecture/environment-defined interrupt line. Absent if unsupported.
 	 * Acceptance, priority, masking and pending behavior belong to the backend. */
 	requestInterrupt?(line: number): boolean
-	/** Legacy interrupt entry point until the native device adapters migrate. */
-	interrupt(cause: number): boolean
 }
 
 /** One instruction the machine has run, as a tool replaying them reads it. */

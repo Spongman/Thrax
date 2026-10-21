@@ -1,3 +1,4 @@
+import { createArchitectureServices } from '../../core/architectureServices'
 import { assembleMips } from './assembler'
 import { MipsSimulator } from './core/simulator'
 import { BotIcon, DigitalLabIcon, ScavengerIcon, XRayIcon } from '../../components/icons'
@@ -12,7 +13,7 @@ import { MipsAssembly, mipsDisassembly } from './program'
 import { MIPS_REGISTER_BANKS, MIPS_REGISTERS } from './registers'
 import { MIPS_SETTINGS, splitProgramArguments, type MipsSettings } from './settings'
 import { createMipsTools } from './tools'
-import type { ArchitectureDefinition, ArchitectureServices, AssembledProgram, Disposable, PanelContribution } from '../contracts'
+import type { ArchitectureDefinition, ArchitectureServices, AssembledProgram, PanelContribution } from '../contracts'
 
 const panels = () => import('./panels')
 
@@ -57,60 +58,44 @@ const definition: ArchitectureDefinition<ArchitectureServices<MipsSettings>> = {
 	multipleEntries: true,
 	panels: PANELS,
 	createServices(): ArchitectureServices<MipsSettings> {
-		let machine: MipsMachine | undefined
-		let disposed = false
-		const contributions: Disposable[] = []
-		const check = () => {
-			if (disposed) throw new Error('Architecture services have been disposed')
-		}
-		return {
-			disassembly: mipsDisassembly,
-			describeToken,
-			assemble({ files, entries }, settings) {
-				check()
-				const { delayedBranching, extendedAssembler, warningsAreErrors } = settings
-				const layout = MEMORY_CONFIGURATIONS[settings.memoryConfiguration]
-				const result = assembleMips(files, entries, { delayedBranching, extendedAssembler, warningsAreErrors, memory: layout })
-				return new MipsAssembly(result, layout)
-			},
-			createMachine(program, settings, options) {
-				check()
-				const { layout, machineCode, program: assembled } = mipsAssembly(program)
-				const simulator = new MipsSimulator(machineCode, assembled, layout, {
-					historySchema: mipsHistorySchema,
-					startAtMain: settings.startAtMain,
-					// The field is one line of text; the simulator wants the words of it.
-					programArguments: settings.programArguments ? splitProgramArguments(settings.programArgumentsText) : undefined,
-				})
-				simulator.delayedBranching = settings.delayedBranching
-				// Off, stores into text and fetches outside it fault.
-				simulator.selfModifyingCode = settings.selfModifyingCode
-				// How far back the workspace is willing to let the program be rewound.
-				simulator.maxHistorySize = options.historyLimit
-				simulator.configure({ speed: options.speed })
-				const next = new MipsMachine(simulator)
-				machine?.dispose()
-				machine = next
-				return next
-			},
-			createTools: createMipsTools,
-			profile: (settings) => mipsProfile(settings.memoryConfiguration),
-			exportWords: (program) => mipsAssembly(program).machineCode,
-			async installEditor(monaco, host) {
-				check()
-				const { installEditor } = await import('./editor')
-				check()
-				const contribution = installEditor(monaco, host)
-				contributions.push(contribution)
-				return contribution
-			},
-			dispose() {
-				if (disposed) return
-				disposed = true
-				machine?.dispose()
-				for (const contribution of contributions.reverse()) contribution.dispose()
-			},
-		}
+		return createArchitectureServices<MipsSettings>(({ check }) => {
+			return {
+				disassembly: mipsDisassembly,
+				describeToken,
+				assemble({ files, entries }, settings) {
+					const { delayedBranching, extendedAssembler, warningsAreErrors } = settings
+					const layout = MEMORY_CONFIGURATIONS[settings.memoryConfiguration]
+					const result = assembleMips(files, entries, { delayedBranching, extendedAssembler, warningsAreErrors, memory: layout })
+					return new MipsAssembly(result, layout)
+				},
+				createMachine(program, settings, options) {
+					const { layout, machineCode, program: assembled } = mipsAssembly(program)
+					const simulator = new MipsSimulator(machineCode, assembled, layout, {
+						historySchema: mipsHistorySchema,
+						startAtMain: settings.startAtMain,
+						// The field is one line of text; the simulator wants the words of it.
+						programArguments: settings.programArguments ? splitProgramArguments(settings.programArgumentsText) : undefined,
+					})
+					simulator.delayedBranching = settings.delayedBranching
+					// Off, stores into text and fetches outside it fault.
+					simulator.selfModifyingCode = settings.selfModifyingCode
+					// How far back the workspace is willing to let the program be rewound.
+					simulator.maxHistorySize = options.historyLimit
+					simulator.configure({ speed: options.speed })
+					const next = new MipsMachine(simulator)
+					return next
+				},
+				createTools: createMipsTools,
+				profile: (settings) => mipsProfile(settings.memoryConfiguration),
+				exportWords: (program) => mipsAssembly(program).machineCode,
+				async installEditor(monaco, host) {
+					const { installEditor } = await import('./editor')
+					check()
+					const contribution = installEditor(monaco, host)
+					return contribution
+				},
+			}
+		})
 	},
 }
 

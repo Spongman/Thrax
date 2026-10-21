@@ -13,6 +13,7 @@
  * (`simulator.ts:1641`).
  */
 
+import { formatInstructionHelp, instructionForms, type InstructionHelp } from '../../../core/instructionHelp'
 import { basicForms, pseudoForms } from './isa'
 
 /** Keyed by the lower case mnemonic, as `isa.ts` spells it. */
@@ -439,7 +440,8 @@ export const INSTRUCTION_NAMES: Readonly<Record<string, string>> = {
 
 /** What `mnemonic` does, however it is cased, or undefined when it names nothing. */
 export function instructionDoc(mnemonic: string): string | undefined {
-	return INSTRUCTION_DOCS[mnemonic.toLowerCase()]
+	const name = mnemonic.toLowerCase()
+	return Object.prototype.hasOwnProperty.call(INSTRUCTION_DOCS, name) ? INSTRUCTION_DOCS[name] : undefined
 }
 
 /** The form a completion shows beside the mnemonic: the first the table gives. */
@@ -448,35 +450,17 @@ export function instructionSignature(mnemonic: string): string | undefined {
 	return basicForms(name)[0]?.example ?? pseudoForms(name)[0]?.example
 }
 
-/** How many forms a tip lists before the shapes start repeating. */
-const FORM_LIMIT = 6
-
-/**
- * The tip for `mnemonic`, one Markdown paragraph per entry, or null when the
- * word names no instruction.
- *
- * Only `**strong**` and `` `code` `` are used: the same paragraphs are drawn by
- * the gutter's own tip, which understands those two marks and no others
- * (`SourcePane.tsx:112`).
- */
-export function instructionHelp(mnemonic: string): string[] | null {
-	const doc = instructionDoc(mnemonic)
-	if (doc === undefined) return null
+/** Instruction help shared by source, disassembly and completion providers. */
+export function instructionHelp(mnemonic: string): InstructionHelp | null {
+	const summary = instructionDoc(mnemonic)
+	if (summary === undefined) return null
 	const name = mnemonic.toLowerCase()
 	const basic = basicForms(name).map((form) => form.example)
 	const pseudo = pseudoForms(name).map((form) => form.example)
-	const kind = basic.length > 0 ? 'basic instruction' : 'pseudo-instruction'
-	const paragraphs = [`**${name}** ${INSTRUCTION_NAMES[name]} (${kind})`, doc]
-	if (basic.length > 0) paragraphs.push(formList(basic))
-	// A mnemonic that is both is written as the basic one, and its pseudo forms
-	// are the operand shapes the assembler widens, so they are named as such.
-	if (pseudo.length > 0) paragraphs.push(basic.length > 0 ? `Pseudo forms: ${formList(pseudo)}` : formList(pseudo))
-	return paragraphs
-}
-
-function formList(examples: readonly string[]): string {
-	const shown = examples.slice(0, FORM_LIMIT)
-	const list = shown.map((example) => `\`${example}\``).join(' ')
-	const rest = examples.length - shown.length
-	return rest > 0 ? `${list} and ${rest} more` : list
+	return formatInstructionHelp(name, {
+		summary, title: INSTRUCTION_NAMES[name],
+		kind: basic.length > 0 ? 'basic instruction' : 'pseudo-instruction',
+		forms: basic.length > 0 ? basic : pseudo,
+		details: basic.length > 0 && pseudo.length > 0 ? [`Pseudo forms: ${instructionForms(pseudo)}`] : [],
+	})
 }

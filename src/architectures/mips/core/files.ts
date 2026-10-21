@@ -7,7 +7,7 @@
  * meanings and are wired to the console by the simulator.
  */
 
-import type { FilesSnapshot } from '../../../core/types'
+import type { FilesSnapshot } from './types'
 
 export const STDOUT = 1
 export const STDERR = 2

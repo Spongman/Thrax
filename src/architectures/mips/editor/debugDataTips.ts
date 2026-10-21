@@ -1,3 +1,4 @@
+import { registerTokenHover } from '../../../services/assemblyLanguage'
 import type * as Monaco from 'monaco-editor'
 import { assembleMips } from '../assembler'
 import { formatWord, parseWord } from '../../../core/format'
@@ -109,7 +110,7 @@ export function describeToken(
 		const start = match.index ?? 0
 		if (offset < start || offset > start + match[0].length) continue
 		const help = instructionHelp(match[0])
-		if (help) return { start, length: match[0].length, contents: help }
+		if (help) return { start, length: match[0].length, ...help }
 	}
 
 	const tokenMatch = /-?(?:0x[0-9a-f]+|\d+)|[A-Za-z_]\w*/ig
@@ -153,24 +154,11 @@ export function registerMipsDebugDataTips(monaco: typeof Monaco, getState: () =>
 		return cachedLabels
 	}
 
-	return monaco.languages.registerHoverProvider('mips', {
-		provideHover(model, position) {
-			const state = getState()
-			// The hovered file is assembled on its own, so a label it defines
-			// resolves as it is typed; the program's own labels cover the rest,
-			// which is where a label defined in another file comes from.
-			const own = getLabels(model.getValue())
-			const described = describeToken(
-				model.getLineContent(position.lineNumber),
-				position.column - 1,
-				state,
-				(name) => own.get(name) ?? state.labels.get(name),
-			)
-			if (!described) return null
-			return {
-				range: getTokenRange(monaco, position, described.start, described.length),
-				contents: described.contents.map((value) => ({ value })),
-			}
-		},
+
+	return registerTokenHover(monaco, 'mips', (line, offset, model) => {
+		const state = getState()
+		// The hovered file resolves labels as they are typed; program labels cover includes.
+		const own = getLabels(model.getValue())
+		return describeToken(line, offset, state, (name) => own.get(name) ?? state.labels.get(name))
 	})
 }

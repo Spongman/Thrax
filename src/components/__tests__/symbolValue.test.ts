@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { DataEntry } from '../../core/types'
+import type { DataDeclaration as DataEntry } from '../../architectures/contracts'
 import { WordMemory } from '../../architectures/mips/machine'
 import { dataRuns, runAt, valueOf } from '../symbolValue'
 

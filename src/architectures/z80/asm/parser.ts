@@ -11,7 +11,7 @@ import { evaluate, ExprKind, Op, type Expr } from '../../../core/assembly/expres
 import { location, type ExpansionFrame } from '../../../core/assembly/macroEngine'
 import { TokenKind, positionOf, type Position, type Token } from '../../../core/assembly/tokens'
 import { AssemblyError } from '../../../core/diagnostics'
-import type { Diagnostic } from '../../../core/types'
+import type { Diagnostic } from '../../contracts'
 import { MNEMONICS, REGISTER_NAMES, emitEncoding, encodeInstruction, expressionOf, parseOperand, splitOperands } from './encoder'
 import { z80Arithmetic } from './arithmetic'
 

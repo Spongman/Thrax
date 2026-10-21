@@ -210,7 +210,7 @@ export class DigitalLabSim implements ExecutionObserver, MachineService {
 	 * because it is already in a handler never reaches the program.
 	 */
 	private raise(cause: number, counter: number) {
-		if (this.port?.interrupt(cause) !== true) return
+		if (this.port?.requestInterrupt?.(cause) !== true) return
 		this.set(counter, this.read(counter) + 1)
 		this.lastInterrupt = cause
 	}

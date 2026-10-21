@@ -2,7 +2,7 @@ import { StatementKind, type HookContext, type Statement } from '../../../core/a
 import { Op, parseExpression, type Expr, type ExpressionSyntax } from '../../../core/assembly/expressions'
 import { TokenCursor, TokenKind, positionOf, type Position, type Token } from '../../../core/assembly/tokens'
 import { AssemblyError } from '../../../core/diagnostics'
-import type { Diagnostic } from '../../../core/types'
+import type { Diagnostic } from '../../contracts'
 
 const { Label, Assign, Origin, Emit, Invoke, Define, Align, Bytes, Hook } = StatementKind
 const { Identifier, String: StringToken, Newline, End } = TokenKind

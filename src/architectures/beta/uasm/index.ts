@@ -4,7 +4,7 @@ import { ExprKind, Op, type Arithmetic } from '../../../core/assembly/expression
 import { expandSources, type AssemblySource } from '../../../core/assembly/sources'
 import { TokenKind, makeToken, positionOf, type Position, type Token } from '../../../core/assembly/tokens'
 import { AssemblyError } from '../../../core/diagnostics'
-import type { Diagnostic } from '../../../core/types'
+import type { Diagnostic } from '../../contracts'
 import betaLibraryCode from './beta.uasm?raw'
 import { parseUasm, type UasmDirectives, type UasmRelocation, type UasmSegment } from './parser'
 import { tokenizeUasm } from './tokenizer'

@@ -1,10 +1,10 @@
 import { mipsHistorySchema } from '../../history/schema'
 import { describe, expect, it } from 'vitest'
-import { Kind } from '../../../../core/effectKind'
+import { Kind } from '../effectKind'
 import { assembleMips } from '../../assembler'
 import { firstError } from '../../../../core/diagnostics'
 import { MipsSimulator } from '../simulator'
-import type { Effect } from '../../../../core/types'
+import type { Effect } from '../types'
 
 function build(source: string) {
 	const { program, machineCode, diagnostics } = assembleMips(source)

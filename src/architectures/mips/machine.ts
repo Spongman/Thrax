@@ -110,7 +110,7 @@ export class MipsMachine implements Machine {
 	toolConfig(): MachineConfig {
 		const simulator = this.simulator
 		return {
-			delayedBranching: simulator.delayedBranching,
+			addressing: { instructionBytes: 4, memoryWordBytes: 4 }, delayedBranching: simulator.delayedBranching,
 			instructions: mipsInstructionSet,
 			device: simulator.devicePort(),
 			history: simulator.executionHistory,
@@ -120,6 +120,6 @@ export class MipsMachine implements Machine {
 
 	dispose() {
 		this.simulator.onProgress = null
-		this.simulator.stop()
+		this.simulator.dispose()
 	}
 }

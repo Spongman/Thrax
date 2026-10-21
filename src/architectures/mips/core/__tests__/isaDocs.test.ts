@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { INSTRUCTION_MNEMONICS } from '../isa'
-import { INSTRUCTION_DOCS, INSTRUCTION_NAMES, instructionDoc, instructionHelp, instructionSignature } from '../isaDocs'
+import { INSTRUCTION_DOCS, INSTRUCTION_NAMES, instructionDoc, instructionHelp as describeInstruction, instructionSignature } from '../isaDocs'
+
+const instructionHelp = (name: string) => describeInstruction(name)?.contents ?? null
 
 const mnemonics = [...INSTRUCTION_MNEMONICS].map((mnemonic) => mnemonic.toLowerCase())
 
@@ -35,19 +37,19 @@ describe('instruction docs', () => {
 
 	it('shows a basic instruction with its own form', () => {
 		expect(instructionHelp('add')).toEqual([
-			'**add** ADD (basic instruction)',
+			'**ADD** — ADD (basic instruction)',
 			'Add two registers, trapping on signed overflow.',
-			'`add $t1,$t2,$t3`',
-			'Pseudo forms: `add $t1,$t2,-100` `add $t1,$t2,100000`',
+			'Syntax: `add $t1,$t2,$t3`',
+			'Pseudo forms: `add $t1,$t2,-100` · `add $t1,$t2,100000`',
 		])
 		expect(instructionSignature('add')).toBe('add $t1,$t2,$t3')
 	})
 
 	it('shows a pseudo-instruction as one', () => {
 		expect(instructionHelp('move')).toEqual([
-			'**move** MOVE (pseudo-instruction)',
+			'**MOVE** — MOVE (pseudo-instruction)',
 			'Copy one register into another.',
-			'`move $t1,$t2`',
+			'Syntax: `move $t1,$t2`',
 		])
 		expect(instructionSignature('move')).toBe('move $t1,$t2')
 	})

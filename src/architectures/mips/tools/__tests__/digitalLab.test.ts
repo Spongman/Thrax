@@ -29,7 +29,7 @@ function build({ accept = true } = {}) {
 		device: {
 			read: (address) => written.get(address) ?? 0,
 			write: (address, value) => { written.set(address, value) },
-			interrupt: (cause) => {
+			requestInterrupt: (cause) => {
 				if (accept) raised.push(cause)
 				return accept
 			},

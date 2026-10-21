@@ -1,13 +1,14 @@
+import { describeEffect as presentEffect } from '../../../core/historyView'
 /**
  * How the history panel reads MIPS entries: the word each ran, disassembled,
  * and the packed effects it recorded, taken apart into chips.
  */
 
 import { disassemble } from '../core/disassembler'
-import { KIND_CALL, KIND_CONSOLE, KIND_CONSOLE_RESET, KIND_CP0, KIND_DISPLAY, KIND_EXIT_CODE, KIND_FLAG, KIND_FP, KIND_HALTED, KIND_HEAP_POINTER, KIND_HI_LO, KIND_INPUT, KIND_MEMORY, KIND_QUEUED_INPUT, KIND_REGISTER, KIND_SERVICE, KIND_SLEEP } from '../../../core/effectKind'
+import { KIND_CALL, KIND_CONSOLE, KIND_CONSOLE_RESET, KIND_CP0, KIND_DISPLAY, KIND_EXIT_CODE, KIND_FLAG, KIND_FP, KIND_HALTED, KIND_HEAP_POINTER, KIND_HI_LO, KIND_INPUT, KIND_MEMORY, KIND_QUEUED_INPUT, KIND_REGISTER, KIND_SERVICE, KIND_SLEEP } from '../core/effectKind'
 import type { EffectStore } from '../core/effectStore'
 import { formatWord } from '../../../core/format'
-import type { Effect, HistoryEntry } from '../../../core/types'
+import type { Effect, HistoryEntry } from '../core/types'
 import type { DescribedEffect, HistoryFormatter } from '../../contracts'
 
 const hex = (value: number) => formatWord(value >>> 0)
@@ -19,10 +20,7 @@ function described(applied: boolean, parts: WordEffect): DescribedEffect {
 	const held = parts.value === undefined ? parts.text
 		: parts.second === undefined ? hex(parts.value)
 			: `${hex(parts.value)}/${hex(parts.second)}`
-	const label = held !== undefined
-		? (applied ? `${parts.subject} → ${held}` : `${parts.subject} ${held} →`)
-		: parts.detail !== undefined ? `${parts.subject} ${parts.detail}` : parts.subject
-	return { ...parts, applied, label }
+	return presentEffect(applied, parts, held)
 }
 
 export function describeEffect(effect: Effect, applied: boolean): DescribedEffect {

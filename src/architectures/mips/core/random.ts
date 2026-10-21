@@ -5,7 +5,7 @@
  * sequence on every run: a 48-bit linear congruential engine.
  */
 
-import type { RandomSnapshot } from '../../../core/types'
+import type { RandomSnapshot } from './types'
 
 const MULTIPLIER = 0x5deece66dn
 const ADDEND = 0xbn

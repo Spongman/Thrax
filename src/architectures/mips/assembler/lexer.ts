@@ -6,7 +6,7 @@
 
 import { AssemblyError, formatPosition } from '../../../core/diagnostics'
 import { isInstructionMnemonic } from '../core/isa'
-import type { Diagnostic, TokenData, TokenType } from '../../../core/types'
+import type { Diagnostic, TokenData, TokenType } from '../core/types'
 
 export class Token implements TokenData {
 	constructor(

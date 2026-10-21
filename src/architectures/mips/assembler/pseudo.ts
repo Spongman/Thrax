@@ -9,7 +9,7 @@ import { fpRegisterNumber } from '../core/coprocessor'
 import { REGISTER_NAMES, registerNumber } from '../core/registers'
 import { doubleToBits, singleToBits } from '../../../core/ieee754'
 import { AssemblyError, atInstruction } from '../../../core/diagnostics'
-import type { ImmediateArgument, LabelArgument, MipsArgument, MipsInstruction } from '../../../core/types'
+import type { ImmediateArgument, LabelArgument, MipsArgument, MipsInstruction } from '../core/types'
 import { highHalf, lowHalf, TWO_OPERAND_FORMS } from './operands'
 
 export interface ExpansionSettings {

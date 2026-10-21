@@ -1,7 +1,10 @@
+import { editTransaction } from '../../../core/editTransaction'
+import { rewindHistoryTo } from '../../../core/historyCursor'
 /**
  * MIPS Runtime Simulator with Breakpoint & Step-Through Support
  */
 
+import { MemoryEdits } from '../../../core/memoryEdits'
 import {
 	CP0_REGISTER_COUNT,
 	CP0_STATUS_EXL,
@@ -37,15 +40,15 @@ import type { DevicePort, ExecutionObserver } from '../../../core/observer'
 import { RandomStreams } from './random'
 import type { EffectStore } from './effectStore'
 import { packService, serviceOf, slotOf, type MachineService, type ServiceRecorder } from '../../../core/service'
-import { KIND_REGISTER, KIND_FP, KIND_FLAG, KIND_CP0, KIND_MEMORY, KIND_CONSOLE, KIND_CONSOLE_RESET, KIND_DISPLAY, KIND_QUEUED_INPUT, KIND_CALL, KIND_HI_LO, KIND_HEAP_POINTER, KIND_HALTED, KIND_EXIT_CODE, KIND_SLEEP, KIND_INPUT, KIND_SERVICE } from '../../../core/effectKind'
+import { KIND_REGISTER, KIND_FP, KIND_FLAG, KIND_CP0, KIND_MEMORY, KIND_CONSOLE, KIND_CONSOLE_RESET, KIND_DISPLAY, KIND_QUEUED_INPUT, KIND_CALL, KIND_HI_LO, KIND_HEAP_POINTER, KIND_HALTED, KIND_EXIT_CODE, KIND_SLEEP, KIND_INPUT, KIND_SERVICE } from './effectKind'
 
 import { MipsHistory } from './history'
 import type { HistoryBufferSchema } from '../../../core/historyBuffers'
 import { REGISTER_FILE_NAMES, REGISTER_NAMES, registerFileIndex } from './registers'
 import { DEFAULT_BACKSTEP_LIMIT } from '../../../core/settings'
 import { MEMORY_CONFIGURATIONS, type MemoryConfigurationValues } from '../memoryConfigurations'
-import type { CallFrame, DelayState, Effect, KeyboardDisplayState, MemoryView, MipsInstruction, MipsProgram, PendingInput, SimulatorState, WordRegisters } from '../../../core/types'
-import { yieldToHost } from '../../../core/yieldToHost'
+import type { CallFrame, DelayState, Effect, KeyboardDisplayState, MemoryView, MipsInstruction, MipsProgram, PendingInput, SimulatorState, WordRegisters } from './types'
+import { ExecutionController } from '../../../core/executionController'
 
 /** Cause codes for a bad address, by whether it was a load or a store. */
 const EXCEPTION_ADDRESS_LOAD = 4
@@ -183,18 +186,6 @@ export interface MidiPlayer {
 
 /** `backstepLimit`'s default, from `Config.properties:7`. */
 
-/** Instructions run between yields to the browser. */
-const DEFAULT_BATCH_SIZE = 20_000
-
-/** Redraws per second when execution is paced, which sets the batch size. */
-const ANIMATION_FRAMES_PER_SECOND = 30
-
-/** Longest a paced run sleeps without looking at the speed control again. */
-const FRAME_SLICE_MS = 50
-
-/** How much of a stalled run a paced run will make up once it resumes. */
-const MAX_CATCH_UP_SECONDS = 0.25
-
 /**
  * Bit 1 of either control register enables that device's interrupt.  The
  * receiver's fires when a character arrives, the transmitter's when it has
@@ -252,8 +243,11 @@ export class MipsSimulator {
 	hi: number = 0
 	lo: number = 0
 	console: string
-	running: boolean
-	halted: boolean
+	get running() { return this.execution.running }
+	set running(value: boolean) { this.execution.running = value }
+	private cpuHalted = false
+	get halted() { return this.cpuHalted || this.execution.stopped }
+	set halted(value: boolean) { this.cpuHalted = value }
 	paused: boolean
 	instructionCount: number
 	/** Source-level metadata for the debugger, keyed by address. */
@@ -365,14 +359,30 @@ export class MipsSimulator {
 	readonly effects: EffectStore
 	/** Hands out entry ids; never reset, so an id is unique for the session. */
 	private nextEntryId: number
-	/**
-	 * The absolute history position of the present: entries below it stand
-	 * behind it.  A step back moves this rather than dropping the entry, since
-	 * the entries ahead of it hold the values that came from outside the machine
-	 * and nothing else can reproduce those.  Absolute, so eviction cannot move it.
-	 */
-	private cursor: number
 
+	private readonly execution = new ExecutionController(this, {
+		speed: () => this.speed,
+		pacedAddresses: () => this.pacedAddresses,
+		depth: () => this.callStack.length,
+		ready: () => this.pendingInput === null,
+		takeSleep: () => {
+			const delay = this.pendingSleepMs
+			this.pendingSleepMs = 0
+			return delay
+		},
+	})
+
+	private readonly memoryEdits = new MemoryEdits({
+		region: () => ({ start: 0, end: 0xFFFFFFFF }),
+		read: (address) => this.byteRaw(address),
+		lastWritten: (from, to) => this.lastWrittenByte(from, to),
+		commit: (address, bytes) => {
+			this.edit(() => {
+				for (let i = 0; i < bytes.length; i++) this.writeByte(address + i, bytes[i])
+			})
+			return true
+		},
+	})
 
 	constructor(machineCode: number[], program: MipsProgram, layout: MemoryConfigurationValues = MEMORY_CONFIGURATIONS.default, options: SimulatorOptions) {
 		this.executionHistory = new MipsHistory(options.historySchema)
@@ -419,7 +429,6 @@ export class MipsSimulator {
 		this.deviceWrites = []
 		this.deviceInterrupt = null
 		this.nextEntryId = 1
-		this.cursor = 0
 		this.maxHistorySize = DEFAULT_BACKSTEP_LIMIT
 		this.callStack = []
 		this.pendingInput = null
@@ -535,100 +544,26 @@ export class MipsSimulator {
 	 * aims for a steady redraw rate, so slow speeds step one instruction at a
 	 * time and fast ones still yield often enough to stay responsive.
 	 */
-	batchSize(): number {
-		if (this.speed === null) return DEFAULT_BATCH_SIZE
-		return Math.max(1, Math.round(this.speed / ANIMATION_FRAMES_PER_SECOND))
-	}
+	batchSize() { return this.execution.batchSize() }
 
 	/** The pause that holds a paced run to `speed` instructions per second. */
-	batchDelayMs(batchSize: number): number {
-		return this.speed === null ? 0 : (batchSize / this.speed) * 1000
-	}
+	batchDelayMs(batchSize: number) { return this.execution.batchDelayMs(batchSize) }
 
 	/**
 	 * Waits out a frame in slices, so moving the speed control or pausing is felt
 	 * within a slice rather than after a whole slow frame.
 	 */
-	async waitFrame(ms: number) {
-		// An unlimited run still gives the page a turn between batches.
-		if (ms <= 0) return yieldToHost()
-		const deadline = performance.now() + ms
-		const speed = this.speed
-		while (this.running && !this.halted && this.speed === speed) {
-			const remaining = deadline - performance.now()
-			if (remaining <= 0) return
-			await new Promise((resolve) => setTimeout(resolve, Math.min(remaining, FRAME_SLICE_MS)))
-		}
-	}
+	waitFrame(ms: number) { return this.execution.waitFrame(ms) }
 
 	/** Runs until `shouldStop()` holds after an instruction, a breakpoint is hit, or execution ends. */
 	async runUntil(shouldStop: () => boolean, fixedBatchSize?: number) {
-		this.running = true
-		this.paused = false
-		// A run never stops on the breakpoint it starts on: continuing while the
-		// pc sits on one has to make progress, or the button does nothing.
-		let firstInstruction = true
-		// Timers overshoot, so a paced run measures the clock and makes up what it
-		// owes on the next pass instead of falling behind the speed that was asked for.
-		let lastTick = performance.now()
-		let owed = 0
-
 		try {
-			while (this.running && !this.halted) {
-				const frameStarted = performance.now()
-				// Read every pass: the speed control moves while a run is going.
-				const batchSize = fixedBatchSize ?? this.batchSize()
-				const frameMs = this.batchDelayMs(batchSize)
-				let allowance = batchSize
-				if (this.speed === null) {
-					owed = 0
-					lastTick = frameStarted
-				} else {
-					const arrears = ((frameStarted - lastTick) * this.speed) / 1000
-					// A long stall (a hidden tab, a slow syscall) must not burst afterwards.
-					owed = Math.min(owed + arrears, this.speed * MAX_CATCH_UP_SECONDS)
-					lastTick = frameStarted
-					allowance = Math.max(1, Math.floor(owed))
-				}
-				let executed = 0
-				while (this.running && !this.halted && executed < allowance) {
-					if (!firstInstruction && this.breakpoints.has(this.pc)) {
-						this.paused = true
-						this.running = false
-						break
-					}
-					firstInstruction = false
-					this.step()
-					if (shouldStop()) {
-						this.paused = true
-						this.running = false
-						break
-					}
-					// A word the editor cannot point at gets no frame of its own, so a
-					// paced run animates the same instructions stepping would stop on.
-					if (this.speed !== null && this.pacedAddresses && !this.halted && !this.pacedAddresses.has(this.pc)) continue
-					executed++
-				}
-				owed -= executed
-				this.onProgress?.()
-				if (this.pendingSleepMs > 0) {
-					const delay = this.pendingSleepMs
-					this.pendingSleepMs = 0
-					await new Promise((resolve) => setTimeout(resolve, delay))
-					// A syscall sleep is the program's own wait, not time to make up.
-					lastTick = performance.now()
-				}
-				if (this.running && !this.halted) {
-					await this.waitFrame(Math.max(0, frameMs - (performance.now() - frameStarted)))
-				}
-			}
+			await this.execution.runUntil(shouldStop, fixedBatchSize)
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error)
 			this.writeConsole(`\nError: ${message}\n`)
-			this.halted = true // Outside any instruction, so nothing records it.
+			this.halted = true
 		}
-
-		this.running = false
 	}
 
 	/**
@@ -721,46 +656,32 @@ export class MipsSimulator {
 
 	stepBack() {
 		const history = this.executionHistory
-		if (this.cursor <= history.first) return false
-		// An instruction suspended on input is still being recorded, and it is
-		// the one about to be undone, so its effects have to be settled first.
+		if (history.timeline.index <= 0) return false
+		// Settle a suspended input instruction before exchanging its effects.
 		this.closeEntry()
-		const index = --this.cursor - history.first
-
-		// In reverse, so an instruction that wrote the same place twice ends up
-		// holding the value it found there; the control state goes last, as it
-		// was taken first.
-		const start = history.effectStartAt(index)
-		for (let offset = history.effectCountAt(index) - 1; offset >= 0; offset--) this.applyEffect(start + offset)
-		this.exchangeControl(index)
-		this.exchangeSubsystems(index)
-		this.instructionCount = history.instructionCountAt(index)
+		this.execution.stopped = false
+		if (!history.timeline.back(this.exchangeHistoryEntry)) return false
 		this.pendingInput = null
-		this.paused = true
-		this.running = false
-		this.seekObservers()
+		this.pause()
 		return true
 	}
 
-	/**
-	 * Runs the instruction the log already holds, by applying its effects rather
-	 * than executing anything.  That is what lets a syscall that read the
-	 * console or the clock be passed over a second time in silence: the values
-	 * it produced are in the effects, and nothing has to be asked again.
-	 */
+	/** Replay recorded effects without repeating input, devices or guest execution. */
 	private stepForwardFromLog(): boolean {
-		const history = this.executionHistory
-		if (this.cursor >= history.end) return false
-		const index = this.cursor++ - history.first
+		return this.executionHistory.timeline.forward(this.exchangeHistoryEntry)
+	}
 
-		this.exchangeControl(index)
-		const start = history.effectStartAt(index)
-		const count = history.effectCountAt(index)
-		for (let offset = 0; offset < count; offset++) this.applyEffect(start + offset)
+	private exchangeHistoryEntry = (index: number, forward: boolean) => {
+		const history = this.executionHistory
+		const start = history.effectStartAt(index), count = history.effectCountAt(index)
+		if (forward) this.exchangeControl(index)
+		for (let offset = 0; offset < count; offset++) {
+			this.applyEffect(start + (forward ? offset : count - offset - 1))
+		}
+		if (!forward) this.exchangeControl(index)
 		this.exchangeSubsystems(index)
-		this.instructionCount = history.instructionCountAt(index) + (history.isEdit(index) ? 0 : 1)
+		this.instructionCount = history.instructionCountAt(index) + (forward && !history.isEdit(index) ? 1 : 0)
 		this.seekObservers()
-		return true
 	}
 
 	/**
@@ -794,7 +715,9 @@ export class MipsSimulator {
 		return {
 			read: (address) => this.readWordRaw(address),
 			write: (address, value) => { this.deviceWrites.push({ address: address >>> 0, value }) },
-			interrupt: (cause) => {
+			requestInterrupt: (cause) => {
+				// This MARS environment numbers lines by the Cause pending bit
+				// shifted right two places. Refused requests are dropped.
 				// Already in a handler: taking another would lose the return
 				// address the first one still needs.
 				if ((this.cp0Registers[12] & CP0_STATUS_EXL) !== 0) return false
@@ -1001,7 +924,6 @@ export class MipsSimulator {
 	private openEntry(address: number, word: number | null, edit = false) {
 		this.reclaimAhead()
 		this.executionHistory.open(this.nextEntryId++, this.instructionCount, address, word, edit, this.pc, this.delayState, this.delayedTarget)
-		this.cursor = this.executionHistory.end
 	}
 
 	/**
@@ -1009,22 +931,16 @@ export class MipsSimulator {
 	 * ahead of the present describes a future that will not happen.
 	 */
 	private reclaimAhead() {
-		const history = this.executionHistory
-		if (this.cursor >= history.end) return
-		history.truncate(this.cursor - history.first)
+		this.executionHistory.timeline.branch()
 	}
 
-	/** Steps back until the entry with `id` has been undone. */
+	/** Rewind retains all later entries, including repeated navigation to this row. */
 	rewindTo(id: number): boolean {
-		const target = this.executionHistory.indexOfId(id)
-		if (target === -1 || target >= this.getHistoryCursor()) return false
-		while (this.getHistoryCursor() > target && this.stepBack()) { /* back to that entry */ }
-		return true
+		return rewindHistoryTo(this.executionHistory, () => this.getHistoryCursor(), id, () => this.stepBack(), () => {})
 	}
 
-	/** How many entries stand behind the present; the rest are ahead of it. */
 	getHistoryCursor(): number {
-		return this.cursor - this.executionHistory.first
+		return this.executionHistory.timeline.index
 	}
 
 	/**
@@ -1034,12 +950,15 @@ export class MipsSimulator {
 	 * about to leave the path it took before.
 	 */
 	private edit(change: () => void) {
-		this.openEntry(this.pc, null, true)
-		try {
-			change()
-		} finally {
-			this.closeEntry()
-		}
+		editTransaction(change, {
+			begin: () => this.openEntry(this.pc, null, true),
+			commit: () => this.closeEntry(),
+			rollback: () => {
+				this.closeEntry()
+				this.stepBack()
+				this.executionHistory.timeline.branch()
+			},
+		})
 	}
 
 	/**
@@ -1120,29 +1039,12 @@ export class MipsSimulator {
 	 * and the section the window is showing is what the user can see it fall off.
 	 */
 	insertMemoryByte(address: number, limit: number, value: number): boolean {
-		const start = address >>> 0
-		const end = limit >>> 0
-		if (end < start) return false
-		// One place past the last written byte is where that byte moves to.
-		const top = Math.min(end, this.lastWrittenByte(start, end) + 1)
-		this.edit(() => {
-			for (let target = top; target > start; target--) this.writeByte(target, this.byteRaw(target - 1))
-			this.writeByte(start, value & 0xff)
-		})
-		return true
+		return this.memoryEdits.insert(address, limit, value)
 	}
 
 	/** Removes the byte at `address`, moving the region down and zeroing `limit`. */
 	deleteMemoryByte(address: number, limit: number): boolean {
-		const start = address >>> 0
-		const end = limit >>> 0
-		if (end < start) return false
-		const top = Math.min(end, this.lastWrittenByte(start, end))
-		this.edit(() => {
-			for (let target = start; target < top; target++) this.writeByte(target, this.byteRaw(target + 1))
-			this.writeByte(top, 0)
-		})
-		return true
+		return this.memoryEdits.delete(address, limit)
 	}
 
 	/**
@@ -1219,23 +1121,10 @@ export class MipsSimulator {
 		if (held && held.random === undefined) held.random = this.random.snapshot()
 	}
 
-	/**
-	 * Runs with a breakpoint at `address` that the caller never asked for, leaving
-	 * the breakpoint set exactly as it was found however the run ends.  Stepping
-	 * over a call also has to lift the breakpoint it is standing on, or the run
-	 * would stop before it started.
-	 */
+	/** Legacy entry point; shared completion never mutates user breakpoints. */
 	async runToTemporaryBreakpoint(address: number, liftCurrent: boolean) {
-		const currentAddress = this.pc
-		const restoreCurrent = liftCurrent && this.breakpoints.delete(currentAddress)
-		const wanted = this.breakpoints.has(address)
-		this.breakpoints.add(address)
-		try {
-			await this.run()
-		} finally {
-			if (restoreCurrent) this.breakpoints.add(currentAddress)
-			if (!wanted) this.breakpoints.delete(address)
-		}
+		if (liftCurrent) await this.execution.stepOver(address)
+		else await this.execution.runTo(address)
 	}
 
 	/** Runs until `address` is reached, without leaving a breakpoint behind. */
@@ -1256,14 +1145,7 @@ export class MipsSimulator {
 	}
 
 	/** Runs until the current subroutine returns (call depth drops below the current depth). */
-	async stepToReturn() {
-		const targetDepth = this.callStack.length
-		if (targetDepth === 0) {
-			await this.run()
-			return
-		}
-		await this.runUntil(() => this.callStack.length < targetDepth)
-	}
+	stepToReturn() { return this.execution.stepToReturn() }
 
 	async continue() {
 		this.paused = false
@@ -1271,21 +1153,24 @@ export class MipsSimulator {
 	}
 
 	/** Stops a run where it stands, leaving it able to continue. */
-	pause() {
-		this.paused = true
-		this.running = false
-	}
+	pause() { this.execution.pause() }
 
 	/** Ends a run where it stands; only a fresh run carries on from here. */
 	stop() {
-		this.running = false
-		this.paused = false
+		this.execution.stop()
 		this.pendingInput = null
-		this.halted = true // Outside any instruction, so nothing records it.
+	}
+
+	dispose() {
+		this.execution.stop()
+		this.execution.dispose()
+		this.pendingInput = null
+		this.onProgress = null
 	}
 
 	/** Moves execution to `address` without running anything. */
 	setProgramCounter(address: number) {
+		this.execution.stopped = false
 		// Moving the pc by hand leaves the path the log recorded, so what it
 		// holds ahead of the present describes a future that will not happen.
 		this.reclaimAhead()

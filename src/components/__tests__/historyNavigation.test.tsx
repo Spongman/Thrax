@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { Kind } from '../../core/effectKind'
+import { Kind } from '../../architectures/mips/core/effectKind'
 import { renderToStaticMarkup } from 'react-dom/server'
 import HistoryView from '../HistoryView'
 import { historyFormatter } from '../../architectures/mips/history/format'

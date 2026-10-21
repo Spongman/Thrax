@@ -7,7 +7,7 @@
 
 import { MacroTable, type MacroDefinition } from '../../../core/assembly/macroEngine'
 import { AssemblyError, at } from '../../../core/diagnostics'
-import type { TokenData } from '../../../core/types'
+import type { TokenData } from '../core/types'
 
 const MAX_EXPANSION_DEPTH = 32
 const ARGUMENT_SEPARATORS = ['COMMA', 'LPAREN', 'RPAREN', 'NEWLINE']

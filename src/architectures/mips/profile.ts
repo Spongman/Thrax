@@ -1,3 +1,4 @@
+import { RGB32_LE } from '../../core/bitmapFormats'
 /** MARS memory layouts, as the shared panels need them. */
 
 import { CP0_REGISTERS, CP0_STATUS_INITIAL } from './core/coprocessor'
@@ -44,6 +45,7 @@ export function mipsProfile(configuration: MemoryConfigurationName): MachineProf
 	if (profile) return profile
 	const layout = MEMORY_CONFIGURATIONS[configuration]
 	profile = Object.freeze({
+		bitmap: RGB32_LE,
 		resetRegisters: Object.freeze(resetRegisters(layout)),
 		resetPc: layout.textBaseAddress,
 		memorySections: Object.freeze(sectionsFor(layout)),

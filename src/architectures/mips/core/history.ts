@@ -1,3 +1,4 @@
+import { HistoryCursor } from '../../../core/historyCursor'
 /**
  * The MIPS execution history: one entry per instruction or edit, held in the
  * shared log's typed columns as `mipsHistorySchema` declares them.
@@ -11,7 +12,7 @@
 import { HistoryBufferLayout, type HistoryBufferSchema } from '../../../core/historyBuffers'
 import { HistoryLog } from '../../../core/historyLog'
 import type { HistoryRecords } from '../../../core/historyRecords'
-import type { DelayState, FilesSnapshot, HistoryEntry, RandomSnapshot } from '../../../core/types'
+import type { DelayState, FilesSnapshot, HistoryEntry, RandomSnapshot } from './types'
 import type { MachineHistory } from '../../contracts'
 import { DELAY_STATES, EffectStore } from './effectStore'
 
@@ -43,6 +44,7 @@ export interface SubsystemCopies {
 
 export class MipsHistory implements MachineHistory {
 	readonly log: HistoryLog
+	readonly timeline: HistoryCursor
 	readonly effects: EffectStore
 	private readonly entries: HistoryRecords
 	private readonly capacity: number
@@ -57,6 +59,7 @@ export class MipsHistory implements MachineHistory {
 	constructor(schema: HistoryBufferSchema) {
 		const layout = new HistoryBufferLayout(schema)
 		this.log = new HistoryLog(layout)
+		this.timeline = new HistoryCursor(this.log)
 		this.effects = new EffectStore(this.log)
 		this.entries = this.log.entries
 		this.capacity = this.entries.capacity
@@ -68,6 +71,8 @@ export class MipsHistory implements MachineHistory {
 		this.flags = layout.column('entry', 'flags', 'u8')
 		if (!layout.payloads.entry) throw new Error('History codec requires entry payloads')
 	}
+
+	get retention() { return this.log.retention }
 
 	get length(): number {
 		return this.entries.end - this.entries.first
@@ -131,6 +136,7 @@ export class MipsHistory implements MachineHistory {
 
 	clear() {
 		this.log.clear()
+		this.timeline.reset()
 	}
 
 	id(index: number): number {

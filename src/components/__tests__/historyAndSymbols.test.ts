@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { Kind } from '../../core/effectKind'
+import { Kind } from '../../architectures/mips/core/effectKind'
 import { describeEffect, rowEffects } from '../../architectures/mips/history/format'
 import { symbolRows, symbolSections } from '../SymbolTableView'
 import { parseEditedDouble, parseEditedValue } from '../editValue'
 import { historyWith } from '../../architectures/mips/core/__tests__/historyFixture'
-import type { Effect, SymbolTables } from '../../core/types'
+import type { Effect, SymbolTables } from '../../architectures/mips/core/types'
 
 describe('what a history row says about an effect', () => {
 	const register: Effect = { kind: Kind.REGISTER, name: '$t0', value: 5 }

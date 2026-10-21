@@ -7,7 +7,7 @@ import { cp0RegisterNumber, fpRegisterNumber, FP_REGISTER_COUNT } from '../core/
 import { basicForms, pseudoForms, type IsaOperandKind } from '../core/isa'
 import { registerNumber } from '../core/registers'
 import { AssemblyError, atInstruction } from '../../../core/diagnostics'
-import type { MipsArgument, MipsInstruction } from '../../../core/types'
+import type { MipsArgument, MipsInstruction } from '../core/types'
 
 /** Instructions whose two-operand form repeats the destination as a source. */
 export const TWO_OPERAND_FORMS = new Set([

@@ -1,6 +1,6 @@
 import { mipsHistorySchema } from '../../history/schema'
 import { describe, expect, it } from 'vitest'
-import { Kind } from '../../../../core/effectKind'
+import { Kind } from '../effectKind'
 import { assembleMips } from '../../assembler'
 import { firstError } from '../../../../core/diagnostics'
 import { MipsSimulator } from '../simulator'

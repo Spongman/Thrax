@@ -4,7 +4,7 @@ import type { AssemblyImage } from '../../core/assembly/emitter'
 import type { AssembleResult } from './assembler'
 import { disassemble, disassembleData } from './core/disassembler'
 import type { MemoryConfigurationValues } from './memoryConfigurations'
-import type { MipsProgram } from '../../core/types'
+import type { MipsProgram } from './core/types'
 import type { AssembledProgram, CodeRow, Diagnostic, Disassembly, ProgramImage } from '../contracts'
 
 /** An assembled MIPS program; the private fields are what the simulator loads. */

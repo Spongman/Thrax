@@ -10,8 +10,8 @@
 
 import { REGISTER_FILE_NAMES } from './registers'
 import { serviceOf, slotOf } from '../../../core/service'
-import { KIND_REGISTER, KIND_FP, KIND_FLAG, KIND_CP0, KIND_MEMORY, KIND_CONSOLE, KIND_CONSOLE_RESET, KIND_DISPLAY, KIND_QUEUED_INPUT, KIND_CALL, KIND_HI_LO, KIND_HEAP_POINTER, KIND_HALTED, KIND_EXIT_CODE, KIND_SLEEP, KIND_INPUT, KIND_SERVICE } from '../../../core/effectKind'
-import type { CallFrame, DelayState, Effect } from '../../../core/types'
+import { KIND_REGISTER, KIND_FP, KIND_FLAG, KIND_CP0, KIND_MEMORY, KIND_CONSOLE, KIND_CONSOLE_RESET, KIND_DISPLAY, KIND_QUEUED_INPUT, KIND_CALL, KIND_HI_LO, KIND_HEAP_POINTER, KIND_HALTED, KIND_EXIT_CODE, KIND_SLEEP, KIND_INPUT, KIND_SERVICE } from './effectKind'
+import type { CallFrame, DelayState, Effect } from './types'
 import { HISTORY_BLOCK_SIZE } from '../../../core/historyBuffers'
 import type { HistoryLog } from '../../../core/historyLog'
 import type { HistoryRecords } from '../../../core/historyRecords'
