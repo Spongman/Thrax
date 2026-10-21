@@ -1,4 +1,5 @@
 import type { Example } from '../contracts'
+import { mandelbrot } from './mandelbrot'
 import tinyOs from './tinyos.uasm?raw'
 
 /**
@@ -76,6 +77,7 @@ export function solveTinyOs(source: string) {
 }
 
 export const EXAMPLES: Readonly<Record<string, Example>> = {
+	mandelbrot,
 	input: {
 		name: 'Interactive Input',
 		description: 'Read a line with RDCHAR into a buffer, then print it',
@@ -428,6 +430,7 @@ stack: STORAGE(64)
 	},
 
 	bitmap: {
+		tools: ['bitmap'],
 		name: 'Bitmap Display',
 		description: 'Draw a colour gradient for the Bitmap Display tool',
 		code: `// Fill a 32 x 32 grid of pixels for the Bitmap Display tool.

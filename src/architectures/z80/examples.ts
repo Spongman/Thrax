@@ -1,4 +1,5 @@
 import type { Example } from '../contracts'
+import { mandelbrot } from './mandelbrot'
 
 /**
  * Example Z80 programs, ported from the MIPS and Beta examples.
@@ -78,6 +79,25 @@ div10:
 `
 
 export const EXAMPLES: Readonly<Record<string, Example>> = {
+	mandelbrot,
+	mmio: {
+		name: 'Keyboard and Display',
+		description: 'Poll the keyboard status, echo each character to the display and stop at a period.',
+		tools: ['keyboardDisplay'],
+		code: `; Queue text in the Keyboard / Display tool, ending with a period.
+${DEVICES}
+org $100
+poll:
+ld a,(STATUS)
+and 1
+jr z,poll
+ld a,(INPUT)
+ld (CONSOLE),a
+cp '.'
+jr nz,poll
+halt
+`,
+	},
 	input: {
 		name: 'Interactive Input',
 		description: 'Read a line into a buffer, waiting for each character, then print it',
@@ -351,6 +371,7 @@ ${PRINT_DECIMAL}`,
 	},
 
 	bitmap: {
+		tools: ['bitmap'],
 		name: 'Bitmap Display',
 		description: 'Draw colour bands for the Bitmap Display tool',
 		code: `; Fill a 32 x 32 grid of pixels for the Bitmap Display tool.
@@ -437,6 +458,7 @@ ${PRINT_DECIMAL}`,
 	},
 
 	keyboard: {
+		tools: ['keyboardDisplay'],
 		name: 'Keyboard Interrupts',
 		description: 'Echo typed characters from an IM 1 interrupt handler until a full stop',
 		code: `; Type while the program runs: each character raises the keyboard

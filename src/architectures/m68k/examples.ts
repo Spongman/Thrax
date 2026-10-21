@@ -1,5 +1,41 @@
 import type { Example } from '../contracts'
+import { mandelbrot } from './mandelbrot'
 export const EXAMPLES: Record<string, Example> = {
+	mandelbrot,
+	ackermann: {
+		name: 'Ackermann',
+		description: 'Nested BSR/RTS calls compute A(3, 3) = 61, printed with TRAP #15.',
+		code: `.text
+_start:
+moveq #3,d1
+moveq #3,d2
+bsr ack
+moveq #3,d0
+trap #15
+moveq #9,d0
+trap #15
+ack:
+tst.l d1
+beq base
+tst.l d2
+beq zero
+move.l d1,-(sp)
+subq.l #1,d2
+bsr ack
+move.l d1,d2
+move.l (sp)+,d1
+subq.l #1,d1
+bra ack
+zero:
+subq.l #1,d1
+moveq #1,d2
+bra ack
+base:
+move.l d2,d1
+addq.l #1,d1
+rts
+`,
+	},
 	hello: {
 		name: 'Hello, THRAX!',
 		description: 'Educational TRAP #15 task 14 prints a zero-terminated string from A1.',
@@ -38,17 +74,25 @@ loop:
 `
 	},
 	bitmap: {
+		tools: ['bitmap'],
 		name: 'Bitmap Display',
-		description: 'Draw a color ramp using long stores and address-register postincrement.',
+		description: 'Draw the common 32 by 32 red/blue gradient using long stores and postincrement.',
 		code: `.text
 _start:
     movea.l #$10000,a0
-    moveq #63,d1
-    move.l #$0040ff,d2
+    moveq #0,d2
+    moveq #31,d3
+row:
+    moveq #0,d4
+    moveq #31,d5
 pixel:
-    move.l d2,(a0)+
-    addi.l #$100,d2
-    dbra d1,pixel
+    move.l d2,d6
+    or.l d4,d6
+    move.l d6,(a0)+
+    addq.l #8,d4
+    dbra d5,pixel
+    addi.l #$80000,d2
+    dbra d3,row
     moveq #9,d0
     trap #15
 `

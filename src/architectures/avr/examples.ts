@@ -1,20 +1,55 @@
+import { mandelbrot } from './mandelbrot'
+
 export const examples = {
+	mandelbrot,
+	ackermann: {
+		name: 'Ackermann',
+		description: 'Nested recursive calls compute A(3, 3) = 61 in r16 and SRAM at debugger 0x10100.',
+		code: `; m in r20, n in r21, result in r16. RCALL/RET use the SRAM stack.
+ldi r20, 3
+ldi r21, 3
+rcall ack
+sts 0x100, r16
+break
+ack:
+tst r20
+breq base
+tst r21
+breq zero
+push r20
+dec r21
+rcall ack
+pop r20
+mov r21, r16
+dec r20
+rjmp ack
+zero:
+dec r20
+ldi r21, 1
+rjmp ack
+base:
+mov r16, r21
+inc r16
+ret
+`,
+	},
 	bitmap: {
+		tools: ['bitmap'],
 		name: 'Bitmap Display',
-		description: 'Draw a 32 by 32 RGB gradient in SRAM at debugger address 0x10100.',
+		description: 'Draw the common 32 by 32 red/blue gradient in SRAM at debugger address 0x10100.',
 		code: `; Bitmap base: debugger 0x10100 = AVR SRAM address 0x100.
 ldi r26, 0
 ldi r27, 1
-ldi r18, 32
+clr r18
 row:
-ldi r17, 32
+clr r17
 pixel:
-ldi r16, 0x20
-st X+, r16
 mov r16, r17
 lsl r16
 lsl r16
 lsl r16
+st X+, r16
+clr r16
 st X+, r16
 mov r16, r18
 lsl r16
@@ -23,9 +58,11 @@ lsl r16
 st X+, r16
 clr r16
 st X+, r16
-dec r17
+inc r17
+cpi r17, 32
 brne pixel
-dec r18
+inc r18
+cpi r18, 32
 brne row
 break
 `

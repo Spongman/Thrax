@@ -62,7 +62,7 @@ describe('AArch32 examples', () => {
 		const machine = load('mandelbrot')
 		machine.run(2_000_000)
 		expect(pixel(machine, 16 * 32 + 16)).toBe(0)
-		expect(pixel(machine, 0)).toBe((1 << 19) | (1 << 3))
+		expect(pixel(machine, 0)).toBe(0x00104a)
 	})
 
 	it('echoes a typed line', () => {

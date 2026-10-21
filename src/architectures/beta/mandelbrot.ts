@@ -1,0 +1,71 @@
+import type { Example } from '../contracts'
+
+export const mandelbrot: Example = {
+	name: 'Mandelbrot Set',
+	description: 'Escape-time fractal in signed 8.8 fixed point, drawn to the Bitmap Display.',
+	tools: ['bitmap'],
+	code: `// Same 32 x 32 view as the 6502 port: x=-2, y=-1.25, step=20/256.
+// MUL gives a 32-bit product; SRAC divides it back into 8.8 fixed point.
+.include "beta.uasm"
+MAXITER = 16
+
+	CMOVE(display, R9)
+	CMOVE(-320, R8)        // imaginary coordinate
+	CMOVE(0, R10)          // row
+row:
+	CMOVE(-512, R6)        // real coordinate
+	CMOVE(0, R11)          // column
+column:
+	CMOVE(0, R0)           // zr
+	CMOVE(0, R1)           // zi
+	CMOVE(0, R4)           // iterations
+iterate:
+	MUL(R0, R0, R2)
+	SRAC(R2, 8, R2)
+	MUL(R1, R1, R3)
+	SRAC(R3, 8, R3)
+	ADD(R2, R3, R5)
+	CMPLTC(R5, 1024, R12)  // escaped at |z| squared >= 4
+	BF(R12, escaped)
+	MUL(R0, R1, R5)
+	CMPLTC(R5, 0, R12)
+	BF(R12, positive)
+	ADDC(R5, 255, R5)      // truncate negative products toward zero
+positive:
+	SRAC(R5, 8, R5)
+	SHLC(R5, 1, R5)
+	ADD(R5, R8, R1)
+	SUB(R2, R3, R0)
+	ADD(R0, R6, R0)
+	ADDC(R4, 1, R4)
+	CMPLTC(R4, MAXITER, R12)
+	BT(R12, iterate)
+escaped:
+	SHLC(R4, 2, R7)
+	CMOVE(palette, R5)
+	ADD(R5, R7, R5)
+	LD(R5, 0, R5)          // palette[MAXITER] is black
+plot:
+	ST(R5, 0, R9)
+	ADDC(R9, 4, R9)
+	ADDC(R6, 20, R6)
+	ADDC(R11, 1, R11)
+	CMPLTC(R11, 32, R12)
+	BT(R12, column)
+	ADDC(R8, 20, R8)
+	ADDC(R10, 1, R10)
+	CMPLTC(R10, 32, R12)
+	BT(R12, row)
+	HALT()
+
+palette:
+	LONG(0x000030) LONG(0x00104a) LONG(0x001f66) LONG(0x003080)
+	LONG(0x0044a0) LONG(0x0059bd) LONG(0x1a72d4) LONG(0x3d8ce0)
+	LONG(0x62a6ea) LONG(0x86bff2) LONG(0xa8d5f7) LONG(0xc6e6fb)
+	LONG(0xdef1fd) LONG(0xeff8fe) LONG(0xf8fcff) LONG(0xffffff)
+	LONG(0x000000)
+
+. = 0x1000
+display: STORAGE(32 * 32)
+`,
+}

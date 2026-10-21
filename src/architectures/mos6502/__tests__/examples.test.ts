@@ -74,9 +74,9 @@ describe('6502 example programs', () => {
 		const { machine } = run(EXAMPLES.mandelbrot.code)
 		const pixels = machine.cpu.memory.subarray(0x0200, 0x0600)
 		// c = -0.52 + 0i is inside; c = -2 - 1.25i escapes after one iteration.
-		expect(pixels[32 * 16 + 19]).toBe(0)
+		expect(pixels[32 * 16 + 19]).toBe(16)
 		expect(pixels[0]).toBe(1)
-		const inside = pixels.filter((pixel) => pixel === 0).length
+		const inside = pixels.filter((pixel) => pixel === 16).length
 		expect(inside).toBeGreaterThan(150)
 		expect(inside).toBeLessThan(400)
 		// The set is symmetric about the real axis, row 16; the fixed point keeps most of that.

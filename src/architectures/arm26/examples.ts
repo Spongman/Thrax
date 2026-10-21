@@ -1,4 +1,5 @@
 import type { Example } from '../contracts'
+import { mandelbrot } from './mandelbrot'
 
 /**
  * Example ARM programs, ported from the MIPS and Beta examples.  Most are GNU
@@ -80,6 +81,27 @@ down
 `
 
 export const EXAMPLES: Readonly<Record<string, Example>> = {
+	mandelbrot,
+	mmio: {
+		name: 'Keyboard and Display',
+		description: 'Poll the keyboard status, echo each character to the display and stop at a period.',
+		tools: ['keyboardDisplay'],
+		code: `@ Queue text in the Keyboard / Display tool, ending with a period.
+.text
+_start:
+ldr r1, =KBD_STATUS
+poll:
+ldr r0, [r1]
+tst r0, #1
+beq poll
+ldr r0, [r1, #KBD_DATA - KBD_STATUS]
+str r0, [r1, #TTY_DATA - KBD_STATUS]
+swi OS_WriteC
+cmp r0, #'.'
+bne poll
+swi OS_Exit
+`,
+	},
 	prefetch: {
 		name: 'Instruction Prefetch',
 		description: 'Self-modifying code: a queued instruction stays stale until a branch refills the pipeline',
@@ -323,6 +345,7 @@ ${PRINT_DECIMAL}`,
 	},
 
 	bitmap: {
+		tools: ['bitmap'],
 		name: 'Bitmap Display',
 		description: 'Draw a colour gradient for the Bitmap Display tool',
 		code: `@ Fill a 32 x 32 grid of pixels for the Bitmap Display tool.
@@ -394,6 +417,7 @@ ${PRINT_DECIMAL}`,
 	},
 
 	keyboard: {
+		tools: ['keyboardDisplay'],
 		name: 'Keyboard Interrupts',
 		description: 'Own the vectors: echo keys typed in the Keyboard / Display tool from an IRQ handler, until a full stop',
 		code: `@ Interrupt-driven keyboard echo.  The program owns address 0, so it

@@ -32,6 +32,7 @@ const OUTPUT: Record<string, string> = {
 	loop: '1 2 3 4 5 \n',
 	bitwise: '8 14 6',
 	bitmap: '',
+	mandelbrot: '',
 	macros: 'counting: 12345\n123\n',
 	timer: '12345\n',
 }
@@ -53,7 +54,7 @@ describe('Z80 in the workbench', () => {
 		expect(state().architecture).toBe('z80')
 		expect(state().target?.definition.name).toBe('Zilog Z80')
 		expect(state().target?.definition.language).toBe('z80')
-		expect(Object.keys(examples()).sort()).toEqual([...Object.keys(OUTPUT), 'input', 'keyboard'].sort())
+		expect(Object.keys(examples()).sort()).toEqual([...Object.keys(OUTPUT), 'input', 'keyboard', 'mmio'].sort())
 		expect(state().pc).toBe(0)
 		expect(state().registers.SP).toBe(0xFFFF)
 	})
@@ -86,6 +87,19 @@ describe('Z80 in the workbench', () => {
 		await state().submitInput('hi.')
 		expect(state().halted).toBe(true)
 		expect(state().console).toBe('hi.')
+	})
+
+	it.each(['keyboard', 'mmio'])('echoes keys from the shared Keyboard / Display tool in %s', async (key) => {
+		state().setCode(examples()[key].code)
+		state().assemble()
+		state().sendKeyboardInput('hi.')
+		expect(state().keyboardDisplay?.queuedInput).toBe('hi.')
+		await state().continue()
+		expect(state().halted).toBe(true)
+		expect(state().keyboardDisplay?.displayOutput).toBe('hi.')
+		expect(state().keyboardDisplay?.queuedInput).toBe('')
+		state().stepBack()
+		expect(state().halted).toBe(false)
 	})
 
 	it('reports diagnostics with file and line', () => {

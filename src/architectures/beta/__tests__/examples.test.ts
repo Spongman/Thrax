@@ -38,6 +38,7 @@ const OUTPUT: Record<string, string> = {
 	loop: '1 2 3 4 5 \n',
 	bitwise: '8 14 6',
 	bitmap: '',
+	mandelbrot: '',
 	macros: 'counting: 12345\n123\n',
 }
 

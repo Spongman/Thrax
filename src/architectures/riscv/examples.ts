@@ -1,19 +1,63 @@
 import type { Example } from '../contracts'
+import { mandelbrot } from './mandelbrot'
 export const EXAMPLES: Record<string, Example> = {
+	mandelbrot,
+	ackermann: {
+		name: 'Ackermann',
+		description: 'Nested recursive calls with stack frames compute and print A(3, 3) = 61.',
+		code: `.text
+_start:
+li a0, 3
+li a1, 3
+call ack
+li a7, 1
+ecall
+ebreak
+ack:
+beqz a0, base
+beqz a1, zero
+addi sp, sp, -16
+sw ra, 12(sp)
+sw a0, 8(sp)
+addi a1, a1, -1
+call ack
+mv a1, a0
+lw a0, 8(sp)
+addi a0, a0, -1
+call ack
+lw ra, 12(sp)
+addi sp, sp, 16
+ret
+zero:
+addi a0, a0, -1
+li a1, 1
+j ack
+base:
+addi a0, a1, 1
+ret
+`,
+	},
 	bitmap: {
+		tools: ['bitmap'],
 		name: 'Bitmap Display',
-		description: 'Fill the first 64 pixels at the default data base with a color ramp.',
+		description: 'Draw the common 32 by 32 red/blue gradient at the default data base.',
 		code: `.text
 _start:
     li t0, 0x10000
-    li t1, 64
-    li t2, 0x000040ff
+    li t1, 0
+    li t6, 32
+row:
+    li t2, 0
 pixel:
-    sw t2, 0(t0)
+    slli t3, t1, 19
+    slli t4, t2, 3
+    or t5, t3, t4
+    sw t5, 0(t0)
     addi t0, t0, 4
-    addi t2, t2, 256
-    addi t1, t1, -1
-    bnez t1, pixel
+    addi t2, t2, 1
+    blt t2, t6, pixel
+    addi t1, t1, 1
+    blt t1, t6, row
     ebreak
 `
 	},

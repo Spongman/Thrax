@@ -33,6 +33,7 @@ const OUTPUT: Record<string, string> = {
 	loop: '1 2 3 4 5 \n',
 	bitwise: '8 14 6',
 	bitmap: '',
+	mandelbrot: '',
 	macros: 'counting: 12345\n123\n',
 	helloArmasm: 'Hello, THRAX!\n',
 	factorialArmasm: '120',
@@ -76,7 +77,7 @@ describe('ARM26 in the workbench', () => {
 		expect(state().architecture).toBe('arm26')
 		expect(state().target?.definition.name).toBe('ARM (26-bit, ARMv2a)')
 		expect(state().target?.definition.language).toBe('arm')
-		expect(Object.keys(examples()).sort()).toEqual([...Object.keys(OUTPUT), 'input', 'keyboard'].sort())
+		expect(Object.keys(examples()).sort()).toEqual([...Object.keys(OUTPUT), 'input', 'keyboard', 'mmio'].sort())
 		// Before a program, the panels show reset: SVC with interrupts off.
 		expect(state().registers.PSR).toBe(0x0C000003)
 	})
@@ -100,8 +101,8 @@ describe('ARM26 in the workbench', () => {
 		expect(state().console).toBe('hello, arm\n')
 	})
 
-	it('takes keys from the Keyboard / Display tool as interrupts', async () => {
-		state().setCode(examples().keyboard.code)
+	it.each(['keyboard', 'mmio'])('takes keys from the Keyboard / Display tool in %s', async (key) => {
+		state().setCode(examples()[key].code)
 		state().assemble()
 		state().step()
 		state().sendKeyboardInput('ab.')

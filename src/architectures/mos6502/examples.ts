@@ -437,6 +437,7 @@ ${PRINT_DECIMAL}`,
 	},
 
 	bitmap: {
+		tools: ['bitmap'],
 		name: 'Bitmap Display',
 		description: 'Draw colour bands for the Bitmap Display tool',
 		code: `; Fill a 32 x 32 grid of pixels for the Bitmap Display tool.
@@ -487,6 +488,7 @@ same_page:
 	},
 
 	mmio: {
+		tools: ['keyboardDisplay'],
 		name: 'Keyboard and Display',
 		description: 'Echo queued keystrokes through the I/O page',
 		code: `; Memory-mapped I/O, through the Keyboard and Display tool or the console.
@@ -569,6 +571,7 @@ ${PRINT_DECIMAL}`,
 	},
 
 	interrupts: {
+		tools: ['keyboardDisplay'],
 		name: 'Interrupts',
 		description: 'Timer and keyboard IRQs: a dot per tick, typed keys echoed, five ticks then exit',
 		code: `; The timer raises an IRQ every PERIOD cycles; the handler prints a dot per
@@ -632,6 +635,14 @@ irq:
 	},
 
 	mandelbrot: {
+		tools: ['bitmap'],
+		bitmapPalette: [
+			0x000030, 0x00104a, 0x001f66, 0x003080,
+			0x0044a0, 0x0059bd, 0x1a72d4, 0x3d8ce0,
+			0x62a6ea, 0x86bff2, 0xa8d5f7, 0xc6e6fb,
+			0xdef1fd, 0xeff8fe, 0xf8fcff, 0xffffff,
+			0x000000,
+		],
 		name: 'Mandelbrot Set',
 		description: 'Escape-time fractal in 8.8 fixed point, drawn to the Bitmap Display',
 		code: `; Mandelbrot set, in signed 8.8 fixed point: $0100 is 1.0.
@@ -645,7 +656,7 @@ irq:
 
 DISPLAY = $0200
 SIZE    = 32
-MAXITER = 15
+MAXITER = 16
 STEP    = 20                ; 2.5 / 32 in 8.8: the view is 2.5 wide and high
 X_MIN   = -512              ; -2.0
 Y_MIN   = -320              ; -1.25
@@ -765,8 +776,8 @@ iterate:
 	beq inside
 	jmp iterate             ; too far back for a branch
 inside:
-	lda #0                  ; never escaped: inside the set, black
-	beq plot
+	lda #MAXITER            ; palette entry MAXITER is black
+	bne plot
 
 escaped:
 	lda iter                ; the iteration count is the colour

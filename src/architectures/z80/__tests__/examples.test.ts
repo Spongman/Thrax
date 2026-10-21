@@ -14,6 +14,8 @@ const OUTPUT: Record<string, string> = {
 	loop: '1 2 3 4 5 \n',
 	bitwise: '8 14 6',
 	bitmap: '',
+	mandelbrot: '',
+	mmio: 'hi.',
 	macros: 'counting: 12345\n123\n',
 	keyboard: 'hi.',
 	timer: '12345\n',
@@ -31,7 +33,8 @@ describe('Z80 example programs', () => {
 
 	it.each(Object.keys(OUTPUT))('runs %s to its end', (key) => {
 		const { machine } = machineFor(EXAMPLES[key].code)
-		expect(runToEnd(machine, INPUT[key])).toBe(STEP_HALT)
+		if (key === 'mmio') machine.console.feed('hi.')
+		expect(runToEnd(machine, INPUT[key], key === 'mandelbrot' ? 5_000_000 : 1_000_000)).toBe(STEP_HALT)
 		expect(machine.console.output).toBe(OUTPUT[key])
 	})
 

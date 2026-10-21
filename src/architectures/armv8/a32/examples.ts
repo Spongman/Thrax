@@ -341,6 +341,7 @@ ${PRINT_CHAR}
 	},
 
 	bitmap: {
+		tools: ['bitmap'],
 		name: 'Bitmap Display',
 		description: 'Draw a colour gradient for the Bitmap Display tool',
 		code: `@ Fill a 32 x 32 grid of pixels for the Bitmap Display tool.
@@ -373,6 +374,7 @@ ${EXIT}
 	},
 
 	mmio: {
+		tools: ['keyboardDisplay'],
 		name: 'Keyboard and Display',
 		description: 'Echo queued keystrokes through the MMIO tool',
 		code: `@ Memory-mapped I/O, through the Keyboard and Display tool.
@@ -456,6 +458,7 @@ ${PRINT_CHAR}
 	},
 
 	mandelbrot: {
+		tools: ['bitmap'],
 		name: 'Mandelbrot Set',
 		description: 'Escape-time fractal in 16.16 fixed point, drawn to the Bitmap Display',
 		code: `@ Mandelbrot set in 16.16 fixed point, drawn to the Bitmap Display.
@@ -467,12 +470,18 @@ ${PRINT_CHAR}
 @ the 16.16 result.
 
 	.equ SIZE, 32
-	.equ MAX_ITERATIONS, 32
+	.equ MAX_ITERATIONS, 16
 	.equ ONE, 0x10000               @ 1.0
 	.equ STEP, 3 * ONE / SIZE       @ the plane shown is 3.0 across
 
 	.data
 display:	.space SIZE * SIZE * 4
+palette:
+	.word 0x000030, 0x00104a, 0x001f66, 0x003080
+	.word 0x0044a0, 0x0059bd, 0x1a72d4, 0x3d8ce0
+	.word 0x62a6ea, 0x86bff2, 0xa8d5f7, 0xc6e6fb
+	.word 0xdef1fd, 0xeff8fe, 0xf8fcff, 0xffffff
+	.word 0x000000
 
 	.text
 	.global _start
@@ -506,11 +515,9 @@ iterate:
 	add r4, r4, #1
 	cmp r4, #MAX_ITERATIONS
 	blt iterate
-	mov r5, #0                      @ inside the set: black
-	b plot
 escaped:
-	lsl r5, r4, #19                 @ iterations into red
-	orr r5, r5, r4, lsl #3          @ and blue
+	ldr r7, =palette
+	ldr r5, [r7, r4, lsl #2]
 plot:
 	str r5, [r9], #4
 	add r6, r6, #STEP               @ one step right

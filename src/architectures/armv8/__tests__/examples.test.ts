@@ -57,7 +57,7 @@ describe('ARMv8 examples', () => {
 		// The middle row at -0.5 is in the set: black.
 		expect(pixel(machine, 16 * 32 + 16)).toBe(0)
 		// The top-left corner, -2 - 1.5i, escapes at once.
-		expect(pixel(machine, 0)).toBe((1 << 19) | (1 << 3))
+		expect(pixel(machine, 0)).toBe(0x00104a)
 	})
 
 	it('echoes a typed line', () => {

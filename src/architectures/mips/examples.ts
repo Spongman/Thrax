@@ -375,6 +375,7 @@ main:
 	},
 
 	bitmap: {
+		tools: ['bitmap'],
 		name: 'Bitmap Display',
 		description: 'Draw a colour gradient for the Bitmap Display tool',
 		code: `# Fill a 32 x 32 grid of pixels for the Bitmap Display tool.
@@ -412,6 +413,7 @@ column:
 	},
 
 	mmio: {
+		tools: ['keyboardDisplay'],
 		name: 'Keyboard and Display',
 		description: 'Echo queued keystrokes through the MMIO tool',
 		code: `# Memory-mapped I/O, through the Keyboard and Display Simulator.
@@ -495,6 +497,7 @@ main:
 `,
 	},
 	mandelbrot: {
+		tools: ['bitmap'],
 		name: 'Mandelbrot Set',
 		description: 'Escape-time fractal on coprocessor 1, drawn to the Bitmap Display',
 		code: `# Mandelbrot set, rendered with single-precision coprocessor 1 arithmetic.
@@ -512,11 +515,12 @@ main:
 frame:		.space 16384		# room for 64 x 64 pixels, one word each
 
 # Iteration count to colour: index 0 escapes at once, index MAXITER is interior.
-palette:	.word 0x000030, 0x00104a, 0x001f66, 0x003080
-		.word 0x0044a0, 0x0059bd, 0x1a72d4, 0x3d8ce0
-		.word 0x62a6ea, 0x86bff2, 0xa8d5f7, 0xc6e6fb
-		.word 0xdef1fd, 0xeff8fe, 0xf8fcff, 0xffffff
-		.word 0x000000
+palette:
+	.word 0x000030, 0x00104a, 0x001f66, 0x003080
+	.word 0x0044a0, 0x0059bd, 0x1a72d4, 0x3d8ce0
+	.word 0x62a6ea, 0x86bff2, 0xa8d5f7, 0xc6e6fb
+	.word 0xdef1fd, 0xeff8fe, 0xf8fcff, 0xffffff
+	.word 0x000000
 
 # The view is x in [-2.0, 0.5) and y in [-1.25, 1.25).  One cell is
 # span / SIZE across, worked out at run time so SIZE stays the only knob;

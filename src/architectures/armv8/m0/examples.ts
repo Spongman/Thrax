@@ -1,5 +1,41 @@
 /** Architecture-owned source programs; the shared menu owns names and icons. */
+import { mandelbrot } from './mandelbrot'
+
 export const EXAMPLES = {
+	mandelbrot,
+	ackermann: {
+		name: 'Ackermann',
+		description: 'Nested Thumb calls and stack frames compute and print A(3, 3) = 61.',
+		code: `.thumb
+.text
+_start:
+movs r0, #3
+movs r1, #3
+bl ack
+svc #1
+bkpt #0
+ack:
+cmp r0, #0
+beq base
+cmp r1, #0
+beq zero
+push {r4, lr}
+mov r4, r0
+subs r1, #1
+bl ack
+mov r1, r0
+subs r0, r4, #1
+bl ack
+pop {r4, pc}
+zero:
+subs r0, #1
+movs r1, #1
+b ack
+base:
+adds r0, r1, #1
+bx lr
+`,
+	},
 	hello: {
 		name: 'Hello, THRAX!',
 		description: 'Print a message with the Cortex-M0 teaching console.',
@@ -121,24 +157,35 @@ bkpt #0
 `,
 	},
 	bitmap: {
+		tools: ['bitmap'],
 		name: 'Bitmap Display',
-		description: 'Paint a small RGB bitmap using STR and the common bitmap display.',
+		description: 'Draw the common 32 by 32 red/blue gradient using Thumb stores and shifts.',
 		code: `.thumb
 .text
 _start:
 ldr r0, =pixels
-ldr r1, =0x0000ff00
-movs r2, #64
+movs r1, #0
+movs r2, #32
+ldr r6, =0x00080000
+row:
+movs r3, #0
+movs r4, #32
 paint:
-str r1, [r0]
+mov r5, r1
+orrs r5, r3
+str r5, [r0]
 adds r0, #4
-subs r2, #1
+adds r3, #8
+subs r4, #1
 bne paint
+adds r1, r1, r6
+subs r2, #1
+bne row
 bkpt #0
 .ltorg
 .data
 .balign 4
-pixels: .space 256
+pixels: .space 4096
 `,
 	},
 }
