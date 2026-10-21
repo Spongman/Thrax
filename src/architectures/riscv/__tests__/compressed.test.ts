@@ -201,7 +201,7 @@ c.jr ra`)
 		expect(mnemonics).toEqual(['c.li', 'c.addi', 'c.bnez', 'c.addi', 'c.bnez', 'c.ebreak'])
 		expect(instructionSet.describe(instructionSet.decodeExecuted(runtime.history.at(0)!))).toMatchObject({
 			mnemonic: 'c.li',
-			writes: 10
+			writes: [10]
 		})
 	})
 })

@@ -1,4 +1,4 @@
-import { formatWord } from '../core/format'
+import { formatAddress } from '../core/format'
 import type { BranchHistorySettings, BranchHistorySnapshot } from '../tools/branchHistory'
 import PanelGroup from './PanelGroup'
 import './ToolPanels.css'
@@ -22,6 +22,7 @@ function BranchHistoryView({ branchHistory, settings, onChange }: Props) {
 
 	return (
 		<div className="tool">
+			<p className="tool-description">Table index uses address / {branchHistory.addressUnitBytes} byte{branchHistory.addressUnitBytes === 1 ? '' : 's'}.</p>
 			<div className="tool-settings">
 				<label>
 					Entries
@@ -79,7 +80,7 @@ function BranchHistoryView({ branchHistory, settings, onChange }: Props) {
 							{entries.map((entry) => (
 								<tr key={entry.index} className={entry.predictions === 0 ? 'tool-row-idle' : undefined}>
 									<td>{entry.index}</td>
-									<td>{entry.addresses.map(formatWord).join(' ') || '-'}</td>
+									<td>{entry.addresses.map(formatAddress).join(' ') || '-'}</td>
 									<td>{stateLabel(entry.state, settings.historyBits)}</td>
 									<td>{entry.predictTaken ? 'taken' : 'not taken'}</td>
 									<td className="numeric">{entry.predictions}</td>

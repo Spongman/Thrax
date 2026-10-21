@@ -69,6 +69,7 @@ function infoOf(word: number): InstructionInfo {
 		encoding: d.op,
 		reads,
 		writes,
+		loadWrites: flags & INSN_LOAD ? (d.op === Op.LOAD_STORE_PAIR ? [d.rd, d.ra] : [d.rd]).filter(n => n !== 31) : undefined,
 		isLoad: (flags & INSN_LOAD) !== 0,
 		isBranch: (flags & INSN_BRANCH) !== 0,
 		isJump: (flags & INSN_JUMP) !== 0,
@@ -135,7 +136,7 @@ export const A64_PIPELINE: PipelineModel = Object.freeze({
 
 export const a64InstructionSet: InstructionSet = {
 	encodings: ENCODINGS,
-	registerNames: REGISTER_NAMES,
+	registerNames: [...REGISTER_NAMES, 'NZCV'],
 	pipeline: A64_PIPELINE,
 	describe: (instruction) => describeWord(instruction as number),
 	decodeExecuted(entry) {
@@ -143,4 +144,3 @@ export const a64InstructionSet: InstructionSet = {
 		return kind === 'instruction' ? word : null
 	},
 }
-

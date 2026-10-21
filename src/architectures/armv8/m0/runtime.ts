@@ -72,7 +72,7 @@ export function describe(i: Instruction): InstructionInfo {
 		category: load || store ? 3 : branch ? 2 : jump ? 1 : i.format === 'trap' ? 5 : 0,
 		encoding: i.size === 4 ? 1 : 0,
 		reads: [...registers],
-		writes,
+		writes: writes < 0 ? [] : [writes],
 		isLoad: load,
 		isBranch: branch,
 		isJump: jump,

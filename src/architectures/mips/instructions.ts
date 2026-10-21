@@ -7,7 +7,7 @@ import { decode, type Decoded } from './core/decoder'
 import { Op, OP_NAMES } from './core/ops'
 import { REGISTER_NAMES } from './core/registers'
 import { MIPS_PIPELINE } from './pipeline'
-import type { HistoryEntry } from '../../core/types'
+import type { HistoryEntry } from './core/types'
 import { InstructionCategory, type InstructionInfo, type InstructionSet } from '../contracts'
 
 const { ALU, BRANCH, COPROCESSOR, JUMP, MEMORY, OTHER, TRAP } = InstructionCategory
@@ -73,32 +73,47 @@ export function formatOf(word: number): number {
 	return ENCODING_I
 }
 
-const LOADS = new Set<number>([Op.LB, Op.LBU, Op.LH, Op.LHU, Op.LW])
-const STORES = new Set<number>([Op.SB, Op.SH, Op.SW])
+const LOADS = new Set<number>([Op.LB, Op.LBU, Op.LH, Op.LHU, Op.LW, Op.LWL, Op.LWR, Op.LL, Op.LWC1, Op.LDC1])
+const STORES = new Set<number>([Op.SB, Op.SH, Op.SW, Op.SWL, Op.SWR])
 const JUMP_OPS = new Set<number>([Op.J, Op.JAL, Op.JR, Op.JALR])
 const RA = 31
 
-/**
- * What an instruction is to the tools: its class, and which general-purpose
- * registers it reads and writes.  Only the integer file counts; the
- * coprocessors have their own, with no bypass between them to model.
- */
+/** Dependency resources include GPRs, FP lanes, HI/LO, FP condition bits and CP0.
+ * Double-precision aliases name both FP lanes, so overlap is visible to tools. */
 export function registerEffects(decoded: Decoded): InstructionInfo {
 	const { op, rs, rt, rd, shape } = decoded
 	const isLoad = LOADS.has(op)
 	// cc,branch is bc1t/bc1f with an explicit condition code.
 	const isBranch = shape === 'rs,rt,branch' || shape === 'rs,branch' || shape === 'branch' || shape === 'cc,branch'
 	const isJump = JUMP_OPS.has(op)
-	const info = (reads: number[], writes = -1): InstructionInfo => ({
+	const info = (reads: number[], writes: number | number[] = -1): InstructionInfo => ({
 		mnemonic: OP_NAMES[op],
 		category: categoryOf(op),
 		encoding: formatOf(decoded.word),
 		reads: reads.filter((register) => register !== 0),
-		writes: writes === 0 ? -1 : writes,
+		writes: (Array.isArray(writes) ? writes : [writes]).filter(register => register > 0),
 		isLoad,
 		isBranch,
 		isJump,
 	})
+
+	const name = OP_NAMES[op]
+	const fp = (register: number, double = name.endsWith('.d')) => double ? [32 + register, 32 + register + 1] : [32 + register]
+	const hi = 64, lo = 65, condition = 66 + decoded.cc
+	if (['mult', 'multu', 'div', 'divu', 'madd', 'maddu', 'msub', 'msubu'].includes(name)) {
+		return info(name.startsWith('m') && !name.startsWith('mult') ? [rs, rt, hi, lo] : [rs, rt], [hi, lo])
+	}
+	if (name === 'mfhi' || name === 'mflo') return info([name === 'mfhi' ? hi : lo], rd)
+	if (name === 'mthi' || name === 'mtlo') return info([rs], name === 'mthi' ? hi : lo)
+	if (name === 'sc') return info([rs, rt], rt)
+	if (name === 'lwl' || name === 'lwr') return info([rs, rt], rt)
+	if (shape === 'fd,fs,ft') return info([...fp(decoded.fs), ...fp(decoded.ft)], fp(decoded.fd))
+	if (shape === 'fd,fs') {
+		const sourceDouble = name.endsWith('.d'), destinationDouble = name.split('.')[1] === 'd'
+		return info(fp(decoded.fs, sourceDouble), fp(decoded.fd, destinationDouble))
+	}
+	if (shape === 'fs,ft' || shape === 'cc,fs,ft') return info([...fp(decoded.fs), ...fp(decoded.ft)], condition)
+	if (shape === 'fd,fs,cc') return info([...fp(decoded.fs), condition], fp(decoded.fd))
 
 	switch (shape) {
 		case 'rd,rs,rt': return info([rs, rt], rd)
@@ -106,7 +121,7 @@ export function registerEffects(decoded: Decoded): InstructionInfo {
 		case 'rd,rt,rs': return info([rt, rs], rd)
 		case 'rd,rs': return info([rs], rd)
 		// movf/movt: the cc only picks whether it commits.
-		case 'rd,rs,cc': return info([rs], rd)
+		case 'rd,rs,cc': return info([rs, condition], rd)
 		case 'rs,rt': return info([rs, rt])
 		case 'rd': return info([], rd)
 		case 'rs': return info([rs])
@@ -117,21 +132,21 @@ export function registerEffects(decoded: Decoded): InstructionInfo {
 		case 'rt,uimm': return info([], rt)
 		// A store reads the value it writes out; a load writes the register.
 		case 'rt,offset(rs)': return STORES.has(op) ? info([rs, rt]) : info([rs], rt)
-		// The coprocessor loads and stores touch only the base register here.
-		case 'ft,offset(rs)': return info([rs])
+		// Floating-point loads/stores use the same dependency resource namespace.
+		case 'ft,offset(rs)': return name.startsWith('s') ? info([rs, ...fp(decoded.ft, name === 'sdc1')]) : info([rs], fp(decoded.ft, name === 'ldc1'))
 		// The traps' immediate is in the word, not a register.
 		case 'rs,imm': return info([rs])
 		case 'rs,rt,branch': return info([rs, rt])
 		// bgezal/bltzal write $ra like jal, in addition to reading rs.
 		case 'rs,branch': return (op === Op.BGEZAL || op === Op.BLTZAL) ? info([rs], RA) : info([rs])
-		case 'branch': return info([])
-		// bc1t/bc1f read only the FP flag, which is not tracked.
-		case 'cc,branch': return info([])
+		case 'branch': return info(name === 'bc1t' || name === 'bc1f' ? [condition] : [])
+		// Branches depend on their selected FP condition bit.
+		case 'cc,branch': return info([condition])
 		// movz.s and kin: the condition is a GPR; the moved values are FP.
-		case 'fd,fs,rt': return info([rt])
+		case 'fd,fs,rt': return info([rt, ...fp(decoded.fs)], fp(decoded.fd))
 		case 'jump': return op === Op.JAL ? info([], RA) : info([])
-		case 'rt,cp0': return op === Op.MFC0 ? info([], rt) : info([rt])
-		case 'rt,fs': return op === Op.MFC1 ? info([], rt) : info([rt])
+		case 'rt,cp0': return op === Op.MFC0 ? info([74 + rd], rt) : info([rt], 74 + rd)
+		case 'rt,fs': return op === Op.MFC1 ? info(fp(decoded.fs, false), rt) : info([rt], fp(decoded.fs, false))
 		// syscall reads its arguments; the CP1 operations use the other file.
 		case 'none': return op === Op.SYSCALL ? info([2, 4, 5, 6, 7]) : info([])
 		default: return info([])
@@ -153,7 +168,7 @@ function decodeWord(word: number): Decoded | null {
 
 export const mipsInstructionSet: InstructionSet = {
 	encodings: ENCODINGS,
-	registerNames: REGISTER_NAMES,
+	registerNames: [...REGISTER_NAMES, ...Array.from({ length: 32 }, (_, n) => `$f${n}`), 'HI', 'LO', ...Array.from({ length: 8 }, (_, n) => `FCC${n}`), ...Array.from({ length: 32 }, (_, n) => `CP0_${n}`)],
 	pipeline: MIPS_PIPELINE,
 	describe(instruction) {
 		const decoded = instruction as Decoded

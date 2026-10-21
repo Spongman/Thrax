@@ -761,12 +761,11 @@ function describe(i: Instruction): InstructionInfo {
 		category: memory ? 3 : branch ? 2 : jump ? 1 : i.name === 'break' ? 5 : 0,
 		encoding: 0,
 		reads: [i.d, i.r].filter((r): r is number => r !== undefined),
-		writes:
-			i.d === undefined ||
+		writes: [i.d === undefined ||
 			branch ||
 			['cp', 'cpc', 'cpi', 'sts', 'st', 'out', 'push', 'bst'].includes(i.name)
 				? -1
-				: i.d,
+				: i.d].filter(r => r >= 0),
 		isLoad: load,
 		isBranch: branch,
 		isJump: jump

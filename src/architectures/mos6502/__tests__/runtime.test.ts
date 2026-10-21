@@ -33,7 +33,7 @@ describe('6502 runtime', () => {
 	it('describes opcodes to the tools', () => {
 		const { instructions } = machineFor('nop').toolConfig()
 		const lda = instructions!.describe(0xBD)
-		expect(lda).toMatchObject({ mnemonic: 'LDA', category: InstructionCategory.MEMORY, encoding: 7, writes: REG_A, isLoad: true })
+		expect(lda).toMatchObject({ mnemonic: 'LDA', category: InstructionCategory.MEMORY, encoding: 7, writes: [REG_A], isLoad: true })
 		expect(lda.reads).toEqual([REG_X])
 		expect(instructions!.encodings[lda.encoding]).toBe('absolute,X')
 		expect(instructions!.describe(0xD0)).toMatchObject({ mnemonic: 'BNE', category: InstructionCategory.BRANCH, isBranch: true })

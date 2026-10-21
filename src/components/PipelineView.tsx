@@ -1,5 +1,5 @@
 import React from 'react'
-import { formatWord } from '../core/format'
+import { formatAddress } from '../core/format'
 import { isOneOf, useStoredState } from '../hooks/useStoredState'
 import type { PipelineOption, PipelineStage } from '../architectures/contracts'
 import { optionFor, type BranchResolution, type DataHazardPolicy, type JumpResolution, type PipelineRow, type PipelineSettings, type PipelineSnapshot, type PredictionScheme } from '../tools/pipeline'
@@ -22,6 +22,7 @@ interface Props {
 }
 
 const WINDOW_SIZES = [8, 16, 24, 40, 64]
+const CYCLE_WINDOW = 256
 
 type PipelineTab = 'timeline' | 'hazards'
 
@@ -61,9 +62,14 @@ function describePrediction(row: PipelineRow): string {
 
 function describeStall(row: PipelineRow, names: readonly string[]): string {
 	if (row.stalls === 0) return ''
+	const structural = row.structuralStalls ?? 0
+	const descriptions: string[] = []
+	if (structural > 0) descriptions.push(`${structural} cycles waiting for a busy stage`)
+	const data = row.stalls - structural
 	const register = row.blockedOn === null ? 'an earlier result' : registerName(row.blockedOn, names)
 	const reason = row.cause === 'load-use' ? 'load-use hazard' : 'data hazard'
-	return `${row.stalls} cycle${row.stalls === 1 ? '' : 's'} lost to a ${reason} on ${register}`
+	if (data > 0) descriptions.push(`${data} cycle${data === 1 ? '' : 's'} lost to a ${reason} on ${register}`)
+	return descriptions.join('; ')
 }
 
 const cycleWord = (cycles: number) => `${cycles} cycle${cycles === 1 ? '' : 's'}`
@@ -85,7 +91,7 @@ function StageView({ rows, cycle, stages }: { rows: PipelineRow[]; cycle: number
 						{occupant ? (
 							<>
 								<span className="pipeline-stage-op">{occupant.row.op.toLowerCase()}</span>
-								<span className="pipeline-stage-address">{formatWord(occupant.row.address)}</span>
+								<span className="pipeline-stage-address">{formatAddress(occupant.row.address)}</span>
 								{occupant.stalled && <span className="pipeline-stage-note">held</span>}
 							</>
 						) : (
@@ -120,6 +126,10 @@ function HazardReport({ rows, names }: { rows: PipelineRow[]; names: readonly st
 					<span className="tool-metric-value">{counts.control}</span>
 					<span className="tool-metric-label">Control</span>
 				</div>
+				<div className="tool-metric">
+					<span className="tool-metric-value">{counts.structural}</span>
+					<span className="tool-metric-label">Resource</span>
+				</div>
 			</div>
 
 			<PanelGroup title="Hazards in the window" flush>
@@ -143,7 +153,7 @@ function HazardReport({ rows, names }: { rows: PipelineRow[]; names: readonly st
 								{reported.flatMap((entry) => entry.hazards.map((hazard) => (
 									<tr key={`${entry.row.index}-${hazard.kind}`}>
 										<td className="numeric">{entry.row.index}</td>
-										<th title={formatWord(entry.row.address)}>{entry.row.op.toLowerCase()}</th>
+										<th title={formatAddress(entry.row.address)}>{entry.row.op.toLowerCase()}</th>
 										<td className={`pipeline-hazard-${hazard.kind}`}>{describeHazard(hazard, names)}</td>
 										<td className="numeric">{cycleWord(hazard.cycles)}</td>
 										<td>{hazard.producer ? `#${hazard.producer.index} ${hazard.producer.op.toLowerCase()}` : '-'}</td>
@@ -168,10 +178,18 @@ function PipelineTool({ pipeline, settings, onChange }: Props) {
 	const [tab, setTab] = useStoredState<PipelineTab>('pipeline.tab', 'timeline', isOneOf(TABS.map((item) => item.id)))
 	/** The cycle the stage view is stopped on, or null to follow the run. */
 	const [pickedCycle, setPickedCycle] = React.useState<number | null>(null)
+	const [windowStart, setWindowStart] = React.useState<number | null>(null)
 
-	const lastCycle = rows.reduce((latest, row) => Math.max(latest, row.cycles[row.cycles.length - 1]), pipeline.firstCycle)
+	const lastCycle = rows.reduce((latest, row) => Math.max(latest, row.completed ?? row.cycles[row.cycles.length - 1]), pipeline.firstCycle)
+	const latestStart = Math.max(pipeline.firstCycle, lastCycle - CYCLE_WINDOW + 1)
+	const firstShown = windowStart === null ? latestStart : Math.max(pipeline.firstCycle, Math.min(windowStart, latestStart))
+	const lastShown = Math.min(lastCycle, firstShown + CYCLE_WINDOW - 1)
 	const columns: number[] = []
-	for (let cycle = pipeline.firstCycle; cycle <= lastCycle; cycle++) columns.push(cycle)
+	for (let cycle = firstShown; cycle <= lastShown; cycle++) columns.push(cycle)
+	const page = (start: number | null) => {
+		setWindowStart(start)
+		setPickedCycle(start === null ? null : Math.min(lastCycle, start + CYCLE_WINDOW - 1))
+	}
 
 	// A cycle picked out of an older window would name one the rows no longer
 	// cover, so the view falls back to the newest cycle it has.
@@ -190,7 +208,8 @@ function PipelineTool({ pipeline, settings, onChange }: Props) {
 				<label>
 					Prediction
 					<select
-						value={settings.prediction}
+						value={model?.prediction === false ? 'none' : settings.prediction}
+						disabled={model?.prediction === false}
 						onChange={(event) => onChange({ ...settings, prediction: event.target.value as PredictionScheme })}
 					>
 						<option value="none">None</option>
@@ -227,7 +246,15 @@ function PipelineTool({ pipeline, settings, onChange }: Props) {
 						</div>
 						<div className="tool-metric">
 							<span className="tool-metric-value">{(cycles - idealCycles).toLocaleString()}</span>
-							<span className="tool-metric-label">Lost to hazards</span>
+							<span className="tool-metric-label">Extra cycles</span>
+						</div>
+						<div className="tool-metric">
+							<span className="tool-metric-value">{pipeline.multiCycleCycles.toLocaleString()}</span>
+							<span className="tool-metric-label">Multi-cycle execution</span>
+						</div>
+						<div className="tool-metric">
+							<span className="tool-metric-value">{pipeline.structuralStalls.toLocaleString()}</span>
+							<span className="tool-metric-label">Resource waits</span>
 						</div>
 						<div className="tool-metric">
 							<span className="tool-metric-value">{dataStalls.toLocaleString()}</span>
@@ -250,6 +277,12 @@ function PipelineTool({ pipeline, settings, onChange }: Props) {
 					</div>
 
 					<PanelGroup title="Timeline" flush>
+						{lastCycle - pipeline.firstCycle >= CYCLE_WINDOW && <div className="pipeline-cycle-pages">
+							<button disabled={firstShown <= pipeline.firstCycle} onClick={() => page(Math.max(pipeline.firstCycle, firstShown - CYCLE_WINDOW))}>Earlier cycles</button>
+							<span>{firstShown}–{lastShown}</span>
+							<button disabled={lastShown >= lastCycle} onClick={() => page(Math.min(latestStart, firstShown + CYCLE_WINDOW))}>Later cycles</button>
+							<button disabled={windowStart === null} onClick={() => page(null)}>Latest</button>
+						</div>}
 						{rows.length === 0 ? (
 							<div className="tool-empty">Run or step a program to see it flow through the pipeline.</div>
 						) : (
@@ -273,7 +306,7 @@ function PipelineTool({ pipeline, settings, onChange }: Props) {
 									<tbody>
 										{rows.map((row) => (
 											<tr key={row.index} className={row.stalls > 0 ? 'pipeline-row-stalled' : undefined}>
-												<th className="pipeline-label" title={[formatWord(row.address), describeStall(row, pipeline.registerNames), describePrediction(row)].filter(Boolean).join('\n')}>
+												<th className="pipeline-label" title={[formatAddress(row.address), describeStall(row, pipeline.registerNames), describePrediction(row)].filter(Boolean).join('\n')}>
 													{row.op.toLowerCase()}
 													{row.mispredicted && <span className="pipeline-mispredict" title="Mispredicted"> ✗</span>}
 												</th>

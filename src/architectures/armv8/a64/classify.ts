@@ -40,8 +40,8 @@ export class A64InstructionInfo {
 /** What `d` does to registers, whatever their values. */
 export interface RegisterTraffic {
 	reads: number[]
-	/** Register written, or -1; a load's destination before a base it writes back. */
-	writes: number
+	/** All destinations, including pair loads, base writeback and NZCV. */
+	writes: number[]
 }
 
 /** `n` as read where 31 is the zero register, or -1 for it. */
@@ -52,38 +52,44 @@ export function registerTraffic(d: A64Instruction): RegisterTraffic {
 	const read = (n: number) => {
 		if (n >= 0 && !reads.includes(n)) reads.push(n)
 	}
-	let writes = -1
+	const writes: number[] = []
+	const write = (n: number) => { if (n >= 0 && !writes.includes(n)) writes.push(n) }
 	switch (d.op) {
-		case Op.ADDSUB_IMM: read(d.rn); writes = d.setFlags ? zr(d.rd) : d.rd; break
-		case Op.LOGIC_IMM: read(zr(d.rn)); writes = d.setFlags ? zr(d.rd) : d.rd; break
-		case Op.MOVE_WIDE: if (d.opc === 3) read(zr(d.rd)); writes = zr(d.rd); break
-		case Op.BITFIELD: read(zr(d.rn)); if (d.opc === 1) read(zr(d.rd)); writes = zr(d.rd); break
-		case Op.ADR: case Op.ADRP: writes = zr(d.rd); break
-		case Op.BL: writes = R_LR; break
+		case Op.ADDSUB_IMM: read(d.rn); write(d.setFlags ? zr(d.rd) : d.rd); break
+		case Op.LOGIC_IMM: read(zr(d.rn)); write(d.setFlags ? zr(d.rd) : d.rd); break
+		case Op.MOVE_WIDE: if (d.opc === 3) read(zr(d.rd)); write(zr(d.rd)); break
+		case Op.BITFIELD: read(zr(d.rn)); if (d.opc === 1) read(zr(d.rd)); write(zr(d.rd)); break
+		case Op.ADR: case Op.ADRP: write(zr(d.rd)); break
+		case Op.BL: write(R_LR); break
 		case Op.CB: case Op.TB: read(zr(d.rd)); break
 		case Op.BR: case Op.RET: read(zr(d.rn)); break
-		case Op.BLR: read(zr(d.rn)); writes = R_LR; break
-		case Op.SVC: for (const n of [8, 0, 1, 2]) read(n); writes = 0; break
+		case Op.BLR: read(zr(d.rn)); write(R_LR); break
+		case Op.SVC: for (const n of [8, 0, 1, 2]) read(n); write(0); break
 		case Op.EXTR: case Op.LOGIC_REG: case Op.ADDSUB_SHIFT: case Op.ADC: case Op.DP2: case Op.CSEL:
-			read(zr(d.rn)); read(zr(d.rm)); writes = zr(d.rd); break
-		case Op.ADDSUB_EXT: read(d.rn); read(zr(d.rm)); writes = d.setFlags ? zr(d.rd) : d.rd; break
+			read(zr(d.rn)); read(zr(d.rm)); write(zr(d.rd)); break
+		case Op.ADDSUB_EXT: read(d.rn); read(zr(d.rm)); write(d.setFlags ? zr(d.rd) : d.rd); break
 		case Op.CCMP: read(zr(d.rn)); if (!d.immediate) read(zr(d.rm)); break
-		case Op.DP3: read(zr(d.rn)); read(zr(d.rm)); read(zr(d.ra)); writes = zr(d.rd); break
-		case Op.DP1: read(zr(d.rn)); writes = zr(d.rd); break
-		case Op.LOAD_LITERAL: writes = zr(d.rd); break
+		case Op.DP3: read(zr(d.rn)); read(zr(d.rm)); read(zr(d.ra)); write(zr(d.rd)); break
+		case Op.DP1: read(zr(d.rn)); write(zr(d.rd)); break
+		case Op.LOAD_LITERAL: write(zr(d.rd)); break
 		case Op.LOAD_STORE: case Op.LOAD_STORE_PAIR: {
 			read(d.rn)
 			if (d.op === Op.LOAD_STORE && d.mode === MODE_REGISTER) read(zr(d.rm))
 			if (d.access === ACCESS_STORE) {
 				read(zr(d.rd))
 				if (d.op === Op.LOAD_STORE_PAIR) read(zr(d.ra))
-				writes = d.mode === MODE_POST || d.mode === MODE_PRE ? d.rn : -1
+				write(d.mode === MODE_POST || d.mode === MODE_PRE ? d.rn : -1)
 			} else {
-				writes = zr(d.rd)
+				write(zr(d.rd))
+				if (d.op === Op.LOAD_STORE_PAIR) write(zr(d.ra))
+				if (d.mode === MODE_POST || d.mode === MODE_PRE) write(d.rn)
 			}
 			break
 		}
 	}
+	// Wn and Xn alias the same resource. NZCV is a separate dependency.
+	if ([Op.B_COND, Op.ADC, Op.CCMP, Op.CSEL].includes(d.op)) read(32)
+	if (d.setFlags || d.op === Op.CCMP) write(32)
 	return { reads, writes }
 }
 

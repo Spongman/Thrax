@@ -1,3 +1,4 @@
+import { DEPENDENCY_NAMES, registerTraffic } from './dependencies'
 /**
  * Z80 instruction facts for the call stack, stepping and the shared tools. The
  * opaque instruction an observer is handed is the instruction's bytes packed
@@ -23,17 +24,17 @@ export const Z80_RESTART = 16
 export const Z80_ENCODINGS = ['Main', 'CB', 'ED', 'DD/FD', 'DD/FD CB'] as const
 
 /** The first byte past any index prefixes, and which page the opcode is on. */
-function opcodeOf(read: ByteReader): { opcode: number, page: number, at: number } {
+function opcodeOf(read: ByteReader): { opcode: number, page: number, at: number, index: 'IX' | 'IY' | '' } {
 	let at = 0
 	let opcode = read(at++) & 0xFF
-	let indexed = false
+	let index: 'IX' | 'IY' | '' = ''
 	while (opcode === 0xDD || opcode === 0xFD) {
-		indexed = true
+		index = opcode === 0xDD ? 'IX' : 'IY'
 		opcode = read(at++) & 0xFF
 	}
-	if (opcode === 0xCB) return { opcode: read(indexed ? at + 1 : at) & 0xFF, page: indexed ? 4 : 1, at }
-	if (opcode === 0xED) return { opcode: read(at) & 0xFF, page: 2, at }
-	return { opcode, page: indexed ? 3 : 0, at }
+	if (opcode === 0xCB) return { opcode: read(index ? at + 1 : at) & 0xFF, page: index ? 4 : 1, at, index }
+	if (opcode === 0xED) return { opcode: read(at) & 0xFF, page: 2, at, index }
+	return { opcode, page: index ? 3 : 0, at, index }
 }
 
 /** Z80_* flags of the instruction `read` gives. */
@@ -77,14 +78,12 @@ function infoOf(packed: number): InstructionInfo {
 	const { text } = decode(read, 0)
 	const mnemonic = text.split(' ')[0]
 	const flags = classify(read)
-	const { page } = opcodeOf(read)
+	const { page, opcode, index } = opcodeOf(read)
 	return {
 		mnemonic,
 		category: categoryOf(mnemonic, flags),
 		encoding: page,
-		reads: [],
-		writes: -1,
-		isLoad: false,
+		...registerTraffic(opcode, page, index),
 		isBranch: (flags & Z80_CONDITIONAL) !== 0,
 		isJump: (flags & Z80_TRANSFER) !== 0 && (flags & Z80_CONDITIONAL) === 0,
 	}
@@ -111,7 +110,7 @@ export interface Z80Executed extends HistoryRecord {
 }
 
 /** 8-bit registers by index, as the tools name them. */
-const REGISTER_NAMES = ['B', 'C', 'D', 'E', 'H', 'L', '(HL)', 'A']
+const REGISTER_NAMES = DEPENDENCY_NAMES
 
 export const z80InstructionSet: InstructionSet = {
 	encodings: Z80_ENCODINGS,

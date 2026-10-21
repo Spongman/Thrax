@@ -153,7 +153,7 @@ export class CacheSimulator implements ExecutionObserver, Replayable {
 	/** One access through the cache, live or replayed. */
 	private touch(address: number) {
 		const { blockSizeBytes, associativity, replacement } = this.settings
-		const blockNumber = Math.floor((address >>> 0) / blockSizeBytes)
+		const blockNumber = Math.floor(address / blockSizeBytes)
 		const setIndex = blockNumber % this.setCount
 		const tag = Math.floor(blockNumber / this.setCount)
 		const first = setIndex * associativity

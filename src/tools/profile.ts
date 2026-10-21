@@ -80,7 +80,7 @@ export class ExecutionProfile implements ExecutionObserver, Replayable {
 	}
 
 	private entryFor(address: number) {
-		const key = address >>> 0
+		const key = address
 		let entry = this.addresses.get(key)
 		if (!entry) {
 			entry = { count: 0, taken: 0, notTaken: 0 }

@@ -14,16 +14,16 @@ const word = (line: string) => {
 
 describe('A64 instruction metadata', () => {
 	it.each([
-		['add x0, x1, x2', 'add', InstructionCategory.ALU, [1, 2], 0],
-		['add sp, sp, #16', 'add', InstructionCategory.ALU, [31], 31],
-		['mov x0, x1', 'mov', InstructionCategory.ALU, [1], 0],
-		['cmp x3, #1', 'cmp', InstructionCategory.ALU, [3], -1],
-		['ldr x0, [x1, x2]', 'ldr', InstructionCategory.MEMORY, [1, 2], 0],
-		['stp x29, x30, [sp, #-16]!', 'stp', InstructionCategory.MEMORY, [31, 29, 30], 31],
-		['bl .', 'bl', InstructionCategory.JUMP, [], 30],
-		['ret', 'ret', InstructionCategory.JUMP, [30], -1],
-		['cbz x5, .', 'cbz', InstructionCategory.BRANCH, [5], -1],
-		['svc #0', 'svc', InstructionCategory.TRAP, [8, 0, 1, 2], 0],
+		['add x0, x1, x2', 'add', InstructionCategory.ALU, [1, 2], [0]],
+		['add sp, sp, #16', 'add', InstructionCategory.ALU, [31], [31]],
+		['mov x0, x1', 'mov', InstructionCategory.ALU, [1], [0]],
+		['cmp x3, #1', 'cmp', InstructionCategory.ALU, [3], [32]],
+		['ldr x0, [x1, x2]', 'ldr', InstructionCategory.MEMORY, [1, 2], [0]],
+		['stp x29, x30, [sp, #-16]!', 'stp', InstructionCategory.MEMORY, [31, 29, 30], [31]],
+		['bl .', 'bl', InstructionCategory.JUMP, [], [30]],
+		['ret', 'ret', InstructionCategory.JUMP, [30], []],
+		['cbz x5, .', 'cbz', InstructionCategory.BRANCH, [5], []],
+		['svc #0', 'svc', InstructionCategory.TRAP, [8, 0, 1, 2], [0]],
 	] as const)('%s', (line, mnemonic, category, reads, writes) => {
 		const info = a64InstructionSet.describe(word(line))
 		expect(info).toMatchObject({ mnemonic, category, writes })

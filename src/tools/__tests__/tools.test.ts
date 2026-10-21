@@ -133,6 +133,7 @@ describe('branch history table', () => {
 	it('predicts a loop correctly except at its edges', async () => {
 		const simulator = build(withExit('li $t0, 10\nloop:\naddi $t0, $t0, -1\nbne $t0, $zero, loop'))
 		const table = new BranchHistoryTable({ entryCount: 8, historyBits: 2, initiallyTaken: false })
+		table.onConfigure(toolMachine())
 		simulator.observers.push(table)
 		await simulator.run()
 
@@ -146,6 +147,7 @@ describe('branch history table', () => {
 	it('changes its mind at once with a one-bit counter', async () => {
 		const simulator = build(withExit('li $t0, 10\nloop:\naddi $t0, $t0, -1\nbne $t0, $zero, loop'))
 		const table = new BranchHistoryTable({ entryCount: 8, historyBits: 1, initiallyTaken: false })
+		table.onConfigure(toolMachine())
 		simulator.observers.push(table)
 		await simulator.run()
 
@@ -156,6 +158,7 @@ describe('branch history table', () => {
 	it('starts from the configured prediction', async () => {
 		const simulator = build(withExit('li $t0, 10\nloop:\naddi $t0, $t0, -1\nbne $t0, $zero, loop'))
 		const table = new BranchHistoryTable({ entryCount: 8, historyBits: 2, initiallyTaken: true })
+		table.onConfigure(toolMachine())
 		simulator.observers.push(table)
 		await simulator.run()
 
@@ -166,6 +169,7 @@ describe('branch history table', () => {
 	it('records which branches share an entry', async () => {
 		const simulator = build(withExit('li $t0, 1\nbeq $t0, $t0, next\nnext:\nbne $t0, $zero, done\ndone:'))
 		const table = new BranchHistoryTable({ entryCount: 4, historyBits: 2, initiallyTaken: false })
+		table.onConfigure(toolMachine())
 		simulator.observers.push(table)
 		await simulator.run()
 

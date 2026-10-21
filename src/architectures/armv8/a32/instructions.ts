@@ -1,3 +1,4 @@
+import { a32Dependencies, a32LoadWrites } from '../../arm/a32/dependencies'
 /**
  * A32 instruction metadata for the shared tools, under the ARMv8 profile.
  * The opaque instruction an observer is handed is the instruction word; what
@@ -22,19 +23,16 @@ function categoryOf(flags: number): number {
 	return OTHER
 }
 
-const registersOf = (mask: number) => Array.from({ length: 16 }, (_unused, index) => index).filter((index) => mask & (1 << index))
-
 function infoOf(word: number): InstructionInfo {
 	const { format, flags, reads, writes } = classifyA32(word, ARCH_V8)
-	// One destination for the tools: the last register written.
-	const written = registersOf(writes)
+	const dependencies = a32Dependencies(word, reads, writes, format)
 	return {
 		// The base mnemonic, as the disassembly writes it.
 		mnemonic: format === FORMAT_UNDEFINED ? 'undefined' : disassembleA32(word, 0, ARCH_V8).split(' ')[0],
 		category: categoryOf(flags),
 		encoding: format,
-		reads: registersOf(reads),
-		writes: written.length ? written[written.length - 1] : -1,
+		...dependencies,
+		loadWrites: flags & A32_LOAD ? a32LoadWrites(word, format) : undefined,
 		isLoad: (flags & A32_LOAD) !== 0,
 		isBranch: (flags & A32_BRANCH) !== 0,
 		isJump: (flags & A32_JUMP) !== 0,
@@ -60,7 +58,7 @@ export interface A32Executed extends HistoryRecord {
 
 export const a32InstructionSet: InstructionSet = {
 	encodings: FORMAT_NAMES,
-	registerNames: REGISTER_NAMES,
+	registerNames: [...REGISTER_NAMES, 'NZCV'],
 	pipeline: A64_PIPELINE,
 	describe: (instruction) => describeWord(instruction as number),
 	decodeExecuted(entry) {

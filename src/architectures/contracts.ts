@@ -328,7 +328,7 @@ export interface InstructionInfo {
 	 * Hardwired constants are omitted. Arrays are cached with the decoded form. */
 	readonly reads: readonly number[]
 	/** All resources written, including writeback and overlapping destinations. */
-	readonly writes: number
+	readonly writes: readonly number[]
 	/** For mixed-result loads, the subset supplied by memory. Other destinations
 	 * (e.g. base writeback) use ALU bypasses. Absent means all writes of a load. */
 	readonly loadWrites?: readonly number[]

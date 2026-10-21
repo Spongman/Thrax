@@ -28,28 +28,28 @@ describe('register effects', () => {
 	it('reads the sources and writes the destination of an R-type', () => {
 		const effects = effectsOf('add $t0, $t1, $t2')
 		expect(effects.reads).toEqual([9, 10])
-		expect(effects.writes).toBe(8)
+		expect(effects.writes).toEqual([8])
 	})
 
 	it('treats a load as writing rt and a store as reading it', () => {
 		const load = effectsOf('lw $t0, 0($sp)')
 		expect(load.reads).toEqual([29])
-		expect(load.writes).toBe(8)
+		expect(load.writes).toEqual([8])
 		expect(load.isLoad).toBe(true)
 
 		const store = effectsOf('sw $t0, 0($sp)')
 		expect(store.reads).toEqual([29, 8])
-		expect(store.writes).toBe(-1)
+		expect(store.writes).toEqual([])
 		expect(store.isLoad).toBe(false)
 	})
 
 	it('ignores $zero, which never carries a dependency', () => {
-		expect(effectsOf('add $zero, $t1, $zero').writes).toBe(-1)
+		expect(effectsOf('add $zero, $t1, $zero').writes).toEqual([])
 		expect(effectsOf('addi $t0, $zero, 1').reads).toEqual([])
 	})
 
 	it('knows jal writes $ra and jr reads its target', () => {
-		expect(effectsOf('here: jal here').writes).toBe(31)
+		expect(effectsOf('here: jal here').writes).toEqual([31])
 		expect(effectsOf('jr $ra').reads).toEqual([31])
 		expect(effectsOf('jr $ra').isJump).toBe(true)
 	})
@@ -66,7 +66,7 @@ describe('register effects', () => {
 	it('counts bc1t with a condition code as a branch', () => {
 		const branch = effectsOf('here: bc1t 3,here')
 		expect(branch.isBranch).toBe(true)
-		expect(branch.reads).toEqual([])
+		expect(branch.reads).toEqual([69])
 	})
 
 	// The twelve traps (rs,imm) had no case at all, so a hazard on their register
@@ -77,17 +77,17 @@ describe('register effects', () => {
 	})
 
 	// movz.s/movn.s (fd,fs,rt) read the GPR condition; the FP source and destination
-	// are not tracked here (only the integer file is modelled).
+	// share the dependency namespace with the integer registers.
 	it('reads the GPR condition of an FP conditional move and writes nothing GPR', () => {
 		const move = effectsOf('movz.s $f0,$f1,$t3')
-		expect(move.reads).toEqual([11])
-		expect(move.writes).toBe(-1)
+		expect(move.reads).toEqual([11, 33])
+		expect(move.writes).toEqual([32])
 	})
 
 	// bgezal/bltzal write $ra like jal, in addition to reading rs (InstructionSet.java:909-924).
 	it('knows bgezal and bltzal write $ra', () => {
-		expect(effectsOf('here: bgezal $t0, here').writes).toBe(31)
-		expect(effectsOf('here: bltzal $t0, here').writes).toBe(31)
+		expect(effectsOf('here: bgezal $t0, here').writes).toEqual([31])
+		expect(effectsOf('here: bltzal $t0, here').writes).toEqual([31])
 		expect(effectsOf('here: bgezal $t0, here').isBranch).toBe(true)
 	})
 
@@ -95,8 +95,8 @@ describe('register effects', () => {
 	// dependency between rs and rd went untracked.
 	it('tracks the register traffic of movf/movt with an explicit condition code', () => {
 		const move = effectsOf('movf $t0, $t1, 1')
-		expect(move.reads).toEqual([9])
-		expect(move.writes).toBe(8)
+		expect(move.reads).toEqual([9, 67])
+		expect(move.writes).toEqual([8])
 	})
 })
 

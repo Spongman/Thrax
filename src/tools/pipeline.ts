@@ -9,12 +9,12 @@
  *
  * What is modelled: in-order single issue, RAW hazards under the model's
  * bypass and stall policies, the stage a branch or jump resolves in, delay
- * slots or annulment, and branch prediction.  What is not modelled:
- * structural hazards on memory (separate caches are assumed) and
- * write-after-write, which cannot arise in order.
+ * slots or annulment, branch prediction, and stage occupancy supplied by the
+ * architecture. Cache/bus contention is not inferred from memory accesses;
+ * an architecture must supply any such cost in its timing model.
  */
 
-import { PipelineResult, type InstructionSet, type PipelineBypass, type PipelineModel as ArchitecturePipeline, type PipelineOption } from '../architectures/contracts'
+import { PipelineResult, type InstructionSet, type PipelineBypass, type PipelineModel as ArchitecturePipeline, type PipelineOption, type PipelineExecutionTiming } from '../architectures/contracts'
 import type { ExecutionObserver, MachineConfig } from '../core/observer'
 import { Replay, type Replayable } from './replay'
 import { StepLog } from './stepLog'
@@ -55,7 +55,7 @@ export const DEFAULT_PIPELINE_SETTINGS: PipelineSettings = {
 }
 
 /** Why an instruction could not leave the read stage on the cycle after it entered. */
-export type StallCause = 'data' | 'load-use' | null
+export type StallCause = 'data' | 'load-use' | 'structural' | null
 
 export interface PipelineRow {
 	index: number
@@ -63,6 +63,12 @@ export interface PipelineRow {
 	op: string
 	/** Cycle each stage is entered, indexed as the model's stages. */
 	cycles: number[]
+	/** Active cycles in each stage; absent means one throughout. */
+	durations?: readonly number[]
+	/** End of the final active stage, inclusive. */
+	completed?: number
+	/** Waits for a busy stage, included in stalls. */
+	structuralStalls?: number
 	/** Cycles spent held in the model's read stage. */
 	stalls: number
 	cause: StallCause
@@ -82,6 +88,7 @@ export interface PipelineAddressStats {
 	executions: number
 	stalls: number
 	loadUseStalls: number
+	structuralStalls: number
 	/** Cycles lost to the front end refilling after the instruction before. */
 	flushed: number
 	branches: number
@@ -99,6 +106,9 @@ export interface PipelineSnapshot {
 	idealCycles: number
 	dataStalls: number
 	loadUseStalls: number
+	structuralStalls: number
+	/** Additional active cycles, excluding time spent waiting behind another instruction. */
+	multiCycleCycles: number
 	controlFlushes: number
 	/** Branches the predictor was asked about, and how many it got wrong. */
 	predictions: number
@@ -178,9 +188,11 @@ function timingOf(model: ArchitecturePipeline, settings: PipelineSettings): Timi
 interface InFlight {
 	/** Index of the instruction, so a row can name what it waited for. */
 	index: number
-	writes: number
+	writes: readonly number[]
+	loadWrites?: readonly number[]
 	isLoad: boolean
 	cycles: readonly number[]
+	durations: readonly number[]
 }
 
 export class PipelineModel implements ExecutionObserver, Replayable {
@@ -190,10 +202,17 @@ export class PipelineModel implements ExecutionObserver, Replayable {
 	private index = 0
 	/** Cycles the instruction before this one entered each stage. */
 	private previous: readonly number[] | null = null
+	private previousDurations: readonly number[] = []
+	private observedOrigin: number | null = null
+	private observedFill: number | null = null
+	private observedTiming = false
+	private pendingFetch = 0
 	private lastCycle = 0
 	private firstCycle = 1
 	private dataStalls = 0
 	private loadUseStalls = 0
+	private structuralStalls = 0
+	private multiCycleCycles = 0
 	private controlFlushes = 0
 	/** Penalty the instruction now being fetched owes the branch before it. */
 	private pendingFlush = 0
@@ -270,10 +289,17 @@ export class PipelineModel implements ExecutionObserver, Replayable {
 		this.recent = []
 		this.index = 0
 		this.previous = null
+		this.previousDurations = []
+		this.observedOrigin = null
+		this.observedFill = null
+		this.observedTiming = false
+		this.pendingFetch = 0
 		this.lastCycle = 0
 		this.firstCycle = 1
 		this.dataStalls = 0
 		this.loadUseStalls = 0
+		this.structuralStalls = 0
+		this.multiCycleCycles = 0
 		this.controlFlushes = 0
 		this.pendingFlush = 0
 		this.predictions = 0
@@ -303,10 +329,10 @@ export class PipelineModel implements ExecutionObserver, Replayable {
 	}
 
 	private statsFor(address: number) {
-		const key = address >>> 0
+		const key = address
 		let stats = this.addresses.get(key)
 		if (!stats) {
-			stats = { executions: 0, stalls: 0, loadUseStalls: 0, flushed: 0, branches: 0, mispredictions: 0 }
+			stats = { executions: 0, stalls: 0, loadUseStalls: 0, structuralStalls: 0, flushed: 0, branches: 0, mispredictions: 0 }
 			this.addresses.set(key, stats)
 		}
 		return stats
@@ -327,6 +353,12 @@ export class PipelineModel implements ExecutionObserver, Replayable {
 		// Without the architecture's reading and pipeline there is nothing to model.
 		const timing = this.timing
 		if (!this.instructions || !timing) return
+		const observed = this.model?.executionTiming?.(instruction)
+		this.observedTiming = observed !== undefined
+		if (observed) {
+			this.applyObserved(address, instruction, observed)
+			return
+		}
 		const effects = this.instructions.describe(instruction)
 		const flushed = this.pendingFlush
 		this.pendingFlush = 0
@@ -336,59 +368,76 @@ export class PipelineModel implements ExecutionObserver, Replayable {
 		const { stageCount, hold, gate } = timing
 		const prior = this.previous
 		const cycles = new Array<number>(stageCount)
-		cycles[0] = (prior ? Math.max(prior[0] + 1, prior[1]) : 1) + flushed
+		const durations = Array.from({ length: stageCount }, (_, stage) =>
+			Math.max(1, Math.trunc(this.model?.stageCycles?.(instruction, stage) ?? 1)))
+		const available = (stage: number) => prior === null ? 0 : Math.max(
+			prior[stage] + this.previousDurations[stage],
+			stage + 1 < stageCount ? prior[stage + 1] : 0)
+		cycles[0] = Math.max((prior ? available(0) : 1) + flushed, this.pendingFetch)
+		this.pendingFetch = 0
 		for (let stage = 1; stage <= gate; stage++) {
-			const free = prior === null ? 0 : stage + 1 < stageCount ? prior[stage + 1] : prior[stage] + 1
-			cycles[stage] = Math.max(cycles[stage - 1] + 1, free)
+			cycles[stage] = Math.max(cycles[stage - 1] + durations[stage - 1], available(stage))
 		}
+		const structural = cycles[gate] - cycles[hold] - durations[hold]
 
 		// Leave the hold stage as soon as every operand has arrived.
-		let cause: StallCause = null
+		let cause: StallCause = structural > 0 ? 'structural' : null
 		let blockedOn: number | null = null
 		let blockedBy: number | null = null
 		for (const register of effects.reads) {
 			const producer = this.producerOf(register)
 			if (!producer) continue
-			const bypass = producer.isLoad ? timing.loadBypass : timing.aluBypass
-			const fromFile = producer.cycles[timing.writeStage] + timing.fileDelay
-			const ready = bypass < 0 ? fromFile : Math.min(fromFile, producer.cycles[bypass] + timing.bypassDelay)
+			const loaded = producer.isLoad && (producer.loadWrites?.includes(register) ?? true)
+			const bypass = loaded ? timing.loadBypass : timing.aluBypass
+			const fromFile = producer.cycles[timing.writeStage] + producer.durations[timing.writeStage] - 1 + timing.fileDelay
+			const ready = bypass < 0 ? fromFile : Math.min(fromFile, producer.cycles[bypass] + producer.durations[bypass] - 1 + timing.bypassDelay)
 			if (ready > cycles[gate]) {
 				cycles[gate] = ready
-				cause = timing.loadUse && producer.isLoad ? 'load-use' : 'data'
+				cause = timing.loadUse && loaded ? 'load-use' : 'data'
 				blockedOn = register
 				blockedBy = producer.index
 			}
 		}
-		for (let stage = gate + 1; stage < stageCount; stage++) cycles[stage] = cycles[stage - 1] + 1
+		for (let stage = gate + 1; stage < stageCount; stage++)
+			cycles[stage] = Math.max(cycles[stage - 1] + durations[stage - 1], available(stage))
 
-		const stalls = cycles[gate] - (cycles[hold] + 1)
-		if (stalls > 0) {
-			if (cause === 'load-use') this.loadUseStalls += stalls
-			else this.dataStalls += stalls
+		const stalls = cycles[gate] - cycles[hold] - durations[hold]
+		this.structuralStalls += structural
+		this.multiCycleCycles += durations.reduce((sum, duration) => sum + duration - 1, 0)
+		const data = stalls - structural
+		if (data > 0) {
+			if (cause === 'load-use') this.loadUseStalls += data
+			else this.dataStalls += data
 		}
 
 		// An unconditional jump always redirects; a branch reports itself below.
-		if (effects.isJump) this.redirect(timing.jumpPenalty)
+		if (effects.isJump) this.redirect(timing.jumpPenalty, cycles, durations)
 
 		const stats = this.statsFor(address)
 		stats.executions += 1
 		stats.stalls += Math.max(0, stalls)
-		if (cause === 'load-use') stats.loadUseStalls += stalls
+		if (cause === 'load-use') stats.loadUseStalls += data
+		stats.structuralStalls += structural
 		stats.flushed += flushed
 		this.lastStats = stats
 
 		this.index += 1
 		this.previous = cycles
-		this.lastCycle = Math.max(this.lastCycle, cycles[stageCount - 1])
+		this.previousDurations = durations
+		const completed = cycles[stageCount - 1] + durations[stageCount - 1] - 1
+		this.lastCycle = Math.max(this.lastCycle, completed)
 
-		this.recent.push({ index: this.index, writes: effects.writes, isLoad: effects.isLoad, cycles })
+		this.recent.push({ index: this.index, writes: effects.writes, loadWrites: effects.loadWrites, isLoad: effects.isLoad, cycles, durations })
 		if (this.recent.length > 8) this.recent.shift()
 
 		this.rows.push({
 			index: this.index,
-			address: address >>> 0,
+			address: address,
 			op: effects.mnemonic,
 			cycles,
+			durations,
+			completed,
+			structuralStalls: structural,
 			stalls,
 			cause,
 			blockedOn,
@@ -401,6 +450,40 @@ export class PipelineModel implements ExecutionObserver, Replayable {
 			this.rows.shift()
 			this.firstCycle = this.rows[0].cycles[0]
 		}
+	}
+
+	/** The shared window and counters can also consume a CPU's actual execution schedule. */
+	private applyObserved(address: number, instruction: unknown, timing: PipelineExecutionTiming) {
+		const effects = this.instructions!.describe(instruction)
+		this.observedOrigin ??= timing.starts[0]
+		this.observedFill ??= timing.starts[this.model!.writeStage] - timing.starts[0]
+		const origin = this.observedOrigin
+		const cycles = timing.starts.map((start) => start - origin + 1)
+		const durations = [...timing.durations]
+		const completed = timing.completed - origin
+		const hold = this.timing!.hold
+		const stalls = Math.max(0, cycles[hold + 1] - cycles[hold] - durations[hold])
+		const flushed = this.pendingFlush
+		const stats = this.statsFor(address)
+		stats.executions++
+		stats.stalls += stalls
+		stats.structuralStalls += stalls
+		stats.flushed += flushed
+		this.lastStats = stats
+		this.structuralStalls += stalls
+		this.multiCycleCycles += Math.max(0, durations[durations.length - 1] - 1)
+		this.controlFlushes += timing.discarded
+		this.pendingFlush = timing.discarded
+		this.index++
+		this.lastCycle = Math.max(this.lastCycle, completed)
+		this.rows.push({
+			index: this.index, address: address, op: effects.mnemonic, cycles, durations, completed,
+			stalls, structuralStalls: stalls, cause: stalls > 0 ? 'structural' : null,
+			blockedOn: null, blockedBy: stalls > 0 ? this.index - 1 : null, flushed,
+			predicted: null, mispredicted: false,
+		})
+		if (this.rows.length > this.settings.windowSize) this.rows.shift()
+		this.firstCycle = this.rows[0].cycles[0]
 	}
 
 	/**
@@ -425,9 +508,10 @@ export class PipelineModel implements ExecutionObserver, Replayable {
 		// branch costs anything.  With one, only a wrong guess does.
 		const stats = this.lastStats
 		if (stats) stats.branches += 1
+		if (this.observedTiming) return
 
 		if (this.settings.prediction === 'none') {
-			if (taken) this.redirect(penalty)
+			if (taken) this.redirect(penalty, row?.cycles, row?.durations)
 			if (row) row.mispredicted = taken
 			if (stats && taken) stats.mispredictions += 1
 			return
@@ -438,7 +522,7 @@ export class PipelineModel implements ExecutionObserver, Replayable {
 		if (predicted !== taken) {
 			this.mispredictions += 1
 			if (stats) stats.mispredictions += 1
-			this.redirect(penalty)
+			this.redirect(penalty, row?.cycles, row?.durations)
 		}
 		if (row) {
 			row.predicted = predicted
@@ -452,7 +536,7 @@ export class PipelineModel implements ExecutionObserver, Replayable {
 		const scheme = this.settings.prediction
 		if (scheme === 'taken') return true
 		if (scheme === 'not-taken' || scheme === 'none') return false
-		const state = this.predictor.get(address >>> 0) ?? 0
+		const state = this.predictor.get(address) ?? 0
 		return scheme === 'two-bit' ? state >= 2 : state >= 1
 	}
 
@@ -461,8 +545,8 @@ export class PipelineModel implements ExecutionObserver, Replayable {
 		const scheme = this.settings.prediction
 		if (scheme !== 'one-bit' && scheme !== 'two-bit') return
 		const top = scheme === 'two-bit' ? 3 : 1
-		const state = this.predictor.get(address >>> 0) ?? 0
-		this.predictor.set(address >>> 0, Math.max(0, Math.min(top, state + (taken ? 1 : -1))))
+		const state = this.predictor.get(address) ?? 0
+		this.predictor.set(address, Math.max(0, Math.min(top, state + (taken ? 1 : -1))))
 	}
 
 	/**
@@ -470,16 +554,17 @@ export class PipelineModel implements ExecutionObserver, Replayable {
 	 * which are annulled.  Delay slots are ones the machine runs anyway, so
 	 * they cost nothing.
 	 */
-	private redirect(penalty: number) {
+	private redirect(penalty: number, cycles?: readonly number[], durations?: readonly number[]) {
 		const cost = Math.max(0, penalty - (this.delaySlots ? this.timing!.delaySlots : 0))
 		this.pendingFlush = cost
+		if (cycles) this.pendingFetch = cycles[penalty] + (durations?.[penalty] ?? 1) - (this.delaySlots ? this.timing!.delaySlots : 0)
 		this.controlFlushes += cost
 	}
 
 	/** The most recent still-relevant instruction writing `register`. */
 	private producerOf(register: number): InFlight | null {
 		for (let i = this.recent.length - 1; i >= 0; i--) {
-			if (this.recent[i].writes === register) return this.recent[i]
+			if (this.recent[i].writes.includes(register)) return this.recent[i]
 		}
 		return null
 	}
@@ -493,10 +578,12 @@ export class PipelineModel implements ExecutionObserver, Replayable {
 			instructions: this.index,
 			cycles,
 			cpi: this.index === 0 ? 0 : cycles / this.index,
-			steadyStateCpi: this.index === 0 ? 0 : (cycles - fill) / this.index,
+			steadyStateCpi: this.index === 0 ? 0 : (cycles - (this.observedFill ?? fill)) / this.index,
 			idealCycles: this.index === 0 ? 0 : this.index + fill,
 			dataStalls: this.dataStalls,
 			loadUseStalls: this.loadUseStalls,
+			structuralStalls: this.structuralStalls,
+			multiCycleCycles: this.multiCycleCycles,
 			controlFlushes: this.controlFlushes,
 			predictions: this.predictions,
 			mispredictions: this.mispredictions,

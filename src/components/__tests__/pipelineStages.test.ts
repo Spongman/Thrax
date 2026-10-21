@@ -117,6 +117,6 @@ describe('hazard report', () => {
 			addi $t0, $zero, 1
 			addi $t1, $zero, 2
 		`)
-		expect(hazardCounts(rows.slice(0, 2))).toEqual({ data: 0, 'load-use': 0, control: 0 })
+		expect(hazardCounts(rows.slice(0, 2))).toEqual({ data: 0, 'load-use': 0, control: 0, structural: 0 })
 	})
 })

@@ -334,6 +334,32 @@
 .pipeline-hazard-data { color: var(--data-number) }
 .pipeline-hazard-load-use { color: var(--warning) }
 .pipeline-hazard-control { color: var(--danger-text) }
+.pipeline-hazard-structural { color: var(--warning) }
+
+.pipeline-cycle-pages {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 6px;
+	padding: 6px 8px;
+	font-size: 11px;
+	color: var(--text-secondary);
+}
+
+.pipeline-cycle-pages button {
+	font: inherit;
+	color: var(--text-primary);
+	background: var(--surface-input);
+	border: 1px solid var(--border);
+	border-radius: 3px;
+	padding: 3px 6px;
+	cursor: pointer;
+}
+
+.pipeline-cycle-pages button:disabled {
+	opacity: 0.5;
+	cursor: default;
+}
 
 /* Names a group of bars, where a panel shows more than one breakdown. */
 .tool-section-title {

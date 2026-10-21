@@ -1,4 +1,4 @@
-import { formatWord } from '../core/format'
+import { formatAddress, parseAddress } from '../core/format'
 import { colorForCount } from '../tools/memoryReference'
 import type { MemoryReferenceSettings, MemoryReferenceSnapshot } from '../tools/memoryReference'
 import PanelGroup from './PanelGroup'
@@ -24,15 +24,15 @@ function MemoryReferenceView({ memoryReference, settings, onChange }: Props) {
 					Base address
 					<input
 						className="memory-reference-address"
-						value={formatWord(settings.baseAddress)}
+						value={formatAddress(settings.baseAddress)}
 						onChange={(event) => {
-							const parsed = Number.parseInt(event.target.value.replace(/^0x/i, ''), 16)
-							if (!Number.isNaN(parsed)) onChange({ ...settings, baseAddress: parsed >>> 0 })
+							const parsed = parseAddress(event.target.value)
+							if (parsed !== null) onChange({ ...settings, baseAddress: parsed })
 						}}
 					/>
 				</label>
 				<label>
-					Words / unit
+					Words / unit ({memoryReference.wordBytes} B)
 					<select value={settings.wordsPerUnit} onChange={(event) => onChange({ ...settings, wordsPerUnit: Number(event.target.value) })}>
 						{WORDS_PER_UNIT.map((value) => <option key={value} value={value}>{value}</option>)}
 					</select>
@@ -90,7 +90,7 @@ function MemoryReferenceView({ memoryReference, settings, onChange }: Props) {
 							key={index}
 							className="memory-reference-cell"
 							style={{ background: colorForCount(count, settings.colorRamp) }}
-							title={`${formatWord(settings.baseAddress + index * settings.wordsPerUnit * 4)}: ${count}`}
+							title={`${formatAddress(settings.baseAddress + index * settings.wordsPerUnit * memoryReference.wordBytes)}: ${count}`}
 						/>
 					))}
 				</div>

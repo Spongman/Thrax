@@ -1,3 +1,4 @@
+import { isAddress } from '../core/format'
 /**
  * Memory reference visualization: a grid heat map of memory addresses.
  *
@@ -14,6 +15,7 @@
 import type { ExecutionObserver, MachineConfig } from '../core/observer'
 import { Replay, type Replayable } from './replay'
 import { StepLog } from './stepLog'
+import { addressUnit } from './addressUnit'
 
 /** Low end of a reference-count range, and the colour shown for it. */
 export interface ColorStop {
@@ -58,6 +60,7 @@ export const DEFAULT_MEMORY_REFERENCE_SETTINGS: MemoryReferenceSettings = {
 }
 
 export interface MemoryReferenceSnapshot {
+	wordBytes: number
 	settings: MemoryReferenceSettings
 	rows: number
 	columns: number
@@ -68,7 +71,6 @@ export interface MemoryReferenceSnapshot {
 }
 
 const isCount = (value: unknown) => typeof value === 'number' && Number.isInteger(value) && value > 0
-const isAddress = (value: unknown) => typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 0xffffffff
 const isHexColor = (value: unknown) => typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value)
 
 function isColorStop(value: unknown): value is ColorStop {
@@ -108,6 +110,7 @@ export function colorForCount(count: number, colorRamp: ColorStop[]): string {
 }
 
 export class MemoryReferenceVisualizer implements ExecutionObserver, Replayable {
+	private wordBytes: number
 	private settings: MemoryReferenceSettings
 	private counts: number[] = []
 	private max = 0
@@ -134,7 +137,11 @@ export class MemoryReferenceVisualizer implements ExecutionObserver, Replayable 
 	}
 
 	onConfigure(machine: MachineConfig) {
+		const unit = addressUnit(machine.addressing?.memoryWordBytes ?? 1)
+		const changed = unit !== this.wordBytes
+		this.wordBytes = unit
 		this.replay.configure(machine)
+		if (changed) this.replay.rework()
 	}
 
 	replayStep(_address: number, _decoded: unknown, instructionCount: number) {
@@ -143,7 +150,8 @@ export class MemoryReferenceVisualizer implements ExecutionObserver, Replayable 
 		}
 	}
 
-	constructor(settings: MemoryReferenceSettings = DEFAULT_MEMORY_REFERENCE_SETTINGS) {
+	constructor(settings: MemoryReferenceSettings = DEFAULT_MEMORY_REFERENCE_SETTINGS, wordBytes = 1) {
+		this.wordBytes = addressUnit(wordBytes)
 		this.settings = settings
 		this.configure(settings)
 	}
@@ -204,10 +212,10 @@ export class MemoryReferenceVisualizer implements ExecutionObserver, Replayable 
 	 */
 	private indexFor(address: number): number {
 		const { baseAddress, wordsPerUnit, rows, columns } = this.settings
-		const diff = (address >>> 0) - (baseAddress >>> 0)
+		const diff = address - baseAddress
 		if (diff < 0) return -1
 		// Two truncating integer divisions: bytes to words, then words to units.
-		const wordOffset = Math.floor(diff / 4)
+		const wordOffset = Math.floor(diff / this.wordBytes)
 		const unit = Math.floor(wordOffset / wordsPerUnit)
 		const row = Math.floor(unit / columns)
 		const col = unit % columns
@@ -218,6 +226,7 @@ export class MemoryReferenceVisualizer implements ExecutionObserver, Replayable 
 	snapshot(): MemoryReferenceSnapshot {
 		this.replay.settle()
 		return {
+			wordBytes: this.wordBytes,
 			settings: this.settings,
 			rows: this.settings.rows,
 			columns: this.settings.columns,

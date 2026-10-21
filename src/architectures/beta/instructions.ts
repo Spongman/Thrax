@@ -50,7 +50,7 @@ function infoOf(word: number): InstructionInfo {
 		category: categoryOf(info.flags),
 		encoding: info.format,
 		reads,
-		writes: info.destination,
+		writes: info.destination < 0 ? [] : [info.destination],
 		isLoad: (info.flags & INSN_LOAD) !== 0,
 		isBranch: (info.flags & INSN_BRANCH) !== 0,
 		isJump: (info.flags & INSN_JUMP) !== 0,

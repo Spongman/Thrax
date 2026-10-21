@@ -26,7 +26,7 @@ export function words(source: string): number[] {
 
 /** What a tool is configured with on a MIPS machine: how to read its instructions, and anything else given. */
 export function toolMachine(extra: Partial<MachineConfig> = {}): MachineConfig {
-	return { delayedBranching: false, instructions: mipsInstructionSet, ...extra }
+	return { addressing: { instructionBytes: 4, memoryWordBytes: 4 }, delayedBranching: false, instructions: mipsInstructionSet, ...extra }
 }
 
 export function build(source: string): MipsSimulator {

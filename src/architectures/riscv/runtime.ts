@@ -37,7 +37,7 @@ export const instructionSet: InstructionSet = {
 						? [d.rs1]
 						: []
 				).filter((r) => r !== 0),
-				writes: d.format === 'S' || branch || ['ecall', 'ebreak', 'fence'].includes(d.name) || d.rd === 0 ? -1 : d.rd,
+				writes: [d.format === 'S' || branch || ['ecall', 'ebreak', 'fence'].includes(d.name) || d.rd === 0 ? -1 : d.rd].filter(r => r >= 0),
 				isLoad: load,
 				isBranch: branch,
 				isJump: jump

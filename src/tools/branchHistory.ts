@@ -10,6 +10,7 @@
 import type { ExecutionObserver, MachineConfig } from '../core/observer'
 import { Replay, type Replayable } from './replay'
 import { StepLog } from './stepLog'
+import { addressUnit } from './addressUnit'
 
 export interface BranchHistorySettings {
 	/** Entries in the table; the branch address indexes it modulo this. */
@@ -38,6 +39,7 @@ export interface BranchHistoryEntry {
 }
 
 export interface BranchHistorySnapshot {
+	addressUnitBytes: number
 	settings: BranchHistorySettings
 	predictions: number
 	correct: number
@@ -53,6 +55,7 @@ interface Counter {
 }
 
 export class BranchHistoryTable implements ExecutionObserver, Replayable {
+	private addressUnitBytes: number
 	private settings: BranchHistorySettings
 	private counters: Counter[] = []
 	private predictions = 0
@@ -79,7 +82,11 @@ export class BranchHistoryTable implements ExecutionObserver, Replayable {
 	}
 
 	onConfigure(machine: MachineConfig) {
+		const unit = addressUnit(machine.addressing?.instructionBytes ?? 1)
+		const changed = unit !== this.addressUnitBytes
+		this.addressUnitBytes = unit
 		this.replay.configure(machine)
+		if (changed) this.replay.rework()
 	}
 
 	replayStep(address: number, _decoded: unknown, instructionCount: number) {
@@ -89,7 +96,8 @@ export class BranchHistoryTable implements ExecutionObserver, Replayable {
 		}
 	}
 
-	constructor(settings: BranchHistorySettings = DEFAULT_BHT_SETTINGS) {
+	constructor(settings: BranchHistorySettings = DEFAULT_BHT_SETTINGS, unitBytes = 1) {
+		this.addressUnitBytes = addressUnit(unitBytes)
 		this.settings = settings
 		this.configure(settings)
 	}
@@ -136,7 +144,7 @@ export class BranchHistoryTable implements ExecutionObserver, Replayable {
 		const counter = this.counters[this.indexOf(address)]
 		const predicted = this.predictsTaken(counter.state)
 
-		counter.addresses.add(address >>> 0)
+		counter.addresses.add(address)
 		counter.predictions += 1
 		this.predictions += 1
 		if (predicted === taken) {
@@ -147,9 +155,9 @@ export class BranchHistoryTable implements ExecutionObserver, Replayable {
 		counter.state = this.nextState(counter.state, taken)
 	}
 
-	/** The table is indexed by the branch's own word address. */
+	/** The machine selects which instruction alignment bits the table ignores. */
 	private indexOf(address: number): number {
-		return ((address >>> 2) % this.settings.entryCount + this.settings.entryCount) % this.settings.entryCount
+		return (Math.floor(address / this.addressUnitBytes) % this.settings.entryCount + this.settings.entryCount) % this.settings.entryCount
 	}
 
 	private predictsTaken(state: number): boolean {
@@ -165,6 +173,7 @@ export class BranchHistoryTable implements ExecutionObserver, Replayable {
 	snapshot(): BranchHistorySnapshot {
 		this.replay.settle()
 		return {
+			addressUnitBytes: this.addressUnitBytes,
 			settings: this.settings,
 			predictions: this.predictions,
 			correct: this.correct,

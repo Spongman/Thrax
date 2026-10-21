@@ -46,13 +46,13 @@ export function instructionSetFor(cpu: M68kCpu): InstructionSet {
 				category: branch ? 2 : jump ? 1 : load || store ? 3 : d.name === 'trap' || d.name === 'bkpt' ? 5 : 0,
 				encoding: 0,
 				reads: [...reads],
-				writes: readOnly
+				writes: [readOnly
 					? -1
 					: d.destination && d.destination.mode < 2
 						? d.destination.reg + (d.destination.mode === 1 ? 8 : 0)
 						: d.reg !== undefined && !['cmp', 'cmpa'].includes(d.name)
 							? d.reg
-							: -1,
+							: -1].filter(r => r >= 0),
 				isLoad: load,
 				isBranch: branch,
 				isJump: jump

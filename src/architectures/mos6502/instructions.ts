@@ -61,7 +61,7 @@ function categoryOf(insn: number): number {
 
 function infoOf(opcode: number, model: CpuModel = NMOS_MODEL): InstructionInfo {
 	const insn = model.instructions[opcode]
-	if (insn < 0) return { mnemonic: 'ILLEGAL', category: OTHER, encoding: 0, reads: [], writes: -1, isLoad: false, isBranch: false, isJump: false }
+	if (insn < 0) return { mnemonic: 'ILLEGAL', category: OTHER, encoding: 0, reads: [], writes: [], isLoad: false, isBranch: false, isJump: false }
 	const mode = model.modes[opcode]
 	const reads = new Set(READS.get(insn) ?? [])
 	if (mode === ZPX || mode === ABX || mode === IZX || mode === AIX) reads.add(REG_X)
@@ -72,7 +72,7 @@ function infoOf(opcode: number, model: CpuModel = NMOS_MODEL): InstructionInfo {
 		category: categoryOf(insn),
 		encoding: mode,
 		reads: [...reads],
-		writes: mode === ACC ? REG_A : WRITES.get(insn) ?? -1,
+		writes: [mode === ACC ? REG_A : WRITES.get(insn) ?? -1].filter(r => r >= 0),
 		isLoad: mode !== IMM && (LOADS.has(insn) || (MODIFIES.has(insn) && mode !== ACC) || mode === ZPR),
 		isBranch: BRANCHES.has(insn),
 		isJump: insn === JMP || insn === JSR || insn === RTS || insn === RTI,

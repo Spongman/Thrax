@@ -22,9 +22,9 @@ export interface StagePosition {
 export function stageAt(row: PipelineRow, cycle: number): StagePosition | null {
 	const { cycles } = row
 	const last = cycles.length - 1
-	if (cycle === cycles[last]) return { stage: last, stalled: false }
+	if (cycle >= cycles[last] && cycle < cycles[last] + (row.durations?.[last] ?? 1)) return { stage: last, stalled: false }
 	for (let stage = last - 1; stage >= 0; stage--) {
-		if (cycle >= cycles[stage] && cycle < cycles[stage + 1]) return { stage, stalled: cycle > cycles[stage] }
+		if (cycle >= cycles[stage] && cycle < cycles[stage + 1]) return { stage, stalled: cycle >= cycles[stage] + (row.durations?.[stage] ?? 1) }
 	}
 	return null
 }
@@ -47,7 +47,7 @@ export function stageOccupants(rows: readonly PipelineRow[], cycle: number, stag
 	return occupants
 }
 
-export type HazardKind = 'data' | 'load-use' | 'control'
+export type HazardKind = 'data' | 'load-use' | 'control' | 'structural'
 
 export interface Hazard {
 	kind: HazardKind
@@ -68,10 +68,12 @@ export function hazardsOf(rows: readonly PipelineRow[], at: number): Hazard[] {
 	const row = rows[at]
 	if (!row) return []
 	const hazards: Hazard[] = []
-	if (row.stalls > 0) {
+	const structural = row.structuralStalls ?? 0
+	if (structural > 0) hazards.push({ kind: 'structural', cycles: structural, register: null, producer: rows[at - 1] ?? null })
+	if (row.stalls > structural) {
 		hazards.push({
 			kind: row.cause === 'load-use' ? 'load-use' : 'data',
-			cycles: row.stalls,
+			cycles: row.stalls - structural,
 			register: row.blockedOn,
 			producer: rows.find((candidate) => candidate.index === row.blockedBy) ?? null,
 		})
@@ -84,7 +86,7 @@ export function hazardsOf(rows: readonly PipelineRow[], at: number): Hazard[] {
 
 /** How many of each hazard the shown rows carry. */
 export function hazardCounts(rows: readonly PipelineRow[]): Record<HazardKind, number> {
-	const counts: Record<HazardKind, number> = { data: 0, 'load-use': 0, control: 0 }
+	const counts: Record<HazardKind, number> = { data: 0, 'load-use': 0, control: 0, structural: 0 }
 	for (let index = 0; index < rows.length; index++) {
 		for (const hazard of hazardsOf(rows, index)) counts[hazard.kind] += 1
 	}
@@ -96,6 +98,7 @@ export const registerName = (register: number, names: readonly string[]) => name
 /** One line of the hazard report. */
 export function describeHazard(hazard: Hazard, names: readonly string[]): string {
 	if (hazard.kind === 'control') return 'Control: the branch or jump before it redirected the front end'
+	if (hazard.kind === 'structural') return 'Resource: an earlier instruction still occupies the next stage'
 	const register = hazard.register === null ? 'an earlier result' : registerName(hazard.register, names)
 	return hazard.kind === 'load-use'
 		? `Load-use: waiting on ${register}, which a load has not yet returned`

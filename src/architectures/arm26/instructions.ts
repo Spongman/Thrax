@@ -44,7 +44,7 @@ function infoOf(word: number): InstructionInfo {
 		category: categoryOf(flags),
 		encoding: format,
 		reads: registersOf(reads),
-		writes: written.length ? written[written.length - 1] : -1,
+		writes: written,
 		isLoad: (flags & A32_LOAD) !== 0,
 		isBranch: (flags & A32_BRANCH) !== 0,
 		isJump: (flags & A32_JUMP) !== 0,
