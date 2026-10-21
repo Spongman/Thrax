@@ -1,13 +1,13 @@
 /**
- * Hexadecimal formatting.
+ * Hexadecimal register and address formatting.
  *
- * One spelling of a 32-bit value everywhere it is shown, so the memory view,
- * the disassembly gutter, and the tools cannot drift apart.  The HexText
+ * Register words wrap at 32 bits; addresses retain every safe integer bit.
+ * Views and tools use separate formatters so address navigation cannot wrap.  The HexText
  * export is deliberately not built on this: that is a file format with its own
  * lowercase rule, not something on screen.
  */
 
-/** `0x0040000C`: the way this workspace writes a word or an address. */
+/** `0x0040000C`: the way this workspace writes a 32-bit word. */
 export function formatWord(value: number): string {
 	return `0x${(value >>> 0).toString(16).toUpperCase().padStart(8, '0')}`
 }
@@ -46,4 +46,25 @@ export function parseWord(text: string): number | null {
 	const sign = match[1] ? -1 : 1
 	const magnitude = match[2] !== undefined ? Number.parseInt(match[2], 16) : Number.parseInt(match[3], 10)
 	return sign * magnitude
+}
+
+/** Workbench addresses are exact, nonnegative JS integers. Registers wider than
+ * 32 bits remain bigint; an address beyond this range cannot navigate the UI. */
+export function isAddress(value: unknown): value is number {
+	return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+}
+
+export function formatAddress(value: number): string {
+	return isAddress(value) ? `0x${value.toString(16).toUpperCase().padStart(8, '0')}` : '—'
+}
+
+export function parseAddress(text: string): number | null {
+	const value = parseWord(text)
+	return isAddress(value) ? value : null
+}
+
+/** Signed number registers represent 32-bit bit patterns, as in RegisterValue. */
+export function registerAddress(value: number | bigint): number | null {
+	if (typeof value === 'bigint') return value >= 0n && value <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(value) : null
+	return isAddress(value) ? value : Number.isInteger(value) && value >= -0x80000000 && value < 0 ? value >>> 0 : null
 }

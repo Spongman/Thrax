@@ -50,6 +50,12 @@ export interface Example {
 	name: string
 	description: string
 	code: string
+	/** Shared or contributed tool panel ids to open and activate when loaded. */
+	tools?: readonly string[]
+	/** Optional colours for a byte-indexed Bitmap Display. */
+	bitmapPalette?: readonly number[]
+	/** Optional framebuffer format override for this example. */
+	bitmap?: BitmapFormat
 }
 
 /* ---------------------------------------------------------------- registers */
@@ -96,6 +102,9 @@ export type Registers = Record<string, RegisterValue>
  * Debugger reads of memory.  Never faults, never reaches a device, never tells
  * an observer: inspecting the machine must not change it.
  */
+/** Addresses throughout the workbench are nonnegative safe integers (no implicit
+ * 32-bit coercion). Wider register values remain bigint; native memory maps
+ * decide which exact addresses are supported. */
 export interface MemoryInspector {
 	readonly wordBytes: number
 	readonly littleEndian: boolean
@@ -122,8 +131,14 @@ export interface MemorySection {
 	code?: boolean
 }
 
+/** A framebuffer layout, selected by an environment or a loaded example. */
+export type BitmapFormat =
+	| { readonly kind: 'rgb32', readonly littleEndian: boolean }
+	| { readonly kind: 'indexed8', readonly palette: readonly number[], readonly indexMask?: number }
+
 /** Layout facts the panels need, under the settings in force. */
 export interface MachineProfile {
+	/** Framebuffer layout selected by the machine environment. */
 	/** Registers as a reset leaves them, before any program loads. */
 	readonly resetRegisters: Registers
 	readonly resetPc: number
@@ -227,9 +242,25 @@ export interface HistoryRecord {
 	readonly kind: 'instruction' | 'edit'
 }
 
+/** Retention since reset; typed byte totals exclude opaque payload heap. */
+export interface HistoryRetention {
+	readonly entries: number
+	readonly entryLimit: number
+	readonly byteLimit: number
+	readonly liveBufferBytes: number
+	readonly allocatedBufferBytes: number
+	/** Heap size of opaque payloads is not included in typed buffer bytes. */
+	readonly payloadCount: number
+	readonly entryEvictions: number
+	readonly byteEvictions: number
+	readonly oversizedEntries: number
+	readonly lastEviction: 'entry-limit' | 'byte-limit' | 'oversized-entry' | null
+}
+
 /** The machine's history log, oldest first. */
 export interface MachineHistory {
 	readonly length: number
+	readonly retention?: HistoryRetention
 	at(index: number): HistoryRecord | undefined
 	slice(from: number, to: number): HistoryRecord[]
 	indexOfId(id: number): number
@@ -292,10 +323,15 @@ export interface InstructionInfo {
 	readonly category: number
 	/** Index into `InstructionSet.encodings`. */
 	readonly encoding: number
-	/** Integer registers read, by bank index; the hardwired zero is left out. */
+	/** Resources read, indexed by InstructionSet.registerNames. Aliases overlap by
+	 * naming the same resources; flags and other banks may have their own indices.
+	 * Hardwired constants are omitted. Arrays are cached with the decoded form. */
 	readonly reads: readonly number[]
-	/** Integer register written, or -1. */
+	/** All resources written, including writeback and overlapping destinations. */
 	readonly writes: number
+	/** For mixed-result loads, the subset supplied by memory. Other destinations
+	 * (e.g. base writeback) use ALU bypasses. Absent means all writes of a load. */
+	readonly loadWrites?: readonly number[]
 	readonly isLoad: boolean
 	readonly isBranch: boolean
 	readonly isJump: boolean
@@ -309,7 +345,7 @@ export interface InstructionInfo {
 export interface InstructionSet {
 	/** Labels of the encoding classes `InstructionInfo.encoding` indexes. */
 	readonly encodings: readonly string[]
-	/** Names of the integer registers, by index. */
+	/** Names of dependency resources (registers, flags and other banks), by index. */
 	readonly registerNames: readonly string[]
 	describe(instruction: unknown): InstructionInfo
 	/** The instruction a history entry ran, decoded for replay, or null. */
@@ -369,13 +405,30 @@ export interface PipelineResolution extends PipelineOption {
 	stage: number
 }
 
+/** A CPU-supplied schedule in reference-clock ticks, using zero-based boundaries. */
+export interface PipelineExecutionTiming {
+	starts: readonly number[]
+	durations: readonly number[]
+	/** Exclusive completion, including a redirect's refill. */
+	completed: number
+	/** Speculative instructions discarded by this instruction. */
+	discarded: number
+}
+
 /**
  * An in-order, single-issue pipeline as data.  Stage 0 fetches; an instruction
  * waiting for an operand is held in `readStage`, and every stage after that
- * takes one cycle.  A setting naming no option of a list takes its first.
+ * takes one cycle unless stageCycles supplies another occupancy. A setting
+ * naming no option of a list takes its first.
  */
 export interface PipelineModel {
 	stages: readonly PipelineStage[]
+	/** Occupancy in cycles, at least one, of a stage for this executed instruction. */
+	stageCycles?(instruction: unknown, stage: number): number
+	/** Actual timing, where the CPU models its own bus and prefetch pipeline. */
+	executionTiming?(instruction: unknown): PipelineExecutionTiming | undefined
+	/** False for measured hardware timing that cannot be changed by a hypothetical predictor. */
+	prediction?: boolean
 	/** Stage that reads the register file and holds an instruction that stalls. */
 	readStage: number
 	/** Stage at whose end the register file is written. */
@@ -409,7 +462,9 @@ export interface RunControl {
 	stepOver(): Promise<void>
 	stepToReturn(): Promise<void>
 	runTo(address: number): Promise<void>
+	/** Suspend execution so Continue can resume. */
 	pause(): void
+	/** End the run; Continue remains idle until rewind, a PC edit or a fresh program. */
 	stop(): void
 	setProgramCounter(address: number): void
 	configure(options: { speed?: number | null, pacedAddresses?: ReadonlySet<number> | null }): void
@@ -447,10 +502,10 @@ export interface Machine extends RunControl, Disposable {
 	insertByte(address: number, limit: number, value: number): boolean
 	deleteByte(address: number, limit: number): boolean
 	readonly history: MachineHistory
-	/** How many entries stand behind the present. */
+	/** Entries behind the present; later entries remain available for replay. */
 	readonly historyCursor: number
 	readonly historyFormat: HistoryFormatter
-	/** Steps back until the entry with `id` has been undone. */
+	/** Steps back until `id` is next, retaining later entries. Repeated navigation is a no-op. */
 	rewindTo(id: number): boolean
 	/** Called per instruction only while non-empty. */
 	readonly observers: ExecutionObserver[]
@@ -476,6 +531,8 @@ export interface DebugInspection {
 
 /** One token of a line, and what it is worth. */
 export interface TokenDescription {
+	/** Optional instruction manual URL; the shared tooltip renders its link button. */
+	reference?: string
 	start: number
 	length: number
 	/** Markdown, one paragraph per entry. */

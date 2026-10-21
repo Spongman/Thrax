@@ -1,6 +1,6 @@
 import type { SourceLocation } from '../../architectures/contracts'
 import { AssemblyError } from '../diagnostics'
-import type { Diagnostic } from '../types'
+import type { Diagnostic } from '../../architectures/contracts'
 import { ByteEmitter, type AssemblyImage, type MappingKind, type Provenance } from './emitter'
 import { evaluate, type Arithmetic, type EvaluationScope, type Expr } from './expressions'
 import { MacroTable, location, type ExpansionFrame, type MacroDefinition } from './macroEngine'

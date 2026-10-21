@@ -13,10 +13,14 @@ export interface SourceExpansionPolicy<Token> {
 	includeOnce: boolean
 	/** Bounds repeated expansion even for acyclic graphs. Must be a nonnegative safe integer. */
 	maxFileExpansions: number
+	/** Optional dialect depth bound in addition to the expansion count. */
+	maxDepth?: number
 	cycle(source: AssemblySource, chain: readonly string[], token: Token): Error
 	limit(source: AssemblySource, token: Token | undefined): Error
 	/** Separates statements across file boundaries when the dialect requires it. */
 	boundary(source: AssemblySource, root: AssemblySource): readonly Token[]
+	/** Streaming statement visitors can consume ordinary tokens without retaining them. */
+	emit?(token: Token): void
 }
 
 /**
@@ -31,6 +35,7 @@ export function expandSources<Token>(
 	if (!Number.isSafeInteger(policy.maxFileExpansions) || policy.maxFileExpansions < 0) {
 		throw new RangeError('maxFileExpansions must be a nonnegative safe integer')
 	}
+	if (policy.maxDepth !== undefined && (!Number.isSafeInteger(policy.maxDepth) || policy.maxDepth < 0)) throw new RangeError('maxDepth must be a nonnegative safe integer')
 	interface Frame {
 		source: AssemblySource
 		root: AssemblySource
@@ -51,7 +56,7 @@ export function expandSources<Token>(
 			throw policy.cycle(source, [...stack.slice(start).map((frame) => frame.id), id], token!)
 		}
 		if (policy.includeOnce && seen.has(id)) return
-		if (expansions >= policy.maxFileExpansions) throw policy.limit(source, token)
+		if (expansions >= policy.maxFileExpansions || (policy.maxDepth !== undefined && stack.length >= policy.maxDepth)) throw policy.limit(source, token)
 		expansions += 1
 		seen.add(id)
 		active.add(id)
@@ -63,7 +68,10 @@ export function expandSources<Token>(
 		while (stack.length) {
 			const frame = stack[stack.length - 1]
 			if (frame.index === frame.tokens.length) {
-				for (const token of policy.boundary(frame.source, frame.root)) output.push(token)
+				for (const token of policy.boundary(frame.source, frame.root)) {
+					if (policy.emit) policy.emit(token)
+					else output.push(token)
+				}
 				active.delete(frame.id)
 				stack.pop()
 				continue
@@ -71,7 +79,8 @@ export function expandSources<Token>(
 			const token = frame.tokens[frame.index]
 			const include = policy.readInclude(frame.tokens, frame.index)
 			if (!include) {
-				output.push(token)
+				if (policy.emit) policy.emit(token)
+				else output.push(token)
 				frame.index += 1
 				continue
 			}

@@ -23,6 +23,7 @@
 
 import { ENTRY_EFFECT_START, ENTRY_ID, type HistoryBufferLayout } from './historyBuffers'
 import { HistoryRecords } from './historyRecords'
+import type { HistoryRetention } from '../architectures/contracts'
 
 /** Typed bytes a log may hold unless its owner chooses otherwise. */
 export const DEFAULT_HISTORY_BYTES = 256 * 1024 * 1024
@@ -32,6 +33,9 @@ export class HistoryLog {
 	readonly effects: HistoryRecords
 	/** Entries dropped because they could not fit the byte limit on their own. */
 	overflows = 0
+	private entryEvictions = 0
+	private byteEvictions = 0
+	private lastEviction: HistoryRetention['lastEviction'] = null
 	private entryLimit = Number.POSITIVE_INFINITY
 	private bytes = DEFAULT_HISTORY_BYTES
 	/** The open entry's position, or -1. */
@@ -104,6 +108,16 @@ export class HistoryLog {
 		return this.entries.payloadCount + this.effects.payloadCount
 	}
 
+	/** A cold-path snapshot for UI/benchmarks; recording allocates no status objects. */
+	get retention(): HistoryRetention {
+		return {
+			entries: this.length, entryLimit: this.limit, byteLimit: this.byteLimit,
+			liveBufferBytes: this.liveBufferBytes, allocatedBufferBytes: this.allocatedBufferBytes,
+			payloadCount: this.payloadCount, entryEvictions: this.entryEvictions,
+			byteEvictions: this.byteEvictions, oversizedEntries: this.overflows, lastEviction: this.lastEviction,
+		}
+	}
+
 	/**
 	 * Starts an entry; effects pushed until `close` are its. Returns its slot in
 	 * `entries.tail`, where the codec writes its own columns.
@@ -156,6 +170,8 @@ export class HistoryLog {
 	}
 
 	clear() {
+		this.entryEvictions = this.byteEvictions = this.overflows = 0
+		this.lastEviction = null
 		this.open = -1
 		this.entries.clear()
 		this.effects.clear()
@@ -206,6 +222,8 @@ export class HistoryLog {
 		for (;;) {
 			const boundary = (Math.floor(this.entries.first / capacity) + 1) * capacity
 			if (this.entries.end - boundary < this.entryLimit) break
+			this.entryEvictions += boundary - this.entries.first
+			this.lastEviction = 'entry-limit'
 			this.dropEntriesBefore(boundary)
 		}
 	}
@@ -220,13 +238,17 @@ export class HistoryLog {
 				this.overflow()
 				return
 			}
-			this.dropEntriesBefore(Math.min(keep, (Math.floor(first / capacity) + 1) * capacity))
+			const boundary = Math.min(keep, (Math.floor(first / capacity) + 1) * capacity)
+			this.byteEvictions += boundary - first
+			this.lastEviction = 'byte-limit'
+			this.dropEntriesBefore(boundary)
 		}
 	}
 
 	/** The open entry cannot be held whole: the log empties and refuses the rest of it. */
 	private overflow() {
 		this.overflows += 1
+		this.lastEviction = 'oversized-entry'
 		this.open = -1
 		this.entries.dropBefore(this.entries.end)
 		this.effects.dropBefore(this.effects.end)

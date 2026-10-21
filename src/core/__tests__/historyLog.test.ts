@@ -104,6 +104,7 @@ describe('the shared history engine on a synthetic schema', () => {
 			expect(log.length).toBeGreaterThanOrEqual(Math.min(5, id))
 			expect(log.length).toBeLessThan(5 + CAPACITY)
 		}
+		expect(log.retention).toMatchObject({ entries: log.length, entryLimit: 5, entryEvictions: 40 - log.length, byteEvictions: 0, lastEviction: 'entry-limit' })
 		expect(log.first % CAPACITY).toBe(0)
 		expect(log.effects.first).toBe(log.effectStart(0))
 		for (let index = 0; index < log.length; index++) verify(log, index)
@@ -144,6 +145,7 @@ describe('the shared history engine on a synthetic schema', () => {
 			expect(record(log, id, id % 9)).toBe(true)
 			expect(log.liveBufferBytes).toBeLessThanOrEqual(log.byteLimit)
 		}
+		expect(log.retention).toMatchObject({ byteEvictions: 200 - log.length, entryEvictions: 0, lastEviction: 'byte-limit' })
 		expect(log.overflows).toBe(0)
 		expect(log.length).toBeLessThan(200)
 		expect(log.effects.first).toBe(log.effectStart(0))
@@ -155,6 +157,7 @@ describe('the shared history engine on a synthetic schema', () => {
 		log.byteLimit = 2 * CAPACITY * (31 + 23)
 		record(log, 1, 1)
 		expect(record(log, 2, 100)).toBe(false)
+		expect(log.retention).toMatchObject({ oversizedEntries: 1, lastEviction: 'oversized-entry' })
 		expect(log.overflows).toBe(1)
 		expect(log.length).toBe(0)
 		expect(log.openEntry).toBe(-1)
@@ -165,6 +168,20 @@ describe('the shared history engine on a synthetic schema', () => {
 		expect(log.length).toBe(1)
 		expect(log.first).toBeGreaterThan(1)
 		verify(log, 0)
+	})
+
+	it('reports typed allocation separately from payload heap and resets eviction counters', () => {
+		const log = new HistoryLog(layout, CAPACITY)
+		log.limit = 3
+		for (let id = 1; id <= 20; id++) record(log, id, 1)
+		expect(log.retention.liveBufferBytes).toBe(log.liveBufferBytes)
+		expect(log.retention.allocatedBufferBytes).toBeGreaterThanOrEqual(log.liveBufferBytes)
+		expect(log.retention.payloadCount).toBe(log.length)
+		const evicted = log.retention.entryEvictions
+		log.truncate(1)
+		expect(log.retention.entryEvictions).toBe(evicted)
+		log.clear()
+		expect(log.retention).toMatchObject({ entries: 0, entryEvictions: 0, byteEvictions: 0, oversizedEntries: 0, lastEviction: null })
 	})
 
 	it('needs no columns beyond the base', () => {

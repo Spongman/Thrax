@@ -30,15 +30,10 @@ export interface DevicePort {
 	read(address: number): number
 	/** Queues a word, applied at the start of the next instruction. */
 	write(address: number, value: number): void
-	/**
-	 * Asks for an external interrupt, taken in place of the next instruction.
-	 * `cause` is shifted two places into the cause register, so a device names
-	 * itself by the pending bit it lands on rather than by an exception code.
-	 *
-	 * Refused while the machine is already in a handler, since the interrupt
-	 * would overwrite the return address the handler has yet to use.  A refused
-	 * request is dropped rather than held.
-	 */
+	/** Requests an architecture/environment-defined interrupt line. Absent if unsupported.
+	 * Acceptance, priority, masking and pending behavior belong to the backend. */
+	requestInterrupt?(line: number): boolean
+	/** Legacy interrupt entry point until the native device adapters migrate. */
 	interrupt(cause: number): boolean
 }
 
@@ -59,6 +54,14 @@ export interface InstructionHistory {
 
 /** What a tool needs to know about the machine, as opposed to the run on it. */
 export interface MachineConfig {
+	/** Explicit environment units for the shared address-based tools. Unconfigured
+	 * standalone tools use bytes; neither unit is inferred from register width. */
+	addressing?: {
+		/** Minimum instruction address alignment, including variable-length encodings. */
+		instructionBytes: number
+		/** The environment’s memory-tool word unit, independent of register width. */
+		memoryWordBytes: number
+	}
 	/** Delayed branching: the instruction after a branch runs first. */
 	delayedBranching: boolean
 	/**
@@ -119,4 +122,9 @@ export interface ExecutionObserver {
 	 * It describes the hardware rather than the run, so a reset does not undo it.
 	 */
 	onConfigure?(machine: MachineConfig): void
+}
+
+/** Publish one restored position after a replay/edit/seek batch. */
+export function notifyHistorySeek(observers: readonly ExecutionObserver[], instructionCount: number): void {
+	for (const observer of observers) observer.onSeek?.(instructionCount)
 }

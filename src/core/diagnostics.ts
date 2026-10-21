@@ -4,7 +4,7 @@
  * reads alike whether the lexer, the parser or the assembler raised it.
  */
 
-import type { Diagnostic, MipsInstruction, TokenData } from './types'
+import type { Diagnostic } from '../architectures/contracts'
 
 /** Where a diagnostic points; a line is enough, a column narrows the marker. */
 export interface SourcePosition {
@@ -38,7 +38,7 @@ export function formatDiagnostic(diagnostic: Diagnostic): string {
 }
 
 /** Position of `token`, spanning the text it was lexed from. */
-export function at(token: TokenData): SourcePosition {
+export function at(token: { file?: string; line: number; column: number; value: string }): SourcePosition {
 	return {
 		file: token.file || undefined,
 		line: token.line,
@@ -48,7 +48,7 @@ export function at(token: TokenData): SourcePosition {
 }
 
 /** Position of an instruction, which knows its line and its mnemonic's column. */
-export function atInstruction(instruction: MipsInstruction | null | undefined): SourcePosition {
+export function atInstruction(instruction: { sourceFile?: string; sourceLine: number; sourceColumn?: number; name: string } | null | undefined): SourcePosition {
 	if (!instruction) return {}
 	return {
 		file: instruction.sourceFile || undefined,

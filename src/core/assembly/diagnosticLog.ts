@@ -1,5 +1,5 @@
 import { AssemblyError } from '../diagnostics'
-import type { Diagnostic } from '../types'
+import type { Diagnostic } from '../../architectures/contracts'
 
 interface Entry { diagnostic: Diagnostic; phase: number; dedupe: boolean }
 

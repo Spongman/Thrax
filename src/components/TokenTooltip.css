@@ -1,0 +1,42 @@
+/* Shared by Monaco's Markdown hover and the disassembly tooltip. */
+.monaco-hover .hover-contents:has(a[title="Open instruction reference"]) {
+	position: relative;
+	padding-right: 30px;
+}
+
+.monaco-hover .hover-contents p:has(> a[title="Open instruction reference"]) {
+	margin: 0;
+	height: 0;
+}
+
+.monaco-hover .hover-contents a[title="Open instruction reference"] {
+	position: absolute;
+	top: 0;
+	right: 0;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 24px;
+	height: 24px;
+	border-radius: 3px;
+	font-size: 18px;
+	text-decoration: none;
+}
+
+.monaco-hover .hover-contents a[title="Open instruction reference"]:hover {
+	background: var(--vscode-toolbar-hoverBackground, #8883);
+}
+
+.monaco-hover .hover-contents a[title="Open instruction reference"]:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder, currentColor);
+	outline-offset: -2px;
+}
+
+/* Monaco places its copy button alongside the reference action. */
+.monaco-hover .hover-row-with-copy .hover-contents:has(a[title="Open instruction reference"]) {
+	padding-right: 54px;
+}
+
+.monaco-hover .hover-row-with-copy .hover-contents a[title="Open instruction reference"] {
+	right: 24px;
+}
