@@ -10,7 +10,8 @@
  */
 
 import { HistoryBufferLayout, type HistoryBufferSchema } from '../../core/historyBuffers'
-import { HistoryLog } from '../../core/historyLog'
+import { ReversibleHistory } from '../../core/reversibleHistory'
+import { HistoryText } from '../../core/historyCursor'
 import type { Mos6502CallStack, Mos6502CallStackSink } from './callStack'
 import { FAULT_NONE, type Mos6502Cpu, type Mos6502EffectSink } from './cpu'
 import type { Mos6502Device } from './device'
@@ -24,13 +25,14 @@ const column = (name: string, type: 'u8' | 'i32' | 'u32' | 'f64') => Object.free
  */
 export const mos6502HistorySchema: HistoryBufferSchema = Object.freeze({
 	entry: Object.freeze([
-		column('pc', 'u32'), column('opcode', 'i32'), column('kind', 'u8'), column('count', 'f64'), column('cycles', 'f64'),
+		column('pc', 'u32'), column('opcode', 'i32'), column('kind', 'u8'), column('count', 'f64'), column('controlCount', 'f64'), column('cycles', 'f64'),
 		column('registers', 'u32'), column('p', 'u8'), column('timer', 'i32'),
+		column('controlPc', 'u32'), column('controlRegisters', 'u32'), column('controlP', 'u8'),
 	]),
 	effect: Object.freeze([column('kind', 'u8'), column('a', 'i32'), column('b', 'i32')]),
 })
 
-/** Effect kinds; `b` is always the old value. `a` is the address. */
+/** Effect kinds; `b` holds the value exchanged with live state when navigating. `a` is the address. */
 export const EFFECT_MEMORY = 0
 /** Console output length. */
 export const EFFECT_OUTPUT = 1
@@ -74,18 +76,22 @@ const PC = layout.column('entry', 'pc', 'u32')
 const OPCODE = layout.column('entry', 'opcode', 'i32')
 const KIND = layout.column('entry', 'kind', 'u8')
 const COUNT = layout.column('entry', 'count', 'f64')
+const CONTROL_COUNT = layout.column('entry', 'controlCount', 'f64')
 const CYCLES = layout.column('entry', 'cycles', 'f64')
 const REGISTERS = layout.column('entry', 'registers', 'u32')
 const P = layout.column('entry', 'p', 'u8')
 const TIMER = layout.column('entry', 'timer', 'i32')
+const CONTROL_PC = layout.column('entry', 'controlPc', 'u32')
+const CONTROL_REGISTERS = layout.column('entry', 'controlRegisters', 'u32')
+const CONTROL_P = layout.column('entry', 'controlP', 'u8')
 const EFFECT_KIND = layout.column('effect', 'kind', 'u8')
 const EFFECT_A = layout.column('effect', 'a', 'i32')
 const EFFECT_B = layout.column('effect', 'b', 'i32')
 
 const packRegisters = (cpu: Mos6502Cpu) => (cpu.a | (cpu.x << 8) | (cpu.y << 16) | (cpu.sp << 24)) >>> 0
 
-export class Mos6502History implements Mos6502EffectSink, Mos6502CallStackSink {
-	private readonly log = new HistoryLog(layout)
+export class Mos6502History extends ReversibleHistory implements Mos6502EffectSink, Mos6502CallStackSink {
+	readonly outputText = new HistoryText()
 	// The open entry's starting state.
 	private start = 0
 	private kind = ENTRY_INSTRUCTION
@@ -108,7 +114,7 @@ export class Mos6502History implements Mos6502EffectSink, Mos6502CallStackSink {
 	private stopped = false
 
 	constructor(private readonly target: Mos6502HistoryTarget, limit = DEFAULT_HISTORY_LIMIT) {
-		this.log.limit = limit
+		super(layout, limit)
 	}
 
 	get limit(): number {
@@ -119,17 +125,9 @@ export class Mos6502History implements Mos6502EffectSink, Mos6502CallStackSink {
 		this.log.limit = value
 	}
 
-	get length(): number {
-		return this.log.length
-	}
-
-	/** Id of the oldest entry held; ids count entries since the program loaded. */
-	get firstId(): number {
-		return this.log.first
-	}
-
 	/** Opens an entry; call before the CPU steps, or before an edit with ENTRY_EDIT. */
 	begin(kind = ENTRY_INSTRUCTION) {
+		this.timeline.branch()
 		const { cpu, device } = this.target
 		this.kind = kind
 		this.log.openEntryWith(this.log.end)
@@ -161,7 +159,7 @@ export class Mos6502History implements Mos6502EffectSink, Mos6502CallStackSink {
 	/** Closes the entry; returns whether the step changed anything and so was kept. */
 	end(): boolean {
 		const { cpu, device } = this.target
-		if (device.output.length !== this.outputLength) this.push(EFFECT_OUTPUT, 0, this.outputLength)
+		if (device.output.length !== this.outputLength) this.push(EFFECT_OUTPUT, device.output.length, this.outputLength)
 		if (device.inputIndex !== this.inputIndex) this.push(EFFECT_INPUT, 0, this.inputIndex)
 		if (device.control !== this.control) this.push(EFFECT_CONTROL, 0, this.control)
 		if (device.period !== this.period) this.push(EFFECT_PERIOD, 0, this.period)
@@ -187,10 +185,14 @@ export class Mos6502History implements Mos6502EffectSink, Mos6502CallStackSink {
 		columns[OPCODE][slot] = this.kind === ENTRY_INTERRUPT ? this.vector : cpu.opcode
 		columns[KIND][slot] = this.kind
 		columns[COUNT][slot] = this.countBefore
+		columns[CONTROL_COUNT][slot] = this.countBefore
 		columns[CYCLES][slot] = this.cyclesBefore
 		columns[REGISTERS][slot] = this.registersBefore
 		columns[P][slot] = this.pBefore
 		columns[TIMER][slot] = this.timerBefore
+		columns[CONTROL_PC][slot] = this.pcBefore
+		columns[CONTROL_REGISTERS][slot] = this.registersBefore
+		columns[CONTROL_P][slot] = this.pBefore
 		log.close()
 		return true
 	}
@@ -230,6 +232,9 @@ export class Mos6502History implements Mos6502EffectSink, Mos6502CallStackSink {
 	}
 
 	/** A X Y SP before entry `index`, a byte each from the low end. */
+	controlRegistersAt(index: number): number { return this.column(index, CONTROL_REGISTERS) }
+	controlPAt(index: number): number { return this.column(index, CONTROL_P) }
+
 	registersAt(index: number): number {
 		return this.column(index, REGISTERS)
 	}
@@ -259,62 +264,42 @@ export class Mos6502History implements Mos6502EffectSink, Mos6502CallStackSink {
 	}
 
 	/** Undoes the last entry; false when none is held. */
-	stepBack(): boolean {
-		if (this.log.length === 0) return false
-		this.rewindTo(this.log.length - 1)
-		return true
-	}
-
-	/** Undoes entry `index` and every later one, then forgets them. */
-	rewindTo(index: number) {
+	protected exchange = (index: number, forward: boolean) => {
 		const log = this.log
-		if (!Number.isInteger(index) || index < 0 || index > log.length) throw new RangeError(`No history entry ${index}`)
-		if (index === log.length) return
-		const target = this.target
-		const { cpu, device, callStack } = target
-		const stop = this.effectStartAt(index)
-		const capacity = log.effects.capacity
-		for (let position = log.effects.end - 1; position >= stop; position--) {
-			const columns = log.effects.block(position).arrays
-			const slot = position % capacity
-			const a = columns[EFFECT_A][slot]
-			const b = columns[EFFECT_B][slot]
+		const { cpu, device, callStack } = this.target
+		const start = log.effectStart(index), count = log.effectCount(index)
+		for (let offset = 0; offset < count; offset++) {
+			const position = start + (forward ? offset : count - offset - 1)
+			const columns = log.effects.block(position).arrays, slot = position % log.effects.capacity
+			const a = columns[EFFECT_A][slot], b = columns[EFFECT_B][slot]
 			switch (columns[EFFECT_KIND][slot]) {
-				case EFFECT_MEMORY: cpu.memory[a] = b; break
-				case EFFECT_OUTPUT: device.output = device.output.slice(0, b); break
-				case EFFECT_INPUT: device.inputIndex = b; break
-				case EFFECT_HALTED: target.halted = b !== 0; break
-				case EFFECT_EXIT: target.exitCode = b; break
-				case EFFECT_FRAME_WORD: callStack.setFrameWord(a, b); break
-				case EFFECT_FRAME_DEPTH: callStack.setDepth(b); break
-				case EFFECT_CONTROL: device.control = b; break
-				case EFFECT_PERIOD: device.period = b; break
-				case EFFECT_TIMER_FLAG: device.timerFlag = b !== 0; break
-				case EFFECT_NMI: target.nmiPending = b !== 0; break
-				case EFFECT_SLEEPING: cpu.sleeping = b !== 0; break
-				case EFFECT_STOPPED: cpu.stopped = b !== 0; break
+				case EFFECT_MEMORY: columns[EFFECT_B][slot] = cpu.memory[a]; cpu.memory[a] = b; break
+				case EFFECT_OUTPUT: columns[EFFECT_B][slot] = device.output.length; columns[EFFECT_A][slot] = b; device.output = this.outputText.exchange(device.output, b); break
+				case EFFECT_INPUT: columns[EFFECT_B][slot] = device.inputIndex; device.inputIndex = b; break
+				case EFFECT_HALTED: columns[EFFECT_B][slot] = +this.target.halted; this.target.halted = b !== 0; break
+				case EFFECT_EXIT: columns[EFFECT_B][slot] = this.target.exitCode; this.target.exitCode = b; break
+				case EFFECT_FRAME_WORD: columns[EFFECT_B][slot] = callStack.frameWordAt(a); callStack.setFrameWord(a, b); break
+				case EFFECT_FRAME_DEPTH: columns[EFFECT_B][slot] = callStack.depth; callStack.setDepth(b); break
+				case EFFECT_CONTROL: columns[EFFECT_B][slot] = device.control; device.control = b; break
+				case EFFECT_PERIOD: columns[EFFECT_B][slot] = device.period; device.period = b; break
+				case EFFECT_TIMER_FLAG: columns[EFFECT_B][slot] = +device.timerFlag; device.timerFlag = b !== 0; break
+				case EFFECT_NMI: columns[EFFECT_B][slot] = +this.target.nmiPending; this.target.nmiPending = b !== 0; break
+				case EFFECT_SLEEPING: columns[EFFECT_B][slot] = +cpu.sleeping; cpu.sleeping = b !== 0; break
+				case EFFECT_STOPPED: columns[EFFECT_B][slot] = +cpu.stopped; cpu.stopped = b !== 0; break
 			}
 		}
-		const registers = this.column(index, REGISTERS)
-		cpu.a = registers & 0xFF
-		cpu.x = (registers >>> 8) & 0xFF
-		cpu.y = (registers >>> 16) & 0xFF
-		cpu.sp = registers >>> 24
-		cpu.p = this.column(index, P)
-		cpu.pc = this.column(index, PC)
-		cpu.cycles = this.column(index, CYCLES)
+		const entrySlot = (log.first + index) % log.entries.capacity
+		const entries = log.entries.block(log.first + index).arrays
+		{ const held = cpu.cycles; cpu.cycles = this.column(index, CYCLES); entries[CYCLES][entrySlot] = held }
+		{ const held = device.timer; device.timer = this.column(index, TIMER); entries[TIMER][entrySlot] = held }
+		const registers = entries[CONTROL_REGISTERS][entrySlot], oldRegisters = packRegisters(cpu)
+		cpu.a = registers & 255; cpu.x = (registers >>> 8) & 255; cpu.y = (registers >>> 16) & 255; cpu.sp = registers >>> 24
+		entries[CONTROL_REGISTERS][entrySlot] = oldRegisters
+		{ const held = cpu.pc; cpu.pc = entries[CONTROL_PC][entrySlot]; entries[CONTROL_PC][entrySlot] = held }
+		{ const held = cpu.p; cpu.p = entries[CONTROL_P][entrySlot]; entries[CONTROL_P][entrySlot] = held }
 		cpu.fault = FAULT_NONE
-		cpu.waiting = false
-		device.timer = this.column(index, TIMER)
-		device.waiting = false
-		device.polled = false
-		target.instructionCount = this.countAt(index)
-		log.truncate(index)
-	}
-
-	/** Forgets everything; the machine is left as it is. */
-	clear() {
-		this.log.clear()
+		cpu.waiting = device.waiting = device.polled = false
+		{ const held = this.target.instructionCount; this.target.instructionCount = entries[CONTROL_COUNT][entrySlot]; entries[CONTROL_COUNT][entrySlot] = held }
 	}
 
 	private push(kind: number, a: number, b: number) {
@@ -326,13 +311,4 @@ export class Mos6502History implements Mos6502EffectSink, Mos6502CallStackSink {
 		columns[EFFECT_B][slot] = b
 	}
 
-	private column(index: number, column: number): number {
-		if (!(index >= 0 && index < this.log.length)) throw new RangeError(`No history entry ${index}`)
-		const position = this.log.first + index
-		return this.log.entries.block(position).arrays[column][position % this.log.entries.capacity]
-	}
-
-	private effect(position: number, column: number): number {
-		return this.log.effects.block(position).arrays[column][position % this.log.effects.capacity]
-	}
 }

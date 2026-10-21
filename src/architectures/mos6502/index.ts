@@ -4,7 +4,10 @@
  * page at $F000.
  */
 
-import type { ArchitectureDefinition, ArchitectureServices, AssembledProgram, Disposable, RegisterBank } from '../contracts'
+import { disposableGroup } from '../../core/disposableScope'
+import { createArchitectureServices } from '../../core/architectureServices'
+
+import type { ArchitectureDefinition, ArchitectureServices, AssembledProgram, RegisterBank } from '../contracts'
 import { assembleMos6502 } from './assembler'
 import { describeMos6502Token } from './editor/dataTips'
 import { MOS6502_LANGUAGE_ID } from './editor/grammar'
@@ -38,66 +41,51 @@ const definition: ArchitectureDefinition<ArchitectureServices<Mos6502Settings>> 
 	settings: MOS6502_SETTINGS,
 	variant: settings => settings.cpuModel === 'w65c02' ? CMOS_VARIANT : NMOS_VARIANT,
 	createServices(): ArchitectureServices<Mos6502Settings> {
-		let machine: Mos6502Runtime | undefined
-		/** The last program that assembled, whose symbols the data tips show. */
-		let latest: Mos6502Assembly | null = null
-		let disposed = false
-		const contributions: Disposable[] = []
-		const check = () => {
-			if (disposed) throw new Error('Architecture services have been disposed')
-		}
-		return {
-			disassembly: {
-				row: (row, next) => disassemblyFor(latest?.model).row(row, next),
-				at: (memory, address) => disassemblyFor(latest?.model).at(memory, address),
-			},
-			// One translation unit: the entry file, with the rest reached by `.include`.
-			assemble({ files, entries }, settings) {
-				check()
-				const main = files.find((file) => file.name === entries[0]) ?? files[0]
-				const model = modelFor(settings.cpuModel)
-				const result = assembleMos6502(main, { files, model })
-				const program = new Mos6502Assembly(main.name, result.image, result.diagnostics, result.breakpoints, result.values, model)
-				if (result.image) latest = program
-				return program
-			},
-			createMachine(program, settings, options) {
-				check()
-				const next = new Mos6502Runtime(mos6502Assembly(program), {
-					model: modelFor(settings.cpuModel),
-					decimal: settings.decimalMode,
-					historyLimit: options.historyLimit,
-					speed: options.speed,
-				})
-				machine?.dispose()
-				machine = next
-				return next
-			},
-			profile: () => mos6502Profile,
-			describeToken: (text, column, state) => describeMos6502Token(text, column, state, { model: latest?.model, value: (name) => latest?.values.get(name) }),
-			async installEditor(monaco, host) {
-				check()
-				const { installEditor } = await import('./editor')
-				check()
-				const sources = {
-					files: () => host.files(),
-					active: () => host.active(),
-					open: (file: string, line: number) => host.open(file, line),
-					inspection: () => host.inspection(),
-					values: () => latest?.values ?? null,
-				}
-				const parts = [installEditor(monaco, sources), installEditor(monaco, sources, W65C02_MODEL)]
-				const contribution = { dispose: () => parts.splice(0).reverse().forEach((part) => part.dispose()) }
-				contributions.push(contribution)
-				return contribution
-			},
-			dispose() {
-				if (disposed) return
-				disposed = true
-				machine?.dispose()
-				for (const contribution of contributions.reverse()) contribution.dispose()
-			},
-		}
+		return createArchitectureServices<Mos6502Settings>(({ check }) => {
+			/** The last program that assembled, whose symbols the data tips show. */
+			let latest: Mos6502Assembly | null = null
+			return {
+				disassembly: {
+					row: (row, next) => disassemblyFor(latest?.model).row(row, next),
+					at: (memory, address) => disassemblyFor(latest?.model).at(memory, address),
+				},
+				// One translation unit: the entry file, with the rest reached by `.include`.
+				assemble({ files, entries }, settings) {
+					const main = files.find((file) => file.name === entries[0]) ?? files[0]
+					const model = modelFor(settings.cpuModel)
+					const result = assembleMos6502(main, { files, model })
+					const program = new Mos6502Assembly(main.name, result.image, result.diagnostics, result.breakpoints, result.values, model)
+					if (result.image) latest = program
+					return program
+				},
+				createMachine(program, settings, options) {
+					const next = new Mos6502Runtime(mos6502Assembly(program), {
+						model: modelFor(settings.cpuModel),
+						decimal: settings.decimalMode,
+						historyLimit: options.historyLimit,
+						speed: options.speed,
+					})
+					return next
+				},
+				profile: () => mos6502Profile,
+				describeToken: (text, column, state) => describeMos6502Token(text, column, state, { model: latest?.model, value: (name) => latest?.values.get(name) }),
+				async installEditor(monaco, host) {
+					const { installEditor } = await import('./editor')
+					check()
+					const sources = {
+						files: () => host.files(),
+						active: () => host.active(),
+						open: (file: string, line: number) => host.open(file, line),
+						inspection: () => host.inspection(),
+						values: () => latest?.values ?? null,
+					}
+					return disposableGroup((scope) => {
+						scope.add(installEditor(monaco, sources))
+						scope.add(installEditor(monaco, sources, W65C02_MODEL))
+					})
+				},
+			}
+		})
 	},
 }
 

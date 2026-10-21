@@ -1,3 +1,4 @@
+import { deltaHistoryEdit } from '../../core/editTransaction'
 /**
  * A 6502 with its I/O page, interrupt lines, shadow call stack and optional
  * history.
@@ -167,10 +168,7 @@ export class Mos6502Machine {
 	}
 
 	private edit(change: () => void): boolean {
-		this.history?.begin(ENTRY_EDIT)
-		change()
-		this.history?.end()
-		return true
+		return deltaHistoryEdit(change, this.history, () => { this.history?.begin(ENTRY_EDIT) })
 	}
 }
 

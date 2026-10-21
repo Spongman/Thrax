@@ -1,3 +1,4 @@
+import { HistoryView, describeEffect, textChange } from '../../core/historyView'
 /**
  * The 6502 history as the shared panels and tools read it: records built on
  * request from the typed columns, and each entry's changes taken apart into
@@ -6,7 +7,7 @@
  * for the last.
  */
 
-import type { DescribedEffect, HistoryFormatter, HistoryRecord, MachineHistory } from '../contracts'
+import type { DescribedEffect, HistoryFormatter } from '../contracts'
 import type { Mos6502Cpu } from './cpu'
 import type { Mos6502Device } from './device'
 import { disassemble, hex2, hex4 } from './disassemble'
@@ -29,48 +30,16 @@ class Mos6502Record implements Mos6502Executed {
 }
 
 /** Live over the log: entries come and go as the machine runs and rewinds. */
-export class Mos6502HistoryView implements MachineHistory {
-	constructor(private readonly log: Mos6502History | null) {}
-
-	get length(): number {
-		return this.log?.length ?? 0
-	}
-
-	at(index: number): Mos6502Record | undefined {
-		const log = this.log
-		if (!log || index < 0 || index >= log.length) return undefined
+export class Mos6502HistoryView extends HistoryView<Mos6502History, Mos6502Record> {
+	protected record(log: Mos6502History, index: number): Mos6502Record {
 		const kind = log.kindAt(index)
 		return new Mos6502Record(log.idAt(index), log.countAt(index), log.pcAt(index), kind === ENTRY_EDIT ? 'edit' : 'instruction', log.opcodeAt(index), kind === ENTRY_INTERRUPT)
-	}
-
-	instructionCountAt(index: number): number {
-		return this.log!.countAt(index)
-	}
-
-	slice(from: number, to: number): HistoryRecord[] {
-		const records: HistoryRecord[] = []
-		const end = Math.min(to, this.length)
-		for (let index = Math.max(0, from); index < end; index++) records.push(this.at(index)!)
-		return records
-	}
-
-	indexOfId(id: number): number {
-		const log = this.log
-		if (!log) return -1
-		const index = id - log.firstId
-		return index >= 0 && index < log.length ? index : -1
 	}
 }
 
 const VECTOR_NAMES: Readonly<Record<number, string>> = { 0xFFFA: 'NMI', 0xFFFE: 'IRQ' }
 
-function described(applied: boolean, parts: Omit<DescribedEffect, 'applied' | 'label'>, held?: string): DescribedEffect {
-	const shown = held ?? parts.text
-	const label = shown !== undefined
-		? (applied ? `${parts.subject} → ${shown}` : `${parts.subject} ${shown} →`)
-		: parts.detail !== undefined ? `${parts.subject} ${parts.detail}` : parts.subject
-	return { ...parts, applied, label }
-}
+const described = describeEffect
 
 /** Registers packed as the history keeps them, by name, with their width. */
 const PACKED: readonly [string, number][] = [['A', 0], ['X', 8], ['Y', 16], ['SP', 24]]
@@ -94,20 +63,21 @@ export function mos6502HistoryFormatter(log: Mos6502History | null, cpu: Mos6502
 			// What the entry left is what the next one started from.
 			const last = index === log.length - 1
 			const before = log.registersAt(index)
-			const after = last ? packed() : log.registersAt(index + 1)
+			const after = last ? (log.timeline.ahead ? log.controlRegistersAt(index) : packed()) : log.registersAt(index + 1)
 			for (const [name, shift] of PACKED) {
 				const old = (before >>> shift) & 0xFF
-				if (old !== ((after >>> shift) & 0xFF)) at({ subject: name, register: name, value: old }, hex2(old))
+				if (old !== ((after >>> shift) & 0xFF)) at({ subject: name, register: name, value: applied ? (after >>> shift) & 255 : old }, hex2(applied ? (after >>> shift) & 255 : old))
 			}
 			const p = log.pAt(index)
-			if (p !== (last ? cpu.p : log.pAt(index + 1))) at({ subject: 'P', register: 'P', value: p }, hex2(p))
+			const afterP = last ? (log.timeline.ahead ? log.controlPAt(index) : cpu.p) : log.pAt(index + 1)
+			if (p !== afterP) at({ subject: 'P', register: 'P', value: applied ? afterP : p }, hex2(applied ? afterP : p))
 			const start = log.effectStartAt(index)
 			for (let position = start; position < start + log.effectCountAt(index); position++) {
 				const a = log.effectA(position)
 				const b = log.effectB(position)
 				switch (log.effectKind(position)) {
 					case EFFECT_MEMORY: at({ subject: `[${hex4(a)}]`, address: a, value: b }, hex2(b)); break
-					case EFFECT_OUTPUT: at({ subject: 'console', detail: JSON.stringify(device.output.slice(b, b + 1)) }); break
+					case EFFECT_OUTPUT: at({ subject: 'console', detail: textChange((log.timeline.ahead ? log.outputText.text : device.output), a, b) }); break
 					case EFFECT_INPUT: at({ subject: 'read', detail: JSON.stringify(device.input.charAt(b)) }); break
 					case EFFECT_HALTED: at({ subject: b ? 'running' : 'halted' }); break
 					case EFFECT_EXIT: at({ subject: 'exit code', text: b < 0 ? 'none' : String(b) }); break

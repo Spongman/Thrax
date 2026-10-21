@@ -1,3 +1,4 @@
+import { BufferedConsole } from '../../core/console'
 /**
  * The console, keyboard and timer in the I/O page at $F000-$F0FF:
  *
@@ -39,13 +40,7 @@ export const ENABLE_TIMER_NMI = 0x04
 const CR = 13
 const LF = 10
 
-export class Mos6502Device implements Mos6502Io {
-	output = ''
-	/** Everything ever typed, kept so a rewound run reads the same characters again. */
-	input = ''
-	inputIndex = 0
-	/** A read of $F001 found nothing and waits. */
-	waiting = false
+export class Mos6502Device extends BufferedConsole implements Mos6502Io {
 	/** The program looked for input and found none, so typing is worth offering. */
 	polled = false
 	control = 0
@@ -56,11 +51,8 @@ export class Mos6502Device implements Mos6502Io {
 	/** The exit code a write to $F003 asked for, or -1. */
 	haltRequest = -1
 
-	constructor(private readonly cpu: Mos6502Cpu) {}
+	constructor(private readonly cpu: Mos6502Cpu) { super() }
 
-	feed(text: string) {
-		this.input += text
-	}
 
 	get keyReady(): boolean {
 		return this.inputIndex < this.input.length

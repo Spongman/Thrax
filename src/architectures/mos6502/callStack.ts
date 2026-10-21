@@ -7,13 +7,10 @@
  * the sink sees every change as an old word or an old depth, enough to undo.
  */
 
+import { FrameStack, type FrameStackSink } from '../../core/frameStack'
 import { JSR, OPCODE_INSN, PLA, PLP, RTI, RTS, TXS } from './isa'
 
-export interface Mos6502CallStackSink {
-	/** `index` is a word of the frame array, about to be overwritten. */
-	frameWord(index: number, old: number): void
-	depth(old: number): void
-}
+export type Mos6502CallStackSink = FrameStackSink
 
 export interface Mos6502Frame {
 	/** Address of the JSR. */
@@ -33,28 +30,8 @@ const WIDTH = 3
 /** Instructions that raise SP, after which frames may have been unwound. */
 const UNWINDS = new Set([RTS, RTI, PLA, PLP, TXS])
 
-export class Mos6502CallStack {
-	sink: Mos6502CallStackSink | null = null
-	private count = 0
-	private words = new Int32Array(64 * WIDTH)
-
-	get depth(): number {
-		return this.count
-	}
-
-	/** Restores the depth; for rewind, not recorded. */
-	setDepth(depth: number) {
-		this.count = depth
-	}
-
-	/** Restores one frame word; for rewind, not recorded. */
-	setFrameWord(index: number, value: number) {
-		this.words[index] = value
-	}
-
-	clear() {
-		this.count = 0
-	}
+export class Mos6502CallStack extends FrameStack {
+	constructor() { super(WIDTH, Int32Array) }
 
 	/** Updates the stack after `opcode` at `pc` ran, leaving PC at `next` and SP at `sp`. Allocates nothing. */
 	observe(opcode: number, pc: number, next: number, sp: number) {
@@ -68,8 +45,7 @@ export class Mos6502CallStack {
 		let count = this.count
 		while (count > 0 && this.words[(count - 1) * WIDTH + SP] <= sp) count--
 		if (count === this.count) return
-		this.sink?.depth(this.count)
-		this.count = count
+		this.changeDepth(count)
 	}
 
 	/** The frames, outermost first. */
@@ -84,21 +60,11 @@ export class Mos6502CallStack {
 	}
 
 	private push(pc: number, callee: number, sp: number) {
-		const base = this.count * WIDTH
-		if (base + WIDTH > this.words.length) {
-			const grown = new Int32Array(this.words.length * 2)
-			grown.set(this.words)
-			this.words = grown
-		}
+		const base = this.allocateFrame()
 		this.write(base + SITE, pc)
 		this.write(base + CALLEE, callee)
 		this.write(base + SP, sp)
-		this.sink?.depth(this.count)
-		this.count += 1
+		this.changeDepth(this.count + 1)
 	}
 
-	private write(index: number, value: number) {
-		this.sink?.frameWord(index, this.words[index])
-		this.words[index] = value
-	}
 }
