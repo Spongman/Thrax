@@ -1,3 +1,7 @@
+import { stripAssemblyComment } from '../../../core/assembly/text'
+import { labelAt, formatIntegerValue, memoryTip } from '../../../core/inspection'
+import { betaInstructionHelp } from '../instructionHelp'
+import { registerTokenHover } from '../../../services/assemblyLanguage'
 /**
  * Data tips for UASM: what a register, symbol, number or macro under the
  * pointer is worth as the program stands. The gutter's disassembly and the
@@ -24,7 +28,7 @@ export interface UasmTipSources {
 	macro?(name: string): readonly string[]
 }
 
-const formatValue = (value: number) => `${formatWord(value)} (${value | 0}, unsigned ${value >>> 0})`
+const formatValue = (value: number) => formatIntegerValue(value, 32)
 
 function registerIndex(name: string): number | undefined {
 	const match = REGISTER.exec(name)
@@ -38,20 +42,16 @@ function parseNumber(text: string): number | null {
 	return /^\d+$/.test(text) ? Number(text) | 0 : null
 }
 
-function labelAt(labels: ReadonlyMap<string, number>, address: number): string | undefined {
-	for (const [name, at] of labels) if (at === address) return name
-	return undefined
-}
 
 /** The word stored at `address`, as a paragraph, or nothing outside memory. */
 function memoryLine(state: DebugInspection, address: number): string[] {
 	const word = state.memory.word(address)
-	return word === undefined ? [] : [`\`[${formatWord(address)}]\` = \`${formatValue(word)}\``]
+	return memoryTip(address, word, value => formatValue(Number(value)))
 }
 
 /** What the token at `offset` of `line` is worth, or null where nothing is. */
 export function describeUasmToken(line: string, offset: number, state: DebugInspection, sources: UasmTipSources = {}): TokenDescription | null {
-	const comment = line.indexOf('//')
+	const comment = stripAssemblyComment(line, ['//']).length
 	if (comment >= 0 && offset >= comment) return null
 	for (const match of line.matchAll(TOKEN)) {
 		const start = match.index
@@ -80,8 +80,8 @@ export function describeUasmToken(line: string, offset: number, state: DebugInsp
 		const value = sources.value?.(text)
 		if (value !== undefined) return { ...span, contents: [`**${text}**\n\n\`${formatValue(value)}\``] }
 		const macros = sources.macro?.(text) ?? []
-		if (macros.length) return { ...span, contents: [`**Macro ${text}**`, ...macros.map((definition) => `\`${definition}\``)] }
-		return null
+		const contents = betaInstructionHelp(text, macros)
+		return contents ? { ...span, ...contents } : null
 	}
 	return null
 }
@@ -93,7 +93,7 @@ export function macroTable(files: readonly SourceFile[]): Map<string, string[]> 
 		for (const line of file.code.split('\n')) {
 			const match = MACRO.exec(line)
 			if (!match) continue
-			const comment = line.indexOf('//')
+			const comment = stripAssemblyComment(line, ['//']).length
 			const definition = (comment >= 0 ? line.slice(0, comment) : line).trim().replace(/\s+/g, ' ')
 			const list = table.get(match[1]) ?? []
 			list.push(definition)
@@ -130,19 +130,13 @@ export function registerUasmDataTips(monaco: typeof Monaco, sources: UasmHoverSo
 		}
 		return cachedMacros
 	}
-	return monaco.languages.registerHoverProvider(UASM_LANGUAGE_ID, {
-		provideHover(model, position) {
-			const state = sources.inspection?.()
-			if (!state) return null
-			const described = describeUasmToken(model.getLineContent(position.lineNumber), position.column - 1, state, {
-				value: (name) => sources.values?.()?.get(name),
-				macro: (name) => macros().get(name) ?? libraryMacros().get(name) ?? [],
-			})
-			if (!described) return null
-			return {
-				range: new monaco.Range(position.lineNumber, described.start + 1, position.lineNumber, described.start + described.length + 1),
-				contents: described.contents.map((value) => ({ value })),
-			}
-		},
+	return registerTokenHover(monaco, UASM_LANGUAGE_ID, (line, offset) => {
+		const state = sources.inspection?.()
+		if (!state) return null
+		const described = describeUasmToken(line, offset, state, {
+			value: (name) => sources.values?.()?.get(name),
+			macro: (name) => macros().get(name) ?? libraryMacros().get(name) ?? [],
+		})
+		return described
 	})
 }

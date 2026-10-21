@@ -1,3 +1,5 @@
+import { BufferedConsole } from '../../core/console'
+import { deltaHistoryEdit } from '../../core/editTransaction'
 /**
  * A bare Z80 with 64 KiB of RAM and a small console device, reached both as
  * memory at 0xFF00-0xFF07 and as I/O ports 0x00-0x07 (the low byte of the
@@ -81,11 +83,7 @@ export const FIELD_SLEEPING = 11
 export const FIELD_COUNT = 12
 
 /** The console, keyboard and timer. */
-export class Z80Console {
-	output = ''
-	/** Everything ever typed, kept so a rewound run reads the same characters again. */
-	input = ''
-	inputIndex = 0
+export class Z80Console extends BufferedConsole {
 	/** The character that arrived and is not yet read, or -1. */
 	key = -1
 	/** IRQ_* bits requested and not yet taken. */
@@ -98,8 +96,6 @@ export class Z80Console {
 	timerDue = 0
 	/** T-state the next typed character may arrive at. */
 	keyDue = 0
-	/** A read of +5 is waiting for a character. */
-	waiting = false
 	/** The program has looked for input, so typing is worth offering. */
 	listening = false
 	/** The exit code written to +3, or -1. */
@@ -107,7 +103,7 @@ export class Z80Console {
 	/** The timer fired since the status was last read. */
 	ticked = false
 
-	constructor(private readonly clock: () => number) {}
+	constructor(private readonly clock: () => number) { super() }
 
 	clear() {
 		this.output = this.input = ''
@@ -116,9 +112,6 @@ export class Z80Console {
 		this.waiting = this.listening = this.ticked = false
 	}
 
-	feed(text: string) {
-		this.input += text
-	}
 
 	/** Typed characters not yet arrived. */
 	get queued(): boolean {
@@ -443,9 +436,6 @@ export class Z80Machine {
 	}
 
 	private edit(change: () => void): boolean {
-		this.history?.beginEdit()
-		change()
-		this.history?.end()
-		return true
+		return deltaHistoryEdit(change, this.history, () => { this.history?.beginEdit() })
 	}
 }

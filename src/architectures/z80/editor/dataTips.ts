@@ -1,3 +1,7 @@
+import { stripAssemblyComment } from '../../../core/assembly/text'
+import { labelAt } from '../../../core/inspection'
+import { z80InstructionHelp } from '../instructionHelp'
+import { registerTokenHover } from '../../../services/assemblyLanguage'
 /**
  * Data tips for Z80 source and disassembly: what a register, symbol or number
  * under the pointer is worth as the program stands.
@@ -37,14 +41,10 @@ function memoryLine(state: DebugInspection, address: number): string[] {
 	return [`\`(${hex16(address)})\` = \`${hex8(low)}\`, word \`${hex16(low | (high << 8))}\``]
 }
 
-function labelAt(labels: ReadonlyMap<string, number>, address: number): string | undefined {
-	for (const [name, at] of labels) if (at === address) return name
-	return undefined
-}
 
 /** What the token at `offset` of `line` is worth, or null where nothing is. */
 export function describeZ80Token(line: string, offset: number, state: DebugInspection, sources: Z80TipSources = {}): TokenDescription | null {
-	const comment = line.indexOf(';')
+	const comment = stripAssemblyComment(line, [';'], true).length
 	if (comment >= 0 && offset >= comment) return null
 	for (const match of line.matchAll(TOKEN)) {
 		const start = match.index
@@ -80,7 +80,8 @@ export function describeZ80Token(line: string, offset: number, state: DebugInspe
 		}
 		const value = sources.value?.(text)
 		if (value !== undefined) return { ...span, contents: [`**${text}**\n\n\`${formatValue(value)}\``] }
-		return null
+		const contents = z80InstructionHelp(text)
+		return contents ? { ...span, ...contents } : null
 	}
 	return null
 }
@@ -93,18 +94,12 @@ export interface Z80HoverSources {
 
 /** Live data tips in Z80 sources. */
 export function registerZ80DataTips(monaco: typeof Monaco, sources: Z80HoverSources): Monaco.IDisposable {
-	return monaco.languages.registerHoverProvider(Z80_LANGUAGE_ID, {
-		provideHover(model, position) {
-			const state = sources.inspection?.()
-			if (!state) return null
-			const described = describeZ80Token(model.getLineContent(position.lineNumber), position.column - 1, state, {
-				value: (name) => sources.values?.()?.get(name),
-			})
-			if (!described) return null
-			return {
-				range: new monaco.Range(position.lineNumber, described.start + 1, position.lineNumber, described.start + described.length + 1),
-				contents: described.contents.map((value) => ({ value })),
-			}
-		},
+	return registerTokenHover(monaco, Z80_LANGUAGE_ID, (line, offset) => {
+		const state = sources.inspection?.()
+		if (!state) return null
+		const described = describeZ80Token(line, offset, state, {
+			value: (name) => sources.values?.()?.get(name),
+		})
+		return described
 	})
 }

@@ -57,7 +57,8 @@ describe('Beta history', () => {
 		const final = snapshot(m)
 		for (const point of points(total, 8, key.length)) {
 			history.rewindTo(point)
-			expect(history.length).toBe(point)
+			expect(history.timeline.index).toBe(point)
+			expect(history.length).toBe(total)
 			expect(snapshot(m)).toEqual(snapshot(freshAfter(code, point)))
 		}
 		// Forward again from the earliest point reproduces the end.

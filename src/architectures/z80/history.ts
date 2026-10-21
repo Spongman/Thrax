@@ -1,3 +1,4 @@
+import { DEFAULT_BACKSTEP_LIMIT } from '../../core/settings'
 /**
  * Z80 execution history: one entry per state-changing step, each owning a run
  * of effects that hold the values the step replaced.
@@ -9,7 +10,8 @@
  */
 
 import { HistoryBufferLayout, type HistoryBufferSchema } from '../../core/historyBuffers'
-import { HistoryLog } from '../../core/historyLog'
+import { ReversibleHistory } from '../../core/reversibleHistory'
+import { HistoryText } from '../../core/historyCursor'
 import { SLOT_COUNT, type Z80MemorySink } from './cpu'
 import type { Z80CallStackSink } from './callStack'
 import { FIELD_COUNT, type Z80Machine } from './machine'
@@ -23,13 +25,13 @@ const column = (name: string, type: 'u8' | 'i32' | 'u32' | 'f64') => Object.free
  */
 export const z80HistorySchema: HistoryBufferSchema = Object.freeze({
 	entry: Object.freeze([
-		column('pc', 'u32'), column('bytes', 'u32'), column('kind', 'u8'), column('count', 'f64'),
+		column('pc', 'u32'), column('bytes', 'u32'), column('kind', 'u8'), column('count', 'f64'), column('controlCount', 'f64'),
 		column('cycles', 'f64'), column('timerDue', 'f64'), column('keyDue', 'f64'),
 	]),
 	effect: Object.freeze([column('kind', 'u8'), column('a', 'i32'), column('b', 'i32')]),
 })
 
-/** Effect kinds; `b` is always the old value. */
+/** Effect kinds; `b` holds the value exchanged with live state when navigating. */
 export const EFFECT_SLOT = 0
 /** `a` is the address. */
 export const EFFECT_MEMORY = 1
@@ -53,6 +55,7 @@ const PC = layout.column('entry', 'pc', 'u32')
 const BYTES = layout.column('entry', 'bytes', 'u32')
 const KIND = layout.column('entry', 'kind', 'u8')
 const COUNT = layout.column('entry', 'count', 'f64')
+const CONTROL_COUNT = layout.column('entry', 'controlCount', 'f64')
 const CYCLES = layout.column('entry', 'cycles', 'f64')
 const TIMER_DUE = layout.column('entry', 'timerDue', 'f64')
 const KEY_DUE = layout.column('entry', 'keyDue', 'f64')
@@ -60,10 +63,10 @@ const EFFECT_KIND = layout.column('effect', 'kind', 'u8')
 const EFFECT_A = layout.column('effect', 'a', 'i32')
 const EFFECT_B = layout.column('effect', 'b', 'i32')
 
-export const DEFAULT_HISTORY_LIMIT = 100_000
+export const DEFAULT_HISTORY_LIMIT = DEFAULT_BACKSTEP_LIMIT
 
-export class Z80History implements Z80MemorySink, Z80CallStackSink {
-	private readonly log = new HistoryLog(layout)
+export class Z80History extends ReversibleHistory implements Z80MemorySink, Z80CallStackSink {
+	readonly outputText = new HistoryText()
 	private readonly slots = new Int32Array(SLOT_COUNT)
 	private readonly fields = new Int32Array(FIELD_COUNT)
 	private start = 0
@@ -78,20 +81,12 @@ export class Z80History implements Z80MemorySink, Z80CallStackSink {
 	private outputLength = 0
 
 	constructor(private readonly target: Z80Machine, limit = DEFAULT_HISTORY_LIMIT) {
-		this.log.limit = limit
-	}
-
-	get length(): number {
-		return this.log.length
-	}
-
-	/** Id of the oldest entry held; ids count entries since the program loaded. */
-	get firstId(): number {
-		return this.log.first
+		super(layout, limit)
 	}
 
 	/** Opens an entry; call before a step. */
 	begin(kind = ENTRY_INSTRUCTION) {
+		this.timeline.branch()
 		const { cpu, console } = this.target
 		this.kind = kind
 		this.log.openEntryWith(this.log.end)
@@ -131,7 +126,7 @@ export class Z80History implements Z80MemorySink, Z80CallStackSink {
 			const old = this.fields[field]
 			if (this.target.field(field) !== old) this.push(EFFECT_FIELD, field, old)
 		}
-		if (console.output.length !== this.outputLength) this.push(EFFECT_OUTPUT, 0, this.outputLength)
+		if (console.output.length !== this.outputLength) this.push(EFFECT_OUTPUT, console.output.length, this.outputLength)
 		const log = this.log
 		const position = log.openEntry
 		if (position < 0) return false
@@ -146,6 +141,7 @@ export class Z80History implements Z80MemorySink, Z80CallStackSink {
 		columns[BYTES][slot] = this.kind === ENTRY_INTERRUPT ? this.data : this.bytes
 		columns[KIND][slot] = this.kind
 		columns[COUNT][slot] = this.count
+		columns[CONTROL_COUNT][slot] = this.count
 		columns[CYCLES][slot] = this.cycles
 		columns[TIMER_DUE][slot] = this.timerDue
 		columns[KEY_DUE][slot] = this.keyDue
@@ -206,44 +202,29 @@ export class Z80History implements Z80MemorySink, Z80CallStackSink {
 	}
 
 	/** Undoes the last entry; false when none is held. */
-	stepBack(): boolean {
-		if (this.log.length === 0) return false
-		this.rewindTo(this.log.length - 1)
-		return true
-	}
-
-	/** Undoes entry `index` and every later one, then forgets them. */
-	rewindTo(index: number) {
+	protected exchange = (index: number, forward: boolean) => {
 		const log = this.log
-		if (!Number.isInteger(index) || index < 0 || index > log.length) throw new RangeError(`No history entry ${index}`)
-		if (index === log.length) return
-		const target = this.target
-		const { cpu, console, callStack } = target
-		const stop = this.effectStartAt(index)
-		const capacity = log.effects.capacity
-		for (let position = log.effects.end - 1; position >= stop; position--) {
-			const columns = log.effects.block(position).arrays
-			const slot = position % capacity
-			const a = columns[EFFECT_A][slot]
-			const b = columns[EFFECT_B][slot]
+		const { cpu, console, callStack } = this.target
+		const start = log.effectStart(index), count = log.effectCount(index)
+		for (let offset = 0; offset < count; offset++) {
+			const position = start + (forward ? offset : count - offset - 1)
+			const columns = log.effects.block(position).arrays, slot = position % log.effects.capacity
+			const a = columns[EFFECT_A][slot], b = columns[EFFECT_B][slot]
 			switch (columns[EFFECT_KIND][slot]) {
-				case EFFECT_SLOT: cpu.setSlot(a, b); break
-				case EFFECT_MEMORY: cpu.memory[a] = b; break
-				case EFFECT_FIELD: target.setField(a, b); break
-				case EFFECT_OUTPUT: console.output = console.output.slice(0, b); break
-				case EFFECT_FRAME_WORD: callStack.setFrameWord(a, b); break
-				case EFFECT_FRAME_DEPTH: callStack.setDepth(b); break
+				case EFFECT_SLOT: columns[EFFECT_B][slot] = cpu.slot(a); cpu.setSlot(a, b); break
+				case EFFECT_MEMORY: columns[EFFECT_B][slot] = cpu.memory[a]; cpu.memory[a] = b; break
+				case EFFECT_FIELD: columns[EFFECT_B][slot] = this.target.field(a); this.target.setField(a, b); break
+				case EFFECT_OUTPUT: columns[EFFECT_B][slot] = console.output.length; columns[EFFECT_A][slot] = b; console.output = this.outputText.exchange(console.output, b); break
+				case EFFECT_FRAME_WORD: columns[EFFECT_B][slot] = callStack.frameWordAt(a); callStack.setFrameWord(a, b); break
+				case EFFECT_FRAME_DEPTH: columns[EFFECT_B][slot] = callStack.depth; callStack.setDepth(b); break
 			}
 		}
-		cpu.cycles = this.column(index, CYCLES)
-		console.timerDue = this.column(index, TIMER_DUE)
-		console.keyDue = this.column(index, KEY_DUE)
-		target.instructionCount = this.countAt(index)
-		log.truncate(index)
-	}
-
-	clear() {
-		this.log.clear()
+		const entrySlot = (log.first + index) % log.entries.capacity
+		const entries = log.entries.block(log.first + index).arrays
+		{ const held = cpu.cycles; cpu.cycles = this.column(index, CYCLES); entries[CYCLES][entrySlot] = held }
+		{ const held = console.timerDue; console.timerDue = this.column(index, TIMER_DUE); entries[TIMER_DUE][entrySlot] = held }
+		{ const held = console.keyDue; console.keyDue = this.column(index, KEY_DUE); entries[KEY_DUE][entrySlot] = held }
+		{ const held = this.target.instructionCount; this.target.instructionCount = entries[CONTROL_COUNT][entrySlot]; entries[CONTROL_COUNT][entrySlot] = held }
 	}
 
 	private push(kind: number, a: number, b: number) {
@@ -255,13 +236,4 @@ export class Z80History implements Z80MemorySink, Z80CallStackSink {
 		columns[EFFECT_B][slot] = b
 	}
 
-	private column(index: number, column: number): number {
-		if (!(index >= 0 && index < this.log.length)) throw new RangeError(`No history entry ${index}`)
-		const position = this.log.first + index
-		return this.log.entries.block(position).arrays[column][position % this.log.entries.capacity]
-	}
-
-	private effect(position: number, column: number): number {
-		return this.log.effects.block(position).arrays[column][position % this.log.effects.capacity]
-	}
 }

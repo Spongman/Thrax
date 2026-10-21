@@ -1,10 +1,11 @@
+import { HistoryView, describeEffect, textChange } from '../../core/historyView'
 /**
  * The Beta history as the shared panels and tools read it: records built on
  * request from the typed columns, and the effects taken apart into chips.
  */
 
 import { formatWord } from '../../core/format'
-import type { DescribedEffect, HistoryFormatter, HistoryRecord, MachineHistory } from '../contracts'
+import type { DescribedEffect, HistoryFormatter } from '../contracts'
 import { disassemble } from './disassemble'
 import {
 	EFFECT_FRAME_DEPTH, EFFECT_HALTED, EFFECT_INPUT, EFFECT_KEY, EFFECT_MEMORY, EFFECT_OUTPUT, EFFECT_PC, EFFECT_PENDING, EFFECT_REGISTER,
@@ -28,16 +29,8 @@ class BetaRecord implements BetaExecuted {
 }
 
 /** Live over the log: entries come and go as the machine runs and rewinds. */
-export class BetaHistoryView implements MachineHistory {
-	constructor(private readonly log: BetaHistory | null) {}
-
-	get length(): number {
-		return this.log?.length ?? 0
-	}
-
-	at(index: number): BetaRecord | undefined {
-		const log = this.log
-		if (!log || index < 0 || index >= log.length) return undefined
+export class BetaHistoryView extends HistoryView<BetaHistory, BetaRecord> {
+	protected record(log: BetaHistory, index: number): BetaRecord {
 		const kind = log.kindAt(index)
 		return new BetaRecord(
 			log.idAt(index),
@@ -48,24 +41,6 @@ export class BetaHistoryView implements MachineHistory {
 			log.wordAt(index),
 			kind === ENTRY_INTERRUPT,
 		)
-	}
-
-	instructionCountAt(index: number): number {
-		return this.log!.countAt(index)
-	}
-
-	slice(from: number, to: number): HistoryRecord[] {
-		const records: HistoryRecord[] = []
-		const end = Math.min(to, this.length)
-		for (let index = Math.max(0, from); index < end; index++) records.push(this.at(index)!)
-		return records
-	}
-
-	indexOfId(id: number): number {
-		const log = this.log
-		if (!log) return -1
-		const index = id - log.firstId
-		return index >= 0 && index < log.length ? index : -1
 	}
 }
 
@@ -81,16 +56,12 @@ const requests = (bits: number) => IRQ_NAMES.filter(([bit]) => bits & bit).map((
 type WordEffect = Omit<DescribedEffect, 'applied' | 'label'> & { value?: number, second?: number }
 
 function described(applied: boolean, parts: WordEffect): DescribedEffect {
-	const held = parts.value === undefined ? parts.text : hex(parts.value)
-	const label = held !== undefined
-		? (applied ? `${parts.subject} → ${held}` : `${parts.subject} ${held} →`)
-		: parts.detail !== undefined ? `${parts.subject} ${parts.detail}` : parts.subject
-	return { ...parts, applied, label }
+	return describeEffect(applied, parts, parts.value === undefined ? parts.text : hex(parts.value))
 }
 
 /**
- * The log keeps only what each effect replaced, so a chip shows that value.
- * Every entry stands behind the present: a rewind drops what it undid.
+ * Effects exchange with live state: past rows hold replaced values and future
+ * rows hold the values replay will restore.
  */
 export function betaHistoryFormatter(log: BetaHistory | null, console: BetaConsole): HistoryFormatter {
 	return {
@@ -114,7 +85,7 @@ export function betaHistoryFormatter(log: BetaHistory | null, console: BetaConso
 					case EFFECT_MEMORY: at({ subject: `[${formatWord(a >>> 0)}]`, address: a >>> 0, value: b }); break
 					case EFFECT_PC: at({ subject: 'PC', register: 'PC', value: b }); break
 					// WRCHAR writes one character past the length it replaced.
-					case EFFECT_OUTPUT: at({ subject: 'console', detail: JSON.stringify(console.output.slice(b, b + 1)) }); break
+					case EFFECT_OUTPUT: at({ subject: 'console', detail: textChange((log.timeline.ahead ? log.outputText.text : console.output), a, b) }); break
 					case EFFECT_INPUT: at({ subject: 'read', detail: JSON.stringify(console.input.charAt(b)) }); break
 					case EFFECT_WAITING: at({ subject: b ? 'input arrived' : 'waiting for input' }); break
 					case EFFECT_HALTED: at({ subject: b ? 'running' : 'halted' }); break

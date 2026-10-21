@@ -1,3 +1,5 @@
+import { BufferedConsole } from '../../core/console'
+import { deltaHistoryEdit } from '../../core/editTransaction'
 /**
  * BSim-compatible machine profile: the privileged operations on opcode 0x00
  * that console programs need, and program loading.
@@ -98,16 +100,9 @@ export interface BetaConsoleOptions {
 }
 
 /** Console I/O and HALT for a BetaCpu, attached as its `privileged` handler. */
-export class BetaConsole implements BetaPrivilegedHandler {
+export class BetaConsole extends BufferedConsole implements BetaPrivilegedHandler {
 	value = 0
 	tty: boolean
-	output = ''
-	/** True while a RDCHAR waits for feed(). */
-	waiting = false
-	/** Everything ever typed, kept so a rewound run reads the same characters again. */
-	input = ''
-	/** Next character to hand over. */
-	inputIndex = 0
 	/** The character that arrived and is not yet read, or -1. */
 	key = -1
 	/** IRQ_* bits requested and not yet taken. */
@@ -116,13 +111,10 @@ export class BetaConsole implements BetaPrivilegedHandler {
 	keyWait = 0
 
 	constructor(options: BetaConsoleOptions = {}) {
+		super()
 		this.tty = options.tty ?? false
 	}
 
-	/** Queues typed characters. */
-	feed(text: string) {
-		this.input += text
-	}
 
 	/** Whether typed characters are queued or arrived and unread. */
 	get typed(): boolean {
@@ -335,10 +327,7 @@ export class BetaMachine {
 	}
 
 	private edit(change: () => void): boolean {
-		this.history?.begin(ENTRY_EDIT)
-		change()
-		this.history?.end()
-		return true
+		return deltaHistoryEdit(change, this.history, () => { this.history?.begin(ENTRY_EDIT) })
 	}
 
 	/** Takes an interrupt at a profile vector now, recorded like a step. */

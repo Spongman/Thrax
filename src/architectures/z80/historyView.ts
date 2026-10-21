@@ -1,9 +1,10 @@
+import { HistoryView, describeEffect, textChange } from '../../core/historyView'
 /**
  * The Z80 history as the shared panels and tools read it: records built on
  * request from the typed columns, and the effects taken apart into chips.
  */
 
-import type { DescribedEffect, HistoryFormatter, HistoryRecord, MachineHistory } from '../contracts'
+import type { DescribedEffect, HistoryFormatter } from '../contracts'
 import { SLOT_AF, SLOT_AF_ALT, SLOT_BC, SLOT_BC_ALT, SLOT_DE, SLOT_DE_ALT, SLOT_EI_DELAY, SLOT_HALTED, SLOT_HL, SLOT_HL_ALT, SLOT_I, SLOT_IFF1, SLOT_IFF2, SLOT_IM, SLOT_IX, SLOT_IY, SLOT_PC, SLOT_R, SLOT_SP } from './cpu'
 import { decode, hex16, hex8, instructionLength } from './disassemble'
 import {
@@ -30,16 +31,8 @@ class Z80Record implements Z80Executed {
 const reader = (bytes: number) => (offset: number) => offset < 4 ? (bytes >>> (offset * 8)) & 0xFF : 0
 
 /** Live over the log: entries come and go as the machine runs and rewinds. */
-export class Z80HistoryView implements MachineHistory {
-	constructor(private readonly log: Z80History | null) {}
-
-	get length(): number {
-		return this.log?.length ?? 0
-	}
-
-	at(index: number): Z80Record | undefined {
-		const log = this.log
-		if (!log || index < 0 || index >= log.length) return undefined
+export class Z80HistoryView extends HistoryView<Z80History, Z80Record> {
+	protected record(log: Z80History, index: number): Z80Record {
 		const kind = log.kindAt(index)
 		const bytes = log.bytesAt(index)
 		const interrupt = kind === ENTRY_INTERRUPT
@@ -52,24 +45,6 @@ export class Z80HistoryView implements MachineHistory {
 			interrupt ? bytes : packInstruction(read, instructionLength(read)),
 			interrupt,
 		)
-	}
-
-	instructionCountAt(index: number): number {
-		return this.log!.countAt(index)
-	}
-
-	slice(from: number, to: number): HistoryRecord[] {
-		const records: HistoryRecord[] = []
-		const end = Math.min(to, this.length)
-		for (let index = Math.max(0, from); index < end; index++) records.push(this.at(index)!)
-		return records
-	}
-
-	indexOfId(id: number): number {
-		const log = this.log
-		if (!log) return -1
-		const index = id - log.firstId
-		return index >= 0 && index < log.length ? index : -1
 	}
 }
 
@@ -120,11 +95,7 @@ function fieldEffect(field: number, old: number, console: Z80Console): Omit<Desc
 }
 
 function described(applied: boolean, parts: Omit<DescribedEffect, 'applied' | 'label'>): DescribedEffect {
-	const held = parts.value === undefined ? parts.text : parts.text ?? hex16(Number(parts.value))
-	const label = held !== undefined
-		? (applied ? `${parts.subject} → ${held}` : `${parts.subject} ${held} →`)
-		: parts.detail !== undefined ? `${parts.subject} ${parts.detail}` : parts.subject
-	return { ...parts, applied, label }
+	return describeEffect(applied, parts, parts.value === undefined ? parts.text : parts.text ?? hex16(Number(parts.value)))
 }
 
 const INTERRUPT_NAMES: Readonly<Record<number, string>> = { [KEYBOARD_DATA]: 'keyboard', [TIMER_DATA]: 'timer', [NMI_DATA]: 'NMI' }
@@ -157,7 +128,7 @@ export function z80HistoryFormatter(log: Z80History | null, console: Z80Console)
 					case EFFECT_MEMORY: at({ subject: `[${hex16(a)}]`, address: a, value: b, text: hex8(b) }); break
 					case EFFECT_FIELD: at(fieldEffect(a, b, console)); break
 					// Output grows a character at a time past the length it replaced.
-					case EFFECT_OUTPUT: at({ subject: 'console', detail: JSON.stringify(console.output.slice(b, b + 1)) }); break
+					case EFFECT_OUTPUT: at({ subject: 'console', detail: textChange((log.timeline.ahead ? log.outputText.text : console.output), a, b) }); break
 					case EFFECT_FRAME_DEPTH: at({ subject: 'call depth', text: String(b) }); break
 				}
 			}

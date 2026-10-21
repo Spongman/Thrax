@@ -1,3 +1,4 @@
+import { DEFAULT_BACKSTEP_LIMIT } from '../../core/settings'
 /**
  * Beta execution history: one entry per state-changing step, each owning a run
  * of effects that hold the values the step replaced.
@@ -9,12 +10,13 @@
  *
  * A step that changes nothing (a repeated RDCHAR wait, a fault) records no
  * entry. Rewinding to entry `index` undoes it and everything after it, leaving
- * the machine about to run that entry's instruction again; the future is
- * dropped and re-running forward recreates it, input included.
+ * the machine about to run that entry's instruction again. The cursor retains
+ * the future for replay; recording a divergent change discards it.
  */
 
 import { HistoryBufferLayout, type HistoryBufferSchema } from '../../core/historyBuffers'
-import { HistoryLog } from '../../core/historyLog'
+import { ReversibleHistory } from '../../core/reversibleHistory'
+import { HistoryText } from '../../core/historyCursor'
 import { FAULT_NONE, SUPERVISOR, type BetaCpu, type BetaEffectSink } from './cpu'
 import type { BetaCallStack, BetaCallStackSink } from './callStack'
 import type { BetaConsole } from './machine'
@@ -28,13 +30,13 @@ const column = (name: string, type: 'u8' | 'i32' | 'u32' | 'f64') => Object.free
  */
 export const betaHistorySchema: HistoryBufferSchema = Object.freeze({
 	entry: Object.freeze([
-		column('pc', 'u32'), column('word', 'i32'), column('kind', 'u8'), column('count', 'f64'),
+		column('pc', 'u32'), column('word', 'i32'), column('kind', 'u8'), column('count', 'f64'), column('controlCount', 'f64'),
 		column('tick', 'i32'), column('keyWait', 'i32'),
 	]),
 	effect: Object.freeze([column('kind', 'u8'), column('a', 'i32'), column('b', 'i32')]),
 })
 
-/** Effect kinds; `b` is always the old value. */
+/** Effect kinds; `b` holds the value exchanged with live state when navigating. */
 export const EFFECT_REGISTER = 0
 /** `a` is the word address. */
 export const EFFECT_MEMORY = 1
@@ -55,7 +57,7 @@ export const EFFECT_PENDING = 10
 export const EFFECT_SEG_BASE = 11
 export const EFFECT_SEG_BOUNDS = 12
 
-export const DEFAULT_HISTORY_LIMIT = 100_000
+export const DEFAULT_HISTORY_LIMIT = DEFAULT_BACKSTEP_LIMIT
 
 /** Entry kinds: a step the CPU ran, a change the user made, or an interrupt taken. */
 export const ENTRY_INSTRUCTION = 0
@@ -80,14 +82,15 @@ const PC = layout.column('entry', 'pc', 'u32')
 const WORD = layout.column('entry', 'word', 'i32')
 const KIND = layout.column('entry', 'kind', 'u8')
 const COUNT = layout.column('entry', 'count', 'f64')
+const CONTROL_COUNT = layout.column('entry', 'controlCount', 'f64')
 const TICK = layout.column('entry', 'tick', 'i32')
 const KEY_WAIT = layout.column('entry', 'keyWait', 'i32')
 const EFFECT_KIND = layout.column('effect', 'kind', 'u8')
 const EFFECT_A = layout.column('effect', 'a', 'i32')
 const EFFECT_B = layout.column('effect', 'b', 'i32')
 
-export class BetaHistory implements BetaEffectSink, BetaCallStackSink {
-	private readonly log = new HistoryLog(layout)
+export class BetaHistory extends ReversibleHistory implements BetaEffectSink, BetaCallStackSink {
+	readonly outputText = new HistoryText()
 	// The open entry's starting state.
 	private start = 0
 	private pcBefore = 0
@@ -107,7 +110,7 @@ export class BetaHistory implements BetaEffectSink, BetaCallStackSink {
 	private instructionCount = 0
 
 	constructor(private readonly target: BetaHistoryTarget, limit = DEFAULT_HISTORY_LIMIT) {
-		this.log.limit = limit
+		super(layout, limit)
 	}
 
 	/** Entries held at least; up to one block more are kept. */
@@ -117,15 +120,6 @@ export class BetaHistory implements BetaEffectSink, BetaCallStackSink {
 
 	set limit(value: number) {
 		this.log.limit = value
-	}
-
-	get length(): number {
-		return this.log.length
-	}
-
-	/** Id of the oldest entry held; ids count entries since the program loaded. */
-	get firstId(): number {
-		return this.log.first
 	}
 
 	/** Absolute position the next effect will take. */
@@ -139,6 +133,7 @@ export class BetaHistory implements BetaEffectSink, BetaCallStackSink {
 
 	/** Opens an entry; call before the CPU steps, or before an edit with ENTRY_EDIT. */
 	begin(kind = ENTRY_INSTRUCTION) {
+		this.timeline.branch()
 		const { cpu, console } = this.target
 		this.kind = kind
 		this.instructionCount = this.target.instructionCount
@@ -168,7 +163,7 @@ export class BetaHistory implements BetaEffectSink, BetaCallStackSink {
 	end(): boolean {
 		const { cpu, console } = this.target
 		if (console) {
-			if (console.output.length !== this.outputLength) this.push(EFFECT_OUTPUT, 0, this.outputLength)
+			if (console.output.length !== this.outputLength) this.push(EFFECT_OUTPUT, console!.output.length, this.outputLength)
 			if (console.inputIndex !== this.inputIndex) this.push(EFFECT_INPUT, 0, this.inputIndex)
 			if (console.waiting !== this.waiting) this.push(EFFECT_WAITING, 0, this.waiting ? 1 : 0)
 			if (console.key !== this.key) this.push(EFFECT_KEY, 0, this.key)
@@ -191,6 +186,7 @@ export class BetaHistory implements BetaEffectSink, BetaCallStackSink {
 		columns[WORD][slot] = this.kind === ENTRY_INTERRUPT ? this.vector : cpu.instruction
 		columns[KIND][slot] = this.kind
 		columns[COUNT][slot] = this.instructionCount
+		columns[CONTROL_COUNT][slot] = this.instructionCount
 		columns[TICK][slot] = this.tick
 		columns[KEY_WAIT][slot] = this.keyWait
 		log.close()
@@ -261,53 +257,37 @@ export class BetaHistory implements BetaEffectSink, BetaCallStackSink {
 	}
 
 	/** Undoes the last entry; false when none is held. */
-	stepBack(): boolean {
-		if (this.log.length === 0) return false
-		this.rewindTo(this.log.length - 1)
-		return true
-	}
-
-	/** Undoes entry `index` and every later one, then forgets them. */
-	rewindTo(index: number) {
+	protected exchange = (index: number, forward: boolean) => {
 		const log = this.log
-		if (!Number.isInteger(index) || index < 0 || index > log.length) throw new RangeError(`No history entry ${index}`)
-		if (index === log.length) return
 		const { cpu, console, callStack } = this.target
-		const stop = this.effectStartAt(index)
-		const count = this.countAt(index)
-		const capacity = log.effects.capacity
-		for (let position = log.effects.end - 1; position >= stop; position--) {
-			const columns = log.effects.block(position).arrays
-			const slot = position % capacity
-			const a = columns[EFFECT_A][slot]
-			const b = columns[EFFECT_B][slot]
+		const start = log.effectStart(index), count = log.effectCount(index)
+		for (let offset = 0; offset < count; offset++) {
+			const position = start + (forward ? offset : count - offset - 1)
+			const columns = log.effects.block(position).arrays, slot = position % log.effects.capacity
+			const a = columns[EFFECT_A][slot], b = columns[EFFECT_B][slot]
 			switch (columns[EFFECT_KIND][slot]) {
-				case EFFECT_REGISTER: cpu.setRegister(a, b); break
-				case EFFECT_MEMORY: cpu.writeWord(a, b); break
-				case EFFECT_PC: cpu.pc = b >>> 0; break
-				case EFFECT_OUTPUT: console!.output = console!.output.slice(0, b); break
-				case EFFECT_INPUT: console!.inputIndex = b; break
-				case EFFECT_WAITING: console!.waiting = b !== 0; break
-				case EFFECT_HALTED: this.target.halted = b !== 0; break
-				case EFFECT_FRAME_WORD: callStack!.setFrameWord(a, b); break
-				case EFFECT_FRAME_DEPTH: callStack!.setDepth(b); break
-				case EFFECT_KEY: console!.key = b; break
-				case EFFECT_PENDING: console!.pending = b; break
-				case EFFECT_SEG_BASE: cpu.segBase = b; break
-				case EFFECT_SEG_BOUNDS: cpu.segBounds = b >>> 0; break
+				case EFFECT_REGISTER: columns[EFFECT_B][slot] = cpu.registers[a]; cpu.setRegister(a, b); break
+				case EFFECT_MEMORY: columns[EFFECT_B][slot] = cpu.readWord(a); cpu.writeWord(a, b); break
+				case EFFECT_PC: columns[EFFECT_B][slot] = cpu.pc; cpu.pc = b >>> 0; break
+				case EFFECT_OUTPUT: columns[EFFECT_B][slot] = console!.output.length; columns[EFFECT_A][slot] = b; console!.output = this.outputText.exchange(console!.output, b); break
+				case EFFECT_INPUT: columns[EFFECT_B][slot] = console!.inputIndex; console!.inputIndex = b; break
+				case EFFECT_WAITING: columns[EFFECT_B][slot] = +console!.waiting; console!.waiting = b !== 0; break
+				case EFFECT_HALTED: columns[EFFECT_B][slot] = +this.target.halted; this.target.halted = b !== 0; break
+				case EFFECT_FRAME_WORD: columns[EFFECT_B][slot] = callStack!.frameWordAt(a); callStack!.setFrameWord(a, b); break
+				case EFFECT_FRAME_DEPTH: columns[EFFECT_B][slot] = callStack!.depth; callStack!.setDepth(b); break
+				case EFFECT_KEY: columns[EFFECT_B][slot] = console!.key; console!.key = b; break
+				case EFFECT_PENDING: columns[EFFECT_B][slot] = console!.pending; console!.pending = b; break
+				case EFFECT_SEG_BASE: columns[EFFECT_B][slot] = cpu.segBase; cpu.segBase = b; break
+				case EFFECT_SEG_BOUNDS: columns[EFFECT_B][slot] = cpu.segBounds; cpu.segBounds = b >>> 0; break
 			}
 		}
+		const entrySlot = (log.first + index) % log.entries.capacity
+		const entries = log.entries.block(log.first + index).arrays
+		{ const held = this.target.tick; this.target.tick = this.column(index, TICK); entries[TICK][entrySlot] = held }
+		{ const held = console!.keyWait; console!.keyWait = this.column(index, KEY_WAIT); entries[KEY_WAIT][entrySlot] = held }
 		cpu.fault = FAULT_NONE
 		cpu.faultAddress = 0
-		this.target.tick = this.column(index, TICK)
-		if (console) console.keyWait = this.column(index, KEY_WAIT)
-		this.target.instructionCount = count
-		log.truncate(index)
-	}
-
-	/** Forgets everything; the machine is left as it is. */
-	clear() {
-		this.log.clear()
+		{ const held = this.target.instructionCount; this.target.instructionCount = entries[CONTROL_COUNT][entrySlot]; entries[CONTROL_COUNT][entrySlot] = held }
 	}
 
 	private push(kind: number, a: number, b: number) {
@@ -319,13 +299,4 @@ export class BetaHistory implements BetaEffectSink, BetaCallStackSink {
 		columns[EFFECT_B][slot] = b
 	}
 
-	private column(index: number, column: number): number {
-		if (!(index >= 0 && index < this.log.length)) throw new RangeError(`No history entry ${index}`)
-		const position = this.log.first + index
-		return this.log.entries.block(position).arrays[column][position % this.log.entries.capacity]
-	}
-
-	private effect(position: number, column: number): number {
-		return this.log.effects.block(position).arrays[column][position % this.log.effects.capacity]
-	}
 }

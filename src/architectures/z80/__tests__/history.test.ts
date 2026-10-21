@@ -38,9 +38,9 @@ function rewindsExactly(code: string, input: string) {
 		if (status === STEP_HALT) break
 	}
 	expect(machine.halted).toBe(true)
-	while (machine.history!.length > 0) {
+	while (machine.history!.timeline.index > 0) {
 		machine.history!.stepBack()
-		const expected = states[machine.history!.length]
+		const expected = states[machine.history!.timeline.index]
 		const actual = stateOf(machine)
 		// What was typed stays typed; the rest is as it was.
 		expect({ ...actual, input: undefined }).toEqual({ ...expected, input: undefined })
