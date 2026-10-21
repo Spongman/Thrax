@@ -24,7 +24,7 @@ describe('DEFAULT_SETTINGS', () => {
 			// one instruction may push several.  THRAX keeps whole instructions,
 			// at about 150 bytes each and no cost to the speed of a run, so the
 			// default is what it takes to rewind a small program from its end.
-			backstepLimit: 100_000,
+			backstepLimit: 1_000_000,
 			hexDimming: 'nibbles', // THRAX's own: how far a hex number's leading zeros are dimmed
 			// THRAX's own, and on: a click that moves another panel is worth
 			// following, and a value that moved is worth seeing move.

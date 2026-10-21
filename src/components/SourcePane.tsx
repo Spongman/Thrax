@@ -2,14 +2,16 @@ import React from 'react'
 import { createPortal } from 'react-dom'
 import Editor, { type OnMount } from '@monaco-editor/react'
 import type { editor } from 'monaco-editor'
-import type { CodeRow } from '../architectures/contracts'
-import { formatHex, formatWord } from '../core/format'
+import type { CodeRow, TokenDescription } from '../architectures/contracts'
+import { formatHex, formatAddress } from '../core/format'
 import { splitHex } from './HexNumber'
 import type { HexDimming } from '../core/settings'
 import { useTHRAXStore } from '../store/thraxStore'
 import { setFindReplaceEditor } from '../services/findReplace'
 import { heatLevel } from '../tools/profile'
 import { useFlash } from './highlight'
+import { TokenTooltipContent } from './TokenTooltip'
+import { tipParagraphs } from '../services/tokenTooltip'
 import './SourcePane.css'
 
 /** Gutter columns are separated, and closed off, by two spaces. */
@@ -46,8 +48,8 @@ export function gutterAddressClass(address: number | undefined, pc: number | nul
  * span per decoration, and the zeros need a class of their own.  Empty parts
  * are dropped so a decoration is only spent on something to draw.
  */
-export function addressRuns(address: number, mode: HexDimming): { text: string, dim: boolean }[] {
-	const { prefix, zeros, rest } = splitHex(formatWord(address), mode)
+export function addressRuns(address: number, mode: HexDimming, columns = ADDRESS_COLUMNS): { text: string, dim: boolean }[] {
+	const { prefix, zeros, rest } = splitHex(`0x${formatAddress(address).slice(2).padStart(columns - 2, '0')}`, mode)
 	return [
 		{ text: prefix, dim: false },
 		{ text: zeros, dim: true },
@@ -89,46 +91,15 @@ interface AssemblyTip {
 	/** Whether it hangs below the row or sits above it, as Monaco's own does. */
 	above: boolean
 	paragraphs: string[]
+	token: Pick<TokenDescription, 'contents' | 'reference'>
 }
 
-/** The paragraphs of a data tip, which is written as Markdown. */
-export function tipParagraphs(contents: string[]): string[] {
-	return contents
-		.flatMap((entry) => entry.split('\n\n'))
-		.map((paragraph) => paragraph.trim())
-		.filter((paragraph) => paragraph.length > 0)
-}
-
-/**
- * One paragraph of a data tip, split into the runs it is drawn as.
- *
- * The tips are written for Monaco, which renders them as Markdown, and this one
- * is drawn inside the editor beside the gutter: the same emphasis and the same
- * code spans have to come out of it, or the two hovers would not look alike.
- * Only the two marks the tips actually use are understood.
- */
-export function tipRuns(paragraph: string): { text: string, kind: 'plain' | 'strong' | 'code' }[] {
-	const runs: { text: string, kind: 'plain' | 'strong' | 'code' }[] = []
-	let plain = ''
-	for (const match of paragraph.matchAll(/\*\*([^*]+)\*\*|`([^`]+)`|([\s\S]+?)(?=\*\*|`|$)/g)) {
-		const [, strong, code, rest] = match
-		if (rest !== undefined) {
-			plain += rest
-			continue
-		}
-		if (plain.length > 0) runs.push({ text: plain, kind: 'plain' })
-		plain = ''
-		runs.push(strong !== undefined ? { text: strong, kind: 'strong' } : { text: code, kind: 'code' })
-	}
-	if (plain.length > 0) runs.push({ text: plain, kind: 'plain' })
-	return runs
-}
+export { tipParagraphs, tipRuns } from '../services/tokenTooltip'
 
 /** A file that assembled to nothing has no machine words and no breakpoints. */
 const NO_CODE_WORDS = new Map<number, CodeRow[]>()
 const NO_LINES: ReadonlySet<number> = new Set<number>()
 
-const formatAddress = formatWord
 
 /** An instruction reads as its encoding; data as its bytes, apart. */
 const formatCodeWord = (row: CodeRow) => row.instruction
@@ -284,10 +255,10 @@ function SourcePane({ documentId }: SourcePaneProps) {
 			left: rect.left - editorRect.left + (described.start / text.length) * rect.width,
 			top: above ? rect.top - editorRect.top - HOVER_GAP : rect.bottom - editorRect.top + HOVER_GAP,
 			above,
-			paragraphs,
+			paragraphs, token: described,
 		}
 		const current = assemblyTipRef.current
-		if (current && current.left === next.left && current.top === next.top && current.paragraphs.join('\n') === paragraphs.join('\n')) return
+		if (current && current.left === next.left && current.top === next.top && current.token.reference === described.reference && current.paragraphs.join('\n') === paragraphs.join('\n')) return
 		// Once a tip is up it follows the pointer at once, as Monaco's does; the
 		// delay is what it waits before the first one.
 		window.clearTimeout(tipTimer.current)
@@ -727,6 +698,7 @@ function SourcePane({ documentId }: SourcePaneProps) {
 	// and the source, one row per machine word.
 	const gutterText = React.useMemo(() => {
 		const rows = [...codeWords.values()].flat()
+		const addressColumns = rows.reduce((width, row) => Math.max(width, formatAddress(row.address).length), ADDRESS_COLUMNS)
 		const assembly = new Map<number, string>()
 		rows.forEach((row, index) => {
 			assembly.set(row.address, disassembly?.row(row, rows[index + 1]) ?? '')
@@ -741,10 +713,10 @@ function SourcePane({ documentId }: SourcePaneProps) {
 			const asm = showDisassembly ? (entry ? assembly.get(entry.address) ?? '' : '').padEnd(assemblyWidth) : ''
 			// The gutter's own gap, plus the address column's width when this line
 			// has no address to fill it, so the source stays aligned either way.
-			const lead = !showAddresses ? '' : (entry ? '' : ' '.repeat(ADDRESS_COLUMNS)) + COLUMN_GAP
+			const lead = !showAddresses ? '' : (entry ? '' : ' '.repeat(addressColumns)) + COLUMN_GAP
 			return gutterParts(lead, code, asm)
 		}
-		return { restParts }
+		return { restParts, addressColumns }
 	}, [codeWords, disassembly, showAddresses, showCodeBytes, showDisassembly])
 
 	React.useEffect(() => {
@@ -760,7 +732,7 @@ function SourcePane({ documentId }: SourcePaneProps) {
 			const words = codeWords.get(line)
 			const current = words?.[0].address === pc
 			const addressClass = gutterAddressClass(words?.[0].address, pc) + (line === hoveredLine ? ' address-hovered' : '')
-			const runs = showAddresses && words !== undefined ? addressRuns(words[0].address, hexDimming) : []
+			const runs = showAddresses && words !== undefined ? addressRuns(words[0].address, hexDimming, gutterText.addressColumns) : []
 			const parts = restParts(words?.[0])
 			const wordClass = current ? 'code-word code-word-current' : 'code-word'
 			// Every `before` is injected ahead of every `after`, and injections that
@@ -850,13 +822,13 @@ function SourcePane({ documentId }: SourcePaneProps) {
 					// The address column can be off, in which case a word row has no
 					// address either: the gutter's own gap belongs to the column, so
 					// drawing one anyway runs it straight into the bytes.
-					for (const run of showAddresses ? addressRuns(entry.address, hexDimming) : []) {
+					for (const run of showAddresses ? addressRuns(entry.address, hexDimming, gutterText.addressColumns) : []) {
 						const part = document.createElement('span')
 						if (run.dim) part.className = 'hex-zero'
 						part.textContent = run.text
 						rowAddress.append(part)
 					}
-					rowAddress.title = `Show ${formatWord(entry.address)} in memory`
+					rowAddress.title = `Show ${formatAddress(entry.address)} in memory`
 					rowAddress.addEventListener('mousedown', (event) => {
 						event.preventDefault()
 						event.stopPropagation()
@@ -881,7 +853,7 @@ function SourcePane({ documentId }: SourcePaneProps) {
 					glyph.className = breakpoints.has(entry.address) ? 'code-word-breakpoint active' : 'code-word-breakpoint'
 					glyph.style.left = `${layout.glyphMarginLeft}px`
 					glyph.style.width = `${layout.glyphMarginWidth}px`
-					glyph.title = `Toggle breakpoint at ${formatWord(entry.address)}`
+					glyph.title = `Toggle breakpoint at ${formatAddress(entry.address)}`
 					glyph.addEventListener('mousedown', (event) => {
 						event.preventDefault()
 						event.stopPropagation()
@@ -941,17 +913,7 @@ function SourcePane({ documentId }: SourcePaneProps) {
 				>
 					<div className="monaco-hover-content">
 						<div className="hover-row markdown-hover">
-							<div className="hover-contents">
-								{assemblyTip.paragraphs.map((paragraph, index) => (
-									<p key={index}>
-										{tipRuns(paragraph).map((run, runIndex) => (
-											run.kind === 'strong' ? <strong key={runIndex}>{run.text}</strong>
-												: run.kind === 'code' ? <code key={runIndex}>{run.text}</code>
-													: <React.Fragment key={runIndex}>{run.text}</React.Fragment>
-										))}
-									</p>
-								))}
-							</div>
+							<TokenTooltipContent token={assemblyTip.token} />
 						</div>
 					</div>
 				</div>,

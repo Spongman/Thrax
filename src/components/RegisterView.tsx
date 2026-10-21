@@ -1,3 +1,4 @@
+import { registerAddress } from '../core/format'
 import React from 'react'
 import './RegisterView.css'
 import './ToggleGroup.css'
@@ -173,8 +174,7 @@ const formatBits = (format: Format, entry: RegisterEntry) => {
 }
 
 /** The address a value names, if it is small enough to be one; unsigned either way. */
-const addressOf = (bits: RegisterValue): number | null => typeof bits === 'number' ? bits >>> 0
-	: bits <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(bits) : null
+const addressOf = registerAddress
 
 /** A value typed into a cell, read as the register's width. */
 const parseEdited = (text: string, format: Format, entry: RegisterEntry): RegisterValue | null =>

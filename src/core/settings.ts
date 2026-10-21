@@ -51,9 +51,8 @@ export interface ThraxSettings {
 	highlightChangeColor: string
 	/**
 	 * Instructions the history keeps, and so how far back a run can be stepped.
-	 * An entry costs about 370 bytes, measured over both arithmetic and
-	 * store-heavy code, so the default holds a whole small program at around
-	 * 37 MB and the maximum covers an uninterrupted run.
+	 * Storage grows with the recorded entries; its cost depends on the
+	 * architecture's history schema and each instruction's effects.
 	 */
 	backstepLimit: number
 }
@@ -64,7 +63,7 @@ export interface ThraxSettings {
  * one uninterrupted run and no more; past that the memory is the user's to
  * spend, and a bound keeps a mistyped number from taking the tab with it.
  */
-export const DEFAULT_BACKSTEP_LIMIT = 100_000
+export const DEFAULT_BACKSTEP_LIMIT = 1_000_000
 export const MAX_BACKSTEP_LIMIT = 1_000_000
 
 export const DEFAULT_SETTINGS: ThraxSettings = {

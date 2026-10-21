@@ -26,13 +26,13 @@ export interface DataRun {
 export function dataRuns(entries: readonly DataDeclaration[]): DataRun[] {
 	return entries
 		.filter((entry) => entry.directive !== undefined)
-		.map((entry) => ({ address: entry.address >>> 0, directive: entry.directive!, length: entry.bytes.length }))
+		.map((entry) => ({ address: entry.address, directive: entry.directive!, length: entry.bytes.length }))
 		.sort((left, right) => left.address - right.address)
 }
 
 /** The run `address` falls in, or undefined where nothing declared it. */
 export function runAt(runs: readonly DataRun[], address: number): DataRun | undefined {
-	const wanted = address >>> 0
+	const wanted = address
 	let low = 0
 	let high = runs.length - 1
 	while (low <= high) {

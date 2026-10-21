@@ -2,9 +2,9 @@ import React from 'react'
 import './MemoryView.css'
 import './ToggleGroup.css'
 import type { Disassembly, MemoryInspector, MemorySection } from '../architectures/contracts'
-import { formatHex, formatWord, parseWord } from '../core/format'
+import { formatHex, formatAddress, parseAddress } from '../core/format'
 import { nextToggles } from './toggleGroup'
-import HexNumber, { HexWord, dimmedDigits } from './HexNumber'
+import HexNumber, { HexAddress, dimmedDigits } from './HexNumber'
 import { afterWrite, applyNibble, asciiByte, beforeCaret, Column, hexDigit, moveCaret, type Caret, type CaretBounds } from './memoryCaret'
 import { flashClass, useChangedEntries, useFlash } from './highlight'
 import type { HexDimming } from '../core/settings'
@@ -54,7 +54,6 @@ const MAX_WINDOW_ROWS = 16384
 const ADDRESS_COLUMNS = 12
 const OVERSCAN_ROWS = 6
 
-const formatAddress = formatWord
 
 const sectionForAddress = (sections: readonly MemorySection[], address: number) =>
 	sections.find((section) => address >= section.start && address <= section.end)
@@ -185,7 +184,7 @@ const MemoryRow = React.memo(function MemoryRow({ row, top, left, width, groupSi
 							// Navigation wins where both apply: the click is the more
 							// recent thing, and one colour on a cell reads better than two.
 							group.start === flashed ? flashClass('navigation')
-								: changed.has(formatWord(group.start)) ? flashClass('change') : '',
+								: changed.has(formatAddress(group.start)) ? flashClass('change') : '',
 						].filter(Boolean).join(' ')}
 					>
 						{/* Little-endian: the highest address is the most significant digit pair. */}
@@ -296,10 +295,10 @@ function MemoryView({ memory, sections: offered, disassembly, pc, returnAddresse
 		return powerOfTwoRows ? Math.max(groupSize, 2 ** Math.floor(Math.log2(bytes))) : bytes
 	}, [charWidth, groupSize, powerOfTwoRows, showAscii, viewport.width])
 
-	const alignedWindowStart = Math.max(section.start, windowStart - (windowStart % bytesPerRow)) >>> 0
+	const alignedWindowStart = Math.max(section.start, windowStart - (windowStart % bytesPerRow))
 	const windowBytes = Math.min(section.end - alignedWindowStart + 1, MAX_WINDOW_ROWS * bytesPerRow)
 	const totalRows = Math.max(1, Math.ceil(windowBytes / bytesPerRow))
-	const windowEnd = (alignedWindowStart + windowBytes - 1) >>> 0
+	const windowEnd = Math.min(Number.MAX_SAFE_INTEGER, alignedWindowStart + windowBytes - 1)
 
 	// Fixed-size row pool: the slot count only changes on resize, so scrolling
 	// rewrites the contents of the same row elements instead of remounting them.
@@ -345,9 +344,9 @@ function MemoryView({ memory, sections: offered, disassembly, pc, returnAddresse
 	}, [alignedWindowStart, bytesPerRow, pendingReveal, toolbarHeight, totalRows, viewport.height])
 
 	const rows = React.useMemo<MemoryRowData[]>(() => Array.from({ length: visibleRows }, (unused, index) => {
-		const rowAddress = (alignedWindowStart + (firstRow + index) * bytesPerRow) >>> 0
+		const rowAddress = alignedWindowStart + (firstRow + index) * bytesPerRow
 		const bytes = Array.from({ length: bytesPerRow }, (unusedByte, offset) => {
-			const address = (rowAddress + offset) >>> 0
+			const address = rowAddress + offset
 			return { address, value: byteAt(memory, address) }
 		})
 		const groups = Array.from({ length: bytesPerRow / groupSize }, (unusedGroup, groupIndex) => {
@@ -370,7 +369,7 @@ function MemoryView({ memory, sections: offered, disassembly, pc, returnAddresse
 	// Only the rows on screen are diffed: a word nobody is looking at cannot
 	// flash, and the whole of memory is far more than a panel ever shows.
 	const visibleWords = React.useMemo(() => rows.flatMap((row) =>
-		row.groups.flatMap((group) => group.value === null ? [] : [[formatWord(group.start), group.value] as const])),
+		row.groups.flatMap((group) => group.value === null ? [] : [[formatAddress(group.start), group.value] as const])),
 	[rows])
 	// A change flash reports the machine's work, not the user's: an edit made here
 	// bumps this so the diff it causes is absorbed rather than lit.
@@ -514,7 +513,7 @@ function MemoryView({ memory, sections: offered, disassembly, pc, returnAddresse
 
 	const tooltip = React.useMemo(() => {
 		if (!hover) return null
-		const bytes = Array.from({ length: hover.size }, (unused, offset) => byteAt(memory, (hover.start + offset) >>> 0))
+		const bytes = Array.from({ length: hover.size }, (unused, offset) => byteAt(memory, hover.start + offset))
 		const value = groupValue(bytes)
 		const signed = BigInt.asIntN(hover.size * 8, value)
 		const range = hover.size > 1
@@ -543,12 +542,12 @@ function MemoryView({ memory, sections: offered, disassembly, pc, returnAddresse
 	}
 
 	const goToAddress = () => {
-		const address = parseWord(addressInput)
-		if (address === null || address < 0 || address > 0xffffffff) {
-			setAddressError('Enter a valid 32-bit address')
+		const address = parseAddress(addressInput)
+		if (address === null) {
+			setAddressError('Enter a valid address')
 			return
 		}
-		if (!revealAddress(address >>> 0)) setAddressError('Address is outside every memory section')
+		if (!revealAddress(address)) setAddressError('Address is outside every memory section')
 	}
 
 	return (
@@ -626,7 +625,7 @@ function MemoryView({ memory, sections: offered, disassembly, pc, returnAddresse
 							<button className="memory-go" onClick={goToAddress}>Go</button>
 						</div>
 						<span className="memory-status">
-							<HexWord value={alignedWindowStart} /> - <HexWord value={windowEnd} />
+							<HexAddress value={alignedWindowStart} /> - <HexAddress value={windowEnd} />
 						</span>
 					</div>
 

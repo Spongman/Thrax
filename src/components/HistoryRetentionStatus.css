@@ -1,0 +1,11 @@
+.history-retention {
+	flex: 0 0 auto;
+	padding: 3px 8px;
+	border-top: 1px solid var(--border-color, #444);
+	font-size: 11px;
+	line-height: 1.5;
+}
+
+.history-retention summary {
+	cursor: pointer;
+}

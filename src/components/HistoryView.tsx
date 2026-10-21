@@ -1,9 +1,10 @@
 import React from 'react'
 import './HistoryView.css'
+import { HistoryRetentionStatus } from './HistoryRetentionStatus'
 import type { DescribedEffect, HistoryFormatter, HistoryRecord, MachineHistory } from '../architectures/contracts'
-import { formatWord } from '../core/format'
+import { formatAddress } from '../core/format'
 import { useTHRAXStore } from '../store/thraxStore'
-import { HexWord } from './HexNumber'
+import { HexAddress, HexWord } from './HexNumber'
 import { rowAt, rowForScroll, scrollStep } from './historyDrag'
 import { rowTop, rowWindow, useFixedRowScroller } from './rowWindow'
 
@@ -18,13 +19,13 @@ const OVERSCAN_ROWS = 8
  */
 function ChipSubject({ chip }: { chip: DescribedEffect }) {
 	if (chip.address === undefined) return <>{chip.subject}</>
-	const text = formatWord(chip.address)
+	const text = formatAddress(chip.address)
 	const at = chip.subject.indexOf(text)
 	if (at < 0) return <>{chip.subject}</>
 	return (
 		<>
 			{chip.subject.slice(0, at)}
-			<HexWord value={chip.address} />
+			<HexAddress value={chip.address} />
 			{chip.subject.slice(at + text.length)}
 		</>
 	)
@@ -60,7 +61,7 @@ function EffectChip({ chip, hoveredAddress, onHoverAddress, hoveredRegister, onH
 	// Everything from the disassembly rightwards runs to the entry, so a chip
 	// with nowhere of its own to go is still worth clicking.
 	const title = chip.register !== undefined ? `Run to here and go to ${chip.register}`
-		: chip.address !== undefined ? `Run to here and show ${formatWord(chip.address)} in memory`
+		: chip.address !== undefined ? `Run to here and show ${formatAddress(chip.address)} in memory`
 			: `${chip.label}: run to here`
 	return (
 		<button
@@ -322,7 +323,7 @@ function HistoryView({ entries, cursor, version, sourceOf, onSelect, onSetNow, o
 										if (source) onSelectSource(source.file, source.line)
 									}}
 								>
-									<HexWord value={entry.address} />
+									<HexAddress value={entry.address} />
 								</button>
 								<button
 									type="button"
@@ -378,6 +379,7 @@ function HistoryView({ entries, cursor, version, sourceOf, onSelect, onSetNow, o
 					})}
 				</div>
 			</div>
+			<HistoryRetentionStatus retention={entries.retention} />
 		</div>
 	)
 }

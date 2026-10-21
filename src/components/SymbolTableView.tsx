@@ -2,7 +2,7 @@ import React from 'react'
 import './SymbolTableView.css'
 import './ToggleGroup.css'
 import type { DataDeclaration, MemoryInspector, SourceLocation, SymbolTables } from '../architectures/contracts'
-import { formatWord } from '../core/format'
+import { formatAddress } from '../core/format'
 import HexNumber from './HexNumber'
 import FilterInput from './FilterInput'
 import { useHover, useHovered } from '../store/hover'
@@ -190,7 +190,7 @@ function SymbolTableView({ symbols, onSelectAddress, hoveredAddress = null, hove
 								const source = sourceOf?.(row) ?? null
 								// Both halves of a row go to the same two places, so they say so
 								// in the same words; a name with no line still has an address.
-								const goTitle = `Show ${formatWord(row.address)} in memory${source ? ` and ${source.file}:${source.line} in the editor` : ''}`
+								const goTitle = `Show ${formatAddress(row.address)} in memory${source ? ` and ${source.file}:${source.line} in the editor` : ''}`
 								// A name is the address it stands for, so hovering either lights
 								// the memory, the history and the source too.
 								const hovers = {
@@ -213,7 +213,7 @@ function SymbolTableView({ symbols, onSelectAddress, hoveredAddress = null, hove
 													{...hovers}
 													onClick={() => goTo(row)}
 												>
-													<HexNumber text={formatWord(row.address)} />
+													<HexNumber text={formatAddress(row.address)} />
 												</button>
 											</td>
 										)}

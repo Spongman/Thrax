@@ -36,7 +36,8 @@ describe.each([
 		expect(state().instructionCount).toBe(1)
 		await state().continue()
 		expect(state().halted).toBe(true)
-		expect(state().registers[register.id]).toBe(6)
+		// Continuing replays the retained manual edit, just as MIPS does.
+		expect(state().registers[register.id]).toBe(42)
 		expect(state().workspaceSnapshot().architecture).toBe(id)
 		expect(await state().switchArchitecture('mips')).toBe(true)
 		expect(state().hasMachine).toBe(false)

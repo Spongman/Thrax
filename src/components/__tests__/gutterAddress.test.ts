@@ -11,6 +11,10 @@ import { addressRuns, gutterAddressClass } from '../SourcePane'
  */
 
 describe('the runs a gutter address is drawn as', () => {
+	it('retains high address bits and aligns a mixed-width file', () => {
+		expect(addressRuns(0x1_0000_0004, 'off').map(run => run.text).join('')).toBe('0x100000004')
+		expect(addressRuns(4, 'off', 11).map(run => run.text).join('')).toBe('0x000000004')
+	})
 	it('leads with the prefix, then the zeros to dim, then the value', () => {
 		expect(addressRuns(0x00400000, 'bytes')).toEqual([
 			{ text: '0x', dim: false },
