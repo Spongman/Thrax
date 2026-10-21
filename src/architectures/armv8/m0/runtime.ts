@@ -1,6 +1,15 @@
+import { REGISTER_IDS, describe } from './instructions'
+import { describeValueEffect, textChange } from '../../../core/historyView'
+import { parseIntegerInput, readCString } from '../../../core/console'
+import { HistoryText } from '../../../core/historyCursor'
+import { notifyHistorySeek } from '../../../core/observer'
+import { editTransaction } from '../../../core/editTransaction'
+import { rewindHistoryTo } from '../../../core/historyCursor'
+import { MemoryEdits } from '../../../core/memoryEdits'
+import { historyNeighbour } from '../../../core/historyCursor'
 /** Thread-mode ARMv6-M teaching machine. Faults are atomic; NVIC/exception entry is not emulated. */
 import type { ExecutionObserver } from '../../../core/observer'
-import { yieldToHost } from '../../../core/yieldToHost'
+import { ExecutionController } from '../../../core/executionController'
 import {
 	addWithCarry,
 	alu,
@@ -15,7 +24,6 @@ import type {
 	CallFrame,
 	DescribedEffect,
 	HistoryFormatter,
-	InstructionInfo,
 	Machine,
 	MachineOptions,
 	MemoryInspector,
@@ -26,61 +34,7 @@ import { M0History, type M0Record, type SavedState } from './history'
 import { decode, disassemble, sign, TEXT_BASE, type Instruction } from './isa'
 import type { M0Program } from './program'
 
-export const REGISTER_IDS = [
-	...Array.from({ length: 15 }, (_, i) => `R${i}`),
-	'PC',
-	'APSR',
-	'MSP',
-	'PSP',
-	'CONTROL',
-	'PRIMASK',
-	'EVENT',
-]
-const infoCache = new Map<number, InstructionInfo>()
-export function describe(i: Instruction): InstructionInfo {
-	const key = i.word + i.second * 65536,
-		old = infoCache.get(key)
-	if (old) return old
-	const load = i.name.startsWith('ldr') || i.name === 'ldmia' || i.name === 'pop',
-		store = i.name.startsWith('str') || i.name === 'stmia' || i.name === 'push'
-	const branch = i.format === 'conditional',
-		jump = ['b', 'bl', 'bx', 'blx'].includes(i.name) || (i.name === 'pop' && !!(i.list & 0x8000))
-	const registers = new Set<number>()
-	if (
-		['alu', 'rrr', 'imm3', 'shift', 'high', 'memimm', 'memreg', 'address', 'sp', 'multiple'].includes(
-			i.format,
-		)
-	)
-		registers.add(i.n)
-	if (['alu', 'rrr', 'high', 'unary', 'exchange', 'memreg'].includes(i.format)) registers.add(i.m)
-	if (store) registers.add(i.d)
-	if (i.name === 'push' || i.name === 'pop') registers.add(13)
-	if (i.name === 'push' || i.name === 'stmia')
-		for (let n = 0; n < 16; n++) if (i.list & (1 << n)) registers.add(n)
-	const writes =
-		store ||
-		branch ||
-		(jump && i.name !== 'bl' && i.name !== 'blx') ||
-		['cmp', 'cmn', 'tst', 'svc', 'bkpt', 'udf', 'msr'].includes(i.name) ||
-		i.format === 'system'
-			? -1
-			: i.name === 'bl' || i.name === 'blx'
-				? 14
-				: i.d
-	const info = {
-		mnemonic: i.name,
-		category: load || store ? 3 : branch ? 2 : jump ? 1 : i.format === 'trap' ? 5 : 0,
-		encoding: i.size === 4 ? 1 : 0,
-		reads: [...registers],
-		writes: writes < 0 ? [] : [writes],
-		isLoad: load,
-		isBranch: branch,
-		isJump: jump,
-	}
-	if (infoCache.size >= 4096) infoCache.clear()
-	infoCache.set(key, info)
-	return info
-}
+export { REGISTER_IDS, describe } from './instructions'
 
 export class M0Runtime implements Machine {
 	/** R0..R15, APSR, MSP, PSP, CONTROL, PRIMASK, event register. */
@@ -93,12 +47,14 @@ export class M0Runtime implements Machine {
 	readonly callStack: CallFrame[] = []
 	readonly historyFormat: HistoryFormatter
 	onProgress: (() => void) | null = null
-	halted = false
+	private cpuHalted = false
+	get halted() { return this.cpuHalted || this.execution.stopped }
+	set halted(value: boolean) { this.cpuHalted = value }
 	paused = false
 	instructionCount = 0
 	console = ''
+	private readonly outputText = new HistoryText()
 	private waiting = false
-	private running = false
 	private disposed = false
 	private speed: number | null
 	private paced: ReadonlySet<number> | null = null
@@ -110,6 +66,24 @@ export class M0Runtime implements Machine {
 		outputLength: 0,
 		pending: false,
 	}
+	private readonly execution = new ExecutionController(this, {
+		speed: () => this.speed,
+		pacedAddresses: () => this.paced,
+		depth: () => this.callStack.length,
+		ready: () => !this.waiting || this.history.timeline.ahead,
+	})
+
+	private readonly memoryEdits = new MemoryEdits({
+		region: () => this.disposed ? null : ({ start: TEXT_BASE, end: TEXT_BASE + this.memory.length - 1 }),
+		read: (address) => this.memory[address - TEXT_BASE],
+		commit: (address, bytes) => {
+			this.edit(() => {
+				for (let i = 0; i < bytes.length; i++) this.put(address + i, bytes[i])
+			})
+			return true
+		},
+	})
+
 	constructor(
 		readonly program: M0Program,
 		memoryBytes: number,
@@ -147,23 +121,34 @@ export class M0Runtime implements Machine {
 		return this.waiting && !this.halted ? { type: 'integer' as const, prompt: 'SVC #5: read integer' } : null
 	}
 	get historyCursor() {
-		return this.history.length
+		return this.history.timeline.index
 	}
 	private saved() {
 		const s = this.snapshot
 		s.pc = this.pc
 		s.count = this.instructionCount
-		s.halted = this.halted
+		s.halted = this.cpuHalted
 		s.outputLength = this.console.length
 		s.pending = this.waiting
 		return s
+	}
+	private moveHistory(forward = false): boolean {
+		if (forward && !this.history.timeline.ahead) return false
+		if (!this.history.timeline.ahead) this.outputText.text = this.console
+		const moved = this.history.undo(this.restore, (address, value) => {
+			const old = this.memory[address - TEXT_BASE]
+			this.memory[address - TEXT_BASE] = value
+			return old
+		}, this.saved(), this.callStack, forward)
+		if (moved && forward) notifyHistorySeek(this.observers, this.instructionCount)
+		return moved
 	}
 	private restore = (s: SavedState) => {
 		this.registers.set(s.registers)
 		this.pc = s.pc
 		this.instructionCount = s.count
 		this.halted = s.halted
-		this.console = this.console.slice(0, s.outputLength)
+		this.console = this.outputText.exchange(this.console, s.outputLength)
 		this.waiting = s.pending
 		if (s.frameAction === 1) this.callStack.pop()
 		else if (s.frameAction === 2 && s.frame) this.callStack.push(s.frame)
@@ -226,7 +211,9 @@ export class M0Runtime implements Machine {
 			this.history.frame(false, this.callStack.pop()!)
 	}
 	step() {
-		if (this.halted || this.waiting || this.disposed) return
+		if (this.disposed) return
+		if (this.moveHistory(true)) return
+		if (this.halted || this.waiting) return
 		const i = this.instruction(),
 			address = this.pc
 		if (i.name === 'svc' && i.imm === 5) {
@@ -244,10 +231,9 @@ export class M0Runtime implements Machine {
 			this.history.close()
 		} catch (error) {
 			this.history.close()
-			this.history.undo(this.restore, (a, v) => {
-				this.memory[a - TEXT_BASE] = v
-			})
-			for (const o of this.observers) o.onSeek?.(this.instructionCount)
+			this.moveHistory()
+			this.history.timeline.branch()
+			notifyHistorySeek(this.observers, this.instructionCount)
 			throw error
 		}
 	}
@@ -454,25 +440,17 @@ export class M0Runtime implements Machine {
 		else if (service === 1) this.console += String(arg)
 		else if (service === 11) this.console += String.fromCharCode(arg & 255)
 		else if (service === 4) {
-			let at = arg >>> 0,
-				text = ''
-			for (let n = 0; n < this.memory.length; n++) {
-				this.range(at, 1)
-				const byte = this.memory[at++ - TEXT_BASE]
-				if (!byte) {
-					this.console += text
-					return
-				}
-				text += String.fromCharCode(byte)
-			}
-			throw new Error('Unterminated console string')
+			this.console += readCString(arg >>> 0, this.memory.length, address => {
+				this.range(address, 1)
+				return this.memory[address - TEXT_BASE]
+			})
 		} else
 			throw new Error(`Unsupported teaching SVC #${service}; hardware exception delivery is not implemented`)
 	}
 	provideInput(text: string) {
-		if (!this.waiting || this.disposed || !/^[+-]?\d+$/.test(text.trim())) return false
-		const value = Number(text)
-		if (!Number.isInteger(value) || value < -2147483648 || value > 2147483647) return false
+		if (!this.waiting || this.disposed) return false
+		const value = parseIntegerInput(text, 32)
+		if (value === null) return false
 		this.history.begin(this.saved(), 0xdf05)
 		for (const o of this.observers) o.onInstruction?.(this.pc, decode(0xdf05), this.instructionCount)
 		this.registers[0] = value
@@ -496,89 +474,44 @@ export class M0Runtime implements Machine {
 		const pos = log.first + index,
 			slot = pos % log.entries.capacity,
 			c = log.entries.block(pos).buffers.columns,
-			nextPos = pos + 1,
-			next = index + 1 < log.length ? log.entries.block(nextPos).buffers.columns : null,
-			nextSlot = nextPos % log.entries.capacity,
+			neighbour = historyNeighbour(log, this.historyCursor, index),
+			next = neighbour?.columns,
+			nextSlot = neighbour?.slot ?? 0,
 			out: DescribedEffect[] = []
 		for (let n = 0; n < 21; n++) {
 			const before = c.registers[slot * 22 + n],
 				after = next ? next.registers[nextSlot * 22 + n] : this.registers[n]
 			if (before !== after) {
-				const value = applied ? before : after
-				out.push({
+				const value = before
+				out.push(describeValueEffect(applied, {
 					subject: REGISTER_IDS[n],
 					register: REGISTER_IDS[n],
-					value: value >>> 0,
-					applied,
-					label: `${REGISTER_IDS[n]} = 0x${(value >>> 0).toString(16)}`,
-				})
+					value: value >>> 0
+				}, 32))
 			}
 		}
 		for (let p = log.effectStart(index); p < log.effectStart(index) + log.effectCount(index); p++) {
 			const e = log.effects.block(p).buffers.columns,
 				s = p % log.effects.capacity
-			out.push({
+			out.push(describeValueEffect(applied, {
 				subject: `[0x${e.address[s].toString(16)}]`,
 				address: e.address[s],
-				value: e[applied ? 'value' : 'next'][s],
-				applied,
-				label: applied ? 'Memory before instruction' : 'Memory after instruction',
-			})
+				value: e.value[s]
+			}, 32))
 		}
 		const beforeLength = c.outputLength[slot],
 			afterLength = next ? next.outputLength[nextSlot] : this.console.length
 		if (beforeLength !== afterLength)
-			out.push({
+			out.push(describeValueEffect(applied, {
 				subject: 'console',
-				detail: JSON.stringify(this.console.slice(beforeLength, afterLength)),
-				applied,
-				label: 'Console output',
-			})
-		if (c.halted[slot] !== (next ? next.halted[nextSlot] : +this.halted))
-			out.push({ subject: 'halted', applied, label: 'Machine halted' })
+				detail: textChange(this.history.timeline.ahead ? this.outputText.text : this.console, beforeLength, afterLength)
+			}, 32))
+		if (c.halted[slot] !== (next ? next.halted[nextSlot] : +this.cpuHalted))
+			out.push(describeValueEffect(applied, { subject: 'halted' }, 32))
 		return out
 	}
-	private async runUntil(done: () => boolean) {
-		if (this.running || this.disposed || this.halted) return
-		this.running = true
-		this.paused = false
-		let first = true
-		try {
-			while (this.running && !this.disposed && !this.halted && !this.waiting) {
-				const start = performance.now(),
-					batch = this.speed === null ? 20000 : Math.max(1, Math.ceil(this.speed / 30))
-				let visible = 0
-				for (
-					let n = 0;
-					n < 20000 &&
-					visible < batch &&
-					performance.now() - start < 16 &&
-					this.running &&
-					!this.halted &&
-					!this.waiting;
-					n++
-				) {
-					if (!first && (done() || this.breakpoints.has(this.pc))) {
-						this.paused = true
-						return
-					}
-					first = false
-					const pc = this.pc
-					this.step()
-					if (!this.paced || this.paced.has(pc)) visible++
-				}
-				this.onProgress?.()
-				await yieldToHost()
-				if (this.speed !== null) {
-					const speed = this.speed,
-						deadline = start + (visible * 1000) / Math.max(1, speed)
-					while (this.running && this.speed === speed && performance.now() < deadline)
-						await new Promise((resolve) => setTimeout(resolve, Math.min(50, deadline - performance.now())))
-				}
-			}
-		} finally {
-			this.running = false
-		}
+	private runUntil(done: () => boolean) {
+		return this.execution.runUntil(done)
 	}
 	run() {
 		return this.runUntil(() => false)
@@ -587,49 +520,52 @@ export class M0Runtime implements Machine {
 		return this.run()
 	}
 	runTo(address: number) {
-		return this.runUntil(() => this.pc === address)
+		return this.execution.runTo(address)
 	}
 	async stepOver() {
 		if (this.halted || this.disposed) return
 		const i = this.instruction()
 		if (i.name === 'bl' || i.name === 'blx') {
-			const next = this.pc + i.size,
-				depth = this.callStack.length
-			await this.runUntil(() => this.pc === next && this.callStack.length <= depth)
+			const next = this.pc + i.size
+			await this.execution.stepOver(next)
 		} else this.step()
 	}
 	stepToReturn() {
-		const depth = this.callStack.length
-		return this.runUntil(() => depth > 0 && this.callStack.length < depth)
+		return this.execution.stepToReturn()
 	}
-	pause() {
-		this.running = false
-		this.paused = true
-	}
-	stop() {
-		this.pause()
-		this.halted = true
-	}
+	pause() { this.execution.pause() }
+	stop() { this.execution.stop() }
 	stepBack() {
+		if (this.disposed || this.historyCursor <= 0) return false
 		this.pause()
-		const result = this.history.undo(this.restore, (a, v) => {
-			this.memory[a - TEXT_BASE] = v
-		})
-		if (result) for (const o of this.observers) o.onSeek?.(this.instructionCount)
+		const result = this.moveHistory()
+		if (result) {
+			this.execution.stopped = false
+			notifyHistorySeek(this.observers, this.instructionCount)
+		}
 		return result
 	}
-	rewindTo(id: number) {
-		const index = this.history.indexOfId(id)
-		if (index < 0) return false
-		while (this.history.length > index) this.stepBack()
-		return true
+	rewindTo(id: number): boolean {
+		return rewindHistoryTo(this.history, () => this.historyCursor, id, () => this.moveHistory(), () => {
+			this.execution.stopped = false
+			this.pause()
+			notifyHistorySeek(this.observers, this.instructionCount)
+		})
 	}
 	private edit(change: () => void) {
 		if (this.disposed) return
-		this.history.begin(this.saved(), 0, true)
-		change()
-		this.registers[this.registers[19] & 2 ? 18 : 17] = this.registers[13]
-		this.history.close()
+		editTransaction(() => {
+			change()
+			this.registers[this.registers[19] & 2 ? 18 : 17] = this.registers[13]
+		}, {
+			begin: () => this.history.begin(this.saved(), 0, true),
+			commit: () => { this.history.close() },
+			rollback: () => {
+				this.history.close()
+				this.moveHistory()
+				this.history.timeline.branch()
+			},
+		})
 	}
 	setProgramCounter(address: number) {
 		this.aligned(address, 2)
@@ -638,6 +574,7 @@ export class M0Runtime implements Machine {
 			this.halted = false
 			this.waiting = false
 		})
+		this.execution.stopped = false
 	}
 	registerValues(): Registers {
 		const out: Registers = {}
@@ -697,11 +634,11 @@ export class M0Runtime implements Machine {
 		this.edit(() => this.put(address, value))
 		return true
 	}
-	insertByte() {
-		return false
+	insertByte(address: number, limit: number, value: number): boolean {
+		return this.memoryEdits.insert(address, limit, value)
 	}
-	deleteByte() {
-		return false
+	deleteByte(address: number, limit: number): boolean {
+		return this.memoryEdits.delete(address, limit)
 	}
 	configure(o: { speed?: number | null; pacedAddresses?: ReadonlySet<number> | null }) {
 		if (o.speed !== undefined) this.speed = o.speed
@@ -718,11 +655,11 @@ export class M0Runtime implements Machine {
 	}
 	toolConfig() {
 		return {
-			delayedBranching: false,
+			addressing: { instructionBytes: 2, memoryWordBytes: 4 }, delayedBranching: false,
 			history: this.history,
 			instructions: {
 				encodings: ['Thumb16', 'Thumb32'],
-				registerNames: REGISTER_IDS.slice(0, 16),
+				registerNames: REGISTER_IDS,
 				describe: (value: unknown) => describe(value as Instruction),
 				decodeExecuted: (entry: M0Record) =>
 					entry.kind === 'edit' ? null : decode(entry.word & 65535, entry.word >>> 16),
@@ -731,7 +668,8 @@ export class M0Runtime implements Machine {
 	}
 	dispose() {
 		this.disposed = true
-		this.running = false
+		this.execution.dispose()
+		this.execution.running = false
 		this.onProgress = null
 		this.observers.length = 0
 		this.history.log.clear()

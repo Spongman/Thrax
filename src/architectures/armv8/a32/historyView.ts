@@ -1,3 +1,5 @@
+import { HistoryView, describeEffect } from '../../../core/historyView'
+import type { PolledTerminal } from '../../../core/devices/polledTerminal'
 /**
  * The AArch32 history as the shared panels and tools read it: records built
  * on request from the typed columns, and the effects taken apart into chips.
@@ -6,8 +8,7 @@
 import { formatRegister, formatWord } from '../../../core/format'
 import { disassembleA32 } from '../../arm/a32/disassemble'
 import { ARCH_V8 } from '../../arm/a32/isa'
-import type { DescribedEffect, HistoryFormatter, HistoryRecord, MachineHistory } from '../../contracts'
-import type { A64Keyboard } from '../a64/machine'
+import type { DescribedEffect, HistoryFormatter } from '../../contracts'
 import {
 	EFFECT_BREAK, EFFECT_CPSR, EFFECT_DISPLAY, EFFECT_EXIT, EFFECT_FRAME_DEPTH, EFFECT_HALTED, EFFECT_INPUT, EFFECT_KEY, EFFECT_MEMORY,
 	EFFECT_MONITOR, EFFECT_OUTPUT, EFFECT_PC, EFFECT_REGISTER, EFFECT_WAITING, ENTRY_EDIT, type A32History,
@@ -26,44 +27,14 @@ class A32Record implements A32Executed {
 }
 
 /** Live over the log: entries come and go as the machine runs and rewinds. */
-export class A32HistoryView implements MachineHistory {
-	constructor(private readonly log: A32History | null) {}
-
-	get length(): number {
-		return this.log?.length ?? 0
-	}
-
-	at(index: number): A32Record | undefined {
-		const log = this.log
-		if (!log || index < 0 || index >= log.length) return undefined
+export class A32HistoryView extends HistoryView<A32History, A32Record> {
+	protected record(log: A32History, index: number): A32Record {
 		return new A32Record(log.idAt(index), log.countAt(index), log.pcAt(index), log.kindAt(index) === ENTRY_EDIT ? 'edit' : 'instruction', log.wordAt(index))
-	}
-
-	instructionCountAt(index: number): number {
-		return this.log!.countAt(index)
-	}
-
-	slice(from: number, to: number): HistoryRecord[] {
-		const records: HistoryRecord[] = []
-		const end = Math.min(to, this.length)
-		for (let index = Math.max(0, from); index < end; index++) records.push(this.at(index)!)
-		return records
-	}
-
-	indexOfId(id: number): number {
-		const log = this.log
-		if (!log) return -1
-		const index = id - log.firstId
-		return index >= 0 && index < log.length ? index : -1
 	}
 }
 
 function described(applied: boolean, parts: Omit<DescribedEffect, 'applied' | 'label'>): DescribedEffect {
-	const held = parts.value === undefined ? parts.text : formatRegister(parts.value, 32)
-	const label = held !== undefined
-		? (applied ? `${parts.subject} → ${held}` : `${parts.subject} ${held} →`)
-		: parts.detail !== undefined ? `${parts.subject} ${parts.detail}` : parts.subject
-	return { ...parts, applied, label }
+	return describeEffect(applied, parts, parts.value === undefined ? parts.text : formatRegister(parts.value, 32))
 }
 
 const REGISTER_NAMES: Readonly<Record<number, string>> = { 13: 'SP', 14: 'LR' }
@@ -72,7 +43,7 @@ const REGISTER_NAMES: Readonly<Record<number, string>> = { 13: 'SP', 14: 'LR' }
  * The log keeps only what each effect replaced, so a chip shows that value.
  * Every entry stands behind the present: a rewind drops what it undid.
  */
-export function a32HistoryFormatter(log: A32History | null, linux: A32Linux, keyboard: A64Keyboard): HistoryFormatter {
+export function a32HistoryFormatter(log: A32History | null, linux: A32Linux, keyboard: PolledTerminal): HistoryFormatter {
 	return {
 		instruction(record) {
 			const { kind, word, address } = record as A32Executed

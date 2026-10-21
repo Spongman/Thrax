@@ -1,3 +1,6 @@
+import { LinuxConsole } from '../../../core/environments/linuxConsole'
+import { deltaHistoryEdit } from '../../../core/editTransaction'
+import { PolledTerminal } from '../../../core/devices/polledTerminal'
 /**
  * An AArch64 user program as Linux would run it, at EL0 with no MMU: the
  * system calls a console program needs, entered by `svc #0` with the number
@@ -15,13 +18,13 @@
  * for the Keyboard and Display tool.
  */
 
-import type { KeyboardDisplayDevice, ProgramImage } from '../../contracts'
+import type { ProgramImage } from '../../contracts'
 import { A64CallStack } from './callStack'
-import { A64Cpu, STEP_FAULT, STEP_HALT, STEP_OK, STEP_WAIT, SVC_HALT, SVC_NEXT, SVC_REFUSED, SVC_WAIT, type A64Device, type A64Supervisor } from './cpu'
+import { A64Cpu, STEP_FAULT, STEP_HALT, STEP_OK, STEP_WAIT, SVC_HALT, SVC_NEXT, SVC_REFUSED, SVC_WAIT, type A64Supervisor } from './cpu'
 import { decode } from './decode'
 import { A64History, ENTRY_EDIT } from './history'
-import { MASK32, MASK64, R_SP } from './isa'
-import { DATA_BASE, MMIO_BASE, MMIO_RECEIVER_CONTROL, MMIO_RECEIVER_DATA, MMIO_TRANSMITTER_CONTROL, MMIO_TRANSMITTER_DATA, TEXT_BASE } from './layout'
+import { MASK32, R_SP } from './isa'
+import { DATA_BASE, MMIO_BASE, TEXT_BASE } from './layout'
 
 export const SYS_READ = 63
 export const SYS_WRITE = 64
@@ -29,118 +32,39 @@ export const SYS_EXIT = 93
 export const SYS_EXIT_GROUP = 94
 export const SYS_BRK = 214
 
-const EBADF = 9n
-const EFAULT = 14n
-const CR = 13
-const LF = 10
-
 /** Room left between the program break and the stack pointer. */
 const BREAK_GUARD = 4096
 
 /** The Linux system calls, attached to the CPU as its supervisor. */
-export class A64Linux implements A64Supervisor {
-	output = ''
-	/** Everything ever typed, kept so a rewound run reads the same characters again. */
-	input = ''
-	inputIndex = 0
-	/** True while a read waits for input. */
-	waiting = false
-	/** The exit status, once the program has exited; -1 before. */
-	exitCode = -1
-	/** The first address past the heap. */
-	programBreak = 0
-	/** Where the break started: the end of the data, rounded up. */
-	initialBreak = 0
-
-	feed(text: string) {
-		this.input += text
-	}
-
-	call(cpu: A64Cpu, _imm: number): number {
+export class A64Linux extends LinuxConsole implements A64Supervisor {
+	call(cpu: A64Cpu): number {
 		const number = Number(cpu.read(8))
 		const [a0, a1, a2] = [cpu.read(0), cpu.read(1), cpu.read(2)]
+		const count = Number(a2 > 0xffff_ffffn ? 0xffff_ffffn : a2)
+		const memory = {
+			valid: (address: number, size: number) => cpu.offsetOf(address, size) >= 0,
+			byte: (address: number) => cpu.memory[address - cpu.base],
+			store: (address: number, value: number) => cpu.store(address, 1, BigInt(value)),
+		}
 		switch (number) {
-			case SYS_WRITE: {
-				if (a0 !== 1n && a0 !== 2n) return this.result(cpu, -EBADF)
-				const count = Number(a2 > 0xFFFF_FFFFn ? 0xFFFF_FFFFn : a2)
-				const at = cpu.offsetOf(Number(a1 & MASK64), count)
-				if (count > 0 && (a1 > BigInt(Number.MAX_SAFE_INTEGER) || at < 0)) return this.result(cpu, -EFAULT)
-				let text = ''
-				for (let index = 0; index < count; index++) text += String.fromCharCode(cpu.memory[at + index])
-				this.output += text
-				return this.result(cpu, BigInt(count))
-			}
+			case SYS_WRITE: return this.result(cpu, this.write(Number(a0), Number(a1), count, memory))
 			case SYS_READ: {
-				if (a0 !== 0n) return this.result(cpu, -EBADF)
-				const wanted = Number(a2 > 0xFFFF_FFFFn ? 0xFFFF_FFFFn : a2)
-				if (wanted === 0) return this.result(cpu, 0n)
-				const available = this.input.length - this.inputIndex
-				if (available === 0) {
-					this.waiting = true
-					return SVC_WAIT
-				}
-				const count = Math.min(wanted, available)
-				const address = Number(a1 & MASK64)
-				if (a1 > BigInt(Number.MAX_SAFE_INTEGER) || cpu.offsetOf(address, count) < 0) return this.result(cpu, -EFAULT)
-				for (let index = 0; index < count; index++) {
-					const code = this.input.charCodeAt(this.inputIndex++) & 0xFF
-					cpu.store(address + index, 1, BigInt(code === CR ? LF : code))
-				}
-				this.waiting = false
-				return this.result(cpu, BigInt(count))
+				const result = this.read(Number(a0), Number(a1), count, memory)
+				return result === null ? SVC_WAIT : this.result(cpu, result)
 			}
 			case SYS_EXIT: case SYS_EXIT_GROUP:
-				this.exitCode = Number(a0 & 0xFFn)
+				this.exitCode = Number(a0 & 0xffn)
 				return SVC_HALT
-			case SYS_BRK: {
-				const limit = Number(cpu.sp) - BREAK_GUARD
-				if (a0 >= BigInt(this.initialBreak) && a0 <= BigInt(limit)) this.programBreak = Number(a0)
-				return this.result(cpu, BigInt(this.programBreak))
-			}
+			case SYS_BRK:
+				return this.result(cpu, this.brk(Number(a0), Number(cpu.sp) - BREAK_GUARD))
 		}
 		cpu.faultDetail = `Unsupported system call ${number} (x8)`
 		return SVC_REFUSED
 	}
 
-	private result(cpu: A64Cpu, value: bigint): number {
-		cpu.writeX(0, BigInt.asUintN(64, value))
+	private result(cpu: A64Cpu, value: number): number {
+		cpu.writeX(0, BigInt.asUintN(64, BigInt(value)))
 		return SVC_NEXT
-	}
-}
-
-/** MARS's keyboard and display: a receiver to poll and a transmitter that is always ready. */
-export class A64Keyboard implements A64Device {
-	/** Everything ever queued; a rewind moves `keyIndex` back over it. */
-	queued = ''
-	keyIndex = 0
-	display = ''
-
-	claims(address: number, size: number): boolean {
-		return address >= MMIO_BASE && address + size <= MMIO_BASE + 16 && address % 4 === 0 && size === 4
-	}
-
-	read(address: number): bigint {
-		switch (address) {
-			case MMIO_RECEIVER_CONTROL: return this.keyIndex < this.queued.length ? 1n : 0n
-			case MMIO_RECEIVER_DATA: {
-				if (this.keyIndex >= this.queued.length) return 0n
-				return BigInt(this.queued.charCodeAt(this.keyIndex++) & 0xFF)
-			}
-			case MMIO_TRANSMITTER_CONTROL: return 1n
-		}
-		return 0n
-	}
-
-	write(address: number, _size: number, value: bigint) {
-		if (address === MMIO_TRANSMITTER_DATA) this.display += String.fromCharCode(Number(value & 0xFFn))
-	}
-
-	/** What the Keyboard and Display tool reads and writes. */
-	device(): KeyboardDisplayDevice {
-		return {
-			state: () => ({ queuedInput: this.queued.slice(this.keyIndex), displayOutput: this.display }),
-			queue: (input) => { this.queued += input },
-		}
 	}
 }
 
@@ -165,7 +89,7 @@ function breakOf(image: ProgramImage): number {
 export class A64Machine {
 	readonly cpu: A64Cpu
 	readonly linux = new A64Linux()
-	readonly keyboard = new A64Keyboard()
+	readonly keyboard = new PolledTerminal(MMIO_BASE)
 	readonly callStack = new A64CallStack()
 	readonly history: A64History | null
 	halted = false
@@ -268,9 +192,6 @@ export class A64Machine {
 	}
 
 	private edit(change: () => void): boolean {
-		this.history?.begin(ENTRY_EDIT)
-		change()
-		this.history?.end()
-		return true
+		return deltaHistoryEdit(change, this.history, () => { this.history?.begin(ENTRY_EDIT) })
 	}
 }

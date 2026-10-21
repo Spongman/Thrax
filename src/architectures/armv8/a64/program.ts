@@ -1,57 +1,24 @@
 /** AArch64 assembly results behind the neutral program contract. */
 
-import type { AssemblyImage } from '../../../core/assembly/emitter'
-import { EMPTY_SOURCE_INDEX, type SourceIndex } from '../../../core/sourceIndex'
-import type { AssembledProgram, CodeRow, DataDeclaration, Diagnostic, Disassembly, ProgramImage, SourceLocation, SymbolTables } from '../../contracts'
-import { disassemble } from './disassemble'
-import { a64SourceIndex } from './sourceIndex'
+import { ImageProgram } from '../../../core/imageProgram'
 
-const NO_SITES: ReadonlyMap<string, ReadonlyMap<string, SourceLocation>> = new Map()
+import type { AssemblyImage } from '../../../core/assembly/emitter'
+import type { Diagnostic, Disassembly, CodeRow } from '../../contracts'
+import { disassemble } from './disassemble'
+
 
 /** An assembled AArch64 program; `image` is what a machine loads. */
-export class A64Assembly implements AssembledProgram {
-	readonly sourceIndex: SourceIndex
-	readonly symbols: SymbolTables
-	readonly labels: ReadonlyMap<string, number>
-	readonly data: readonly DataDeclaration[]
-	readonly symbolSites = NO_SITES
-
+export class A64Assembly extends ImageProgram<AssemblyImage> {
 	constructor(
 		entryFile: string,
-		readonly assembled: AssemblyImage | null,
-		readonly diagnostics: Diagnostic[],
+		assembled: AssemblyImage | null,
+		diagnostics: Diagnostic[],
 		/** Every symbol's value, `.equ` included, for data tips. */
 		readonly values: ReadonlyMap<string, number> = new Map(),
 	) {
-		this.sourceIndex = assembled ? a64SourceIndex(entryFile, assembled) : EMPTY_SOURCE_INDEX
-		const labels = new Map((assembled?.symbols ?? []).map(({ name, address }) => [name, address]))
-		this.labels = labels
-		this.symbols = { locals: new Map(), globals: labels }
-		this.data = (assembled?.sourceMappings ?? [])
-			.filter((mapping) => mapping.kind === 'data')
-			.map((mapping) => ({ address: mapping.address, bytes: bytesAt(assembled!, mapping.address, mapping.byteLength) }))
+		super(entryFile, assembled, diagnostics, { instructionBytes: 4 })
 	}
 
-	image(): ProgramImage {
-		if (!this.assembled) throw new Error('The program did not assemble')
-		return this.assembled
-	}
-
-	/** The highest address the image fills, plus one. */
-	end(): number {
-		return Math.max(0, ...(this.assembled?.sections ?? []).map((section) => section.address + section.bytes.length))
-	}
-}
-
-/** `length` bytes of the image from `address`, zero where nothing was emitted. */
-function bytesAt(image: ProgramImage, address: number, length: number): Uint8Array {
-	const bytes = new Uint8Array(length)
-	for (const section of image.sections) {
-		const from = Math.max(address, section.address)
-		const to = Math.min(address + length, section.address + section.bytes.length)
-		if (from < to) bytes.set(section.bytes.subarray(from - section.address, to - section.address), from - address)
-	}
-	return bytes
 }
 
 const hexByte = (byte: number) => `0x${(byte & 0xFF).toString(16).toUpperCase().padStart(2, '0')}`

@@ -1,3 +1,5 @@
+import { HistoryView, describeEffect } from '../../../core/historyView'
+import type { PolledTerminal } from '../../../core/devices/polledTerminal'
 /**
  * The AArch64 history as the shared panels and tools read it: records built
  * on request from the typed columns, and the effects taken apart into chips.
@@ -5,14 +7,14 @@
  */
 
 import { formatRegister, formatWord } from '../../../core/format'
-import type { DescribedEffect, HistoryFormatter, HistoryRecord, MachineHistory, RegisterValue } from '../../contracts'
+import type { DescribedEffect, HistoryFormatter, RegisterValue } from '../../contracts'
 import { disassemble } from './disassemble'
 import {
 	EFFECT_BREAK, EFFECT_DISPLAY, EFFECT_EXIT, EFFECT_FLAGS, EFFECT_FRAME_DEPTH, EFFECT_HALTED, EFFECT_INPUT, EFFECT_KEY, EFFECT_MEMORY,
 	EFFECT_OUTPUT, EFFECT_PC, EFFECT_REGISTER, EFFECT_SP, EFFECT_WAITING, ENTRY_EDIT, type A64History,
 } from './history'
 import type { A64Executed } from './instructions'
-import type { A64Keyboard, A64Linux } from './machine'
+import type { A64Linux } from './machine'
 import { nzcvRegister } from './registers'
 
 class A64Record implements A64Executed {
@@ -26,44 +28,14 @@ class A64Record implements A64Executed {
 }
 
 /** Live over the log: entries come and go as the machine runs and rewinds. */
-export class A64HistoryView implements MachineHistory {
-	constructor(private readonly log: A64History | null) {}
-
-	get length(): number {
-		return this.log?.length ?? 0
-	}
-
-	at(index: number): A64Record | undefined {
-		const log = this.log
-		if (!log || index < 0 || index >= log.length) return undefined
+export class A64HistoryView extends HistoryView<A64History, A64Record> {
+	protected record(log: A64History, index: number): A64Record {
 		return new A64Record(log.idAt(index), log.countAt(index), log.pcAt(index), log.kindAt(index) === ENTRY_EDIT ? 'edit' : 'instruction', log.wordAt(index))
-	}
-
-	instructionCountAt(index: number): number {
-		return this.log!.countAt(index)
-	}
-
-	slice(from: number, to: number): HistoryRecord[] {
-		const records: HistoryRecord[] = []
-		const end = Math.min(to, this.length)
-		for (let index = Math.max(0, from); index < end; index++) records.push(this.at(index)!)
-		return records
-	}
-
-	indexOfId(id: number): number {
-		const log = this.log
-		if (!log) return -1
-		const index = id - log.firstId
-		return index >= 0 && index < log.length ? index : -1
 	}
 }
 
 function described(applied: boolean, parts: Omit<DescribedEffect, 'applied' | 'label'>): DescribedEffect {
-	const held = parts.value === undefined ? parts.text : formatRegister(parts.value, typeof parts.value === 'bigint' ? 64 : 32)
-	const label = held !== undefined
-		? (applied ? `${parts.subject} → ${held}` : `${parts.subject} ${held} →`)
-		: parts.detail !== undefined ? `${parts.subject} ${parts.detail}` : parts.subject
-	return { ...parts, applied, label }
+	return describeEffect(applied, parts, parts.value === undefined ? parts.text : formatRegister(parts.value, typeof parts.value === 'bigint' ? 64 : 32))
 }
 
 /** A memory value at its width: a word or less as a number, a doubleword as a bigint. */
@@ -73,7 +45,7 @@ const memoryValue = (value: bigint, size: number): RegisterValue => size === 8 ?
  * The log keeps only what each effect replaced, so a chip shows that value.
  * Every entry stands behind the present: a rewind drops what it undid.
  */
-export function a64HistoryFormatter(log: A64History | null, linux: A64Linux, keyboard: A64Keyboard): HistoryFormatter {
+export function a64HistoryFormatter(log: A64History | null, linux: A64Linux, keyboard: PolledTerminal): HistoryFormatter {
 	return {
 		instruction(record) {
 			const { kind, word, address } = record as A64Executed

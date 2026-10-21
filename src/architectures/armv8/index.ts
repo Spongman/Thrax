@@ -6,6 +6,9 @@
  * runs ARMv6-M Thumb in Thread mode with its explicit teaching console ABI.
  */
 
+import { disposableGroup } from '../../core/disposableScope'
+import { createArchitectureServices } from '../../core/architectureServices'
+
 import { ARCH_V8 } from '../arm/a32/isa'
 import { ARM_LANGUAGE_ID } from '../arm/editor/grammar'
 import type { ArchitectureDefinition, ArchitectureServices, ArchitectureVariant, Disposable, Machine } from '../contracts'
@@ -43,66 +46,52 @@ const definition: ArchitectureDefinition<ArchitectureServices<Armv8Settings>> = 
 	settings: ARMV8_SETTINGS,
 	variant: ({ executionState }) => VARIANTS[executionState as string] ?? VARIANTS.aarch64,
 	createServices(): ArchitectureServices<Armv8Settings> {
-		const states = new Map<string, ExecutionState>()
-		let machine: Machine | undefined
-		let latest: ExecutionState | null = null
-		let disposed = false
-		const contributions: Disposable[] = []
-		const check = () => {
-			if (disposed) throw new Error('Architecture services have been disposed')
-		}
-		/** The state a setting names; an unknown one falls back to AArch64. */
-		const stateFor = ({ executionState }: Armv8Settings): ExecutionState => {
-			const id = STATES[executionState] ? executionState : 'aarch64'
-			let state = states.get(id)
-			if (!state) states.set(id, state = STATES[id]())
-			return state
-		}
-		/** The state that last assembled, which disassembly and data tips follow. */
-		const current = () => latest ?? stateFor(DEFAULT_ARMV8_SETTINGS)
-		return {
-			disassembly: {
-				row: (row, next) => current().disassembly.row(row, next),
-				at: (memory, address) => current().disassembly.at(memory, address),
-			},
-			assemble(sources, settings) {
-				check()
-				latest = stateFor(settings)
-				return latest.assemble(sources, settings)
-			},
-			createMachine(program, settings, options) {
-				check()
-				const next = stateFor(settings).createMachine(program, settings, options)
-				machine?.dispose()
-				machine = next
-				return next
-			},
-			profile: (settings) => stateFor(settings).profile(settings),
-			describeToken: (text, column, inspection) => current().describeToken(text, column, inspection),
-			// Every state's language, so files read right whichever state is chosen.
-			async installEditor(monaco, host) {
-				check()
-				const [a64Editor, armEditor, m0Editor] = await Promise.all([import('./editor'), import('../arm/editor'), import('./m0/editor')])
-				check()
-				const sources = {
-					files: () => host.files(),
-					active: () => host.active(),
-					open: (file: string, line: number) => host.open(file, line),
-					inspection: () => host.inspection(),
-					values: () => current().values(),
-				}
-				const parts = [a64Editor.installEditor(monaco, sources), armEditor.installEditor(monaco, sources, ARCH_V8), m0Editor.installM0Editor(monaco, host)]
-				const contribution = { dispose: () => parts.splice(0).reverse().forEach((part) => part.dispose()) }
-				contributions.push(contribution)
-				return contribution
-			},
-			dispose() {
-				if (disposed) return
-				disposed = true
-				machine?.dispose()
-				for (const contribution of contributions.reverse()) contribution.dispose()
-			},
-		}
+		return createArchitectureServices<Armv8Settings>(({ check }) => {
+			const states = new Map<string, ExecutionState>()
+			let latest: ExecutionState | null = null
+			/** The state a setting names; an unknown one falls back to AArch64. */
+			const stateFor = ({ executionState }: Armv8Settings): ExecutionState => {
+				const id = STATES[executionState] ? executionState : 'aarch64'
+				let state = states.get(id)
+				if (!state) states.set(id, state = STATES[id]())
+				return state
+			}
+			/** The state that last assembled, which disassembly and data tips follow. */
+			const current = () => latest ?? stateFor(DEFAULT_ARMV8_SETTINGS)
+			return {
+				disassembly: {
+					row: (row, next) => current().disassembly.row(row, next),
+					at: (memory, address) => current().disassembly.at(memory, address),
+				},
+				assemble(sources, settings) {
+					latest = stateFor(settings)
+					return latest.assemble(sources, settings)
+				},
+				createMachine(program, settings, options) {
+					const next = stateFor(settings).createMachine(program, settings, options)
+					return next
+				},
+				profile: (settings) => stateFor(settings).profile(settings),
+				describeToken: (text, column, inspection) => current().describeToken(text, column, inspection),
+				// Every state's language, so files read right whichever state is chosen.
+				async installEditor(monaco, host) {
+					const [a64Editor, armEditor, m0Editor] = await Promise.all([import('./editor'), import('../arm/editor'), import('./m0/editor')])
+					check()
+					const sources = {
+						files: () => host.files(),
+						active: () => host.active(),
+						open: (file: string, line: number) => host.open(file, line),
+						inspection: () => host.inspection(),
+						values: () => current().values(),
+					}
+					return disposableGroup((scope) => {
+						scope.add(a64Editor.installEditor(monaco, sources))
+						scope.add(armEditor.installEditor(monaco, sources, ARCH_V8))
+						scope.add(m0Editor.installM0Editor(monaco, host))
+					})
+				},
+			}
+		})
 	},
 }
 

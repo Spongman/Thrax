@@ -94,6 +94,8 @@ const K_EXTEND_ADD = 37
 
 /** What a mnemonic's suffixes said. */
 export interface Mnemonic {
+	/** Canonical operation, before condition and flag suffixes. */
+	base: string
 	kind: number
 	cond: number
 	/** Data-processing opcode, or shift type for K_SHIFT. */
@@ -244,6 +246,7 @@ export function parseMnemonic(text: string, arch = ARCH_V2A): Mnemonic | null {
 			const extra = found.get('load') ?? found.get('store')
 			const op = extra !== undefined ? (found.has('load') ? LOAD_KINDS : STORE_KINDS)[extra] : family.op ?? 0
 			return {
+				base: family.base + (extra ?? ''),
 				kind: family.kind,
 				cond: CONDITIONS.get(found.get('cond') ?? 'al')!,
 				op,

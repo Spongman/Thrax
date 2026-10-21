@@ -48,7 +48,7 @@ export function createA32State(): ExecutionState {
 		}),
 		profile: (settings) => a32Profile(settings.memoryBytes),
 		disassembly: a32DisassemblyV8,
-		describeToken: (text, column, inspection) => describeArmToken(text, column, inspection, { value: (name) => latest?.values.get(name) }),
+		describeToken: (text, column, inspection) => describeArmToken(text, column, inspection, { arch: ARCH_V8, value: (name) => latest?.values.get(name) }),
 		values: () => latest?.values ?? null,
 	}
 }

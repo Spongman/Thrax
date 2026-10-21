@@ -9,13 +9,10 @@
  * the sink sees every change as an old word or an old depth, enough to undo.
  */
 
+import { FrameStack, type FrameStackSink } from '../../../core/frameStack'
 import { Op, type A64Instruction } from './decode'
 
-export interface A64CallStackSink {
-	/** `index` is a word of the frame array, about to be overwritten. */
-	frameWord(index: number, old: number): void
-	depth(old: number): void
-}
+export type A64CallStackSink = FrameStackSink
 
 export interface A64Frame {
 	/** Address of the BL or BLR. */
@@ -32,28 +29,8 @@ const CALLEE = 1
 const SP = 2
 const WIDTH = 3
 
-export class A64CallStack {
-	sink: A64CallStackSink | null = null
-	private count = 0
-	private words = new Float64Array(64 * WIDTH)
-
-	get depth(): number {
-		return this.count
-	}
-
-	/** Restores the depth; for rewind, not recorded. */
-	setDepth(depth: number) {
-		this.count = depth
-	}
-
-	/** Restores one frame word; for rewind, not recorded. */
-	setFrameWord(index: number, value: number) {
-		this.words[index] = value
-	}
-
-	clear() {
-		this.count = 0
-	}
+export class A64CallStack extends FrameStack {
+	constructor() { super(WIDTH, Float64Array) }
 
 	/**
 	 * Updates the stack after `instruction` ran at `pc`, leaving the CPU at
@@ -78,31 +55,15 @@ export class A64CallStack {
 	}
 
 	private push(pc: number, next: number, sp: number) {
-		const base = this.count * WIDTH
-		if (base + WIDTH > this.words.length) {
-			const grown = new Float64Array(this.words.length * 2)
-			grown.set(this.words)
-			this.words = grown
-		}
+		const base = this.allocateFrame()
 		this.write(base + RETURN, pc + 4)
 		this.write(base + CALLEE, next)
 		this.write(base + SP, sp)
-		this.sink?.depth(this.count)
-		this.count += 1
+		this.changeDepth(this.count + 1)
 	}
 
 	private pop(next: number) {
-		for (let index = this.count - 1; index >= 0; index--) {
-			if (this.words[index * WIDTH + RETURN] === next) {
-				this.sink?.depth(this.count)
-				this.count = index
-				return
-			}
-		}
+		this.popTo(next, RETURN)
 	}
 
-	private write(index: number, value: number) {
-		this.sink?.frameWord(index, this.words[index])
-		this.words[index] = value
-	}
 }

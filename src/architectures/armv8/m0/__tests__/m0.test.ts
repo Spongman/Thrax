@@ -19,8 +19,8 @@ function machine(code: string, limit = 100000) {
 }
 function finish(m: M0Runtime) {
 	let n = 0
-	while (!m.halted && !m.pendingInput && n++ < 10000) m.step()
-	expect(n).toBeLessThan(10000)
+	while (!m.halted && !m.pendingInput && n++ < 250000) m.step()
+	expect(n).toBeLessThan(250000)
 }
 function words(code: string) {
 	const p = assemble(code)
@@ -42,7 +42,7 @@ describe('ARMv6-M Thumb', () => {
 		])
 	})
 	it.each(Object.keys(EXAMPLES))('runs and fully rewinds the %s example', (key) => {
-		const m = machine(EXAMPLES[key as keyof typeof EXAMPLES].code)
+		const m = machine(EXAMPLES[key as keyof typeof EXAMPLES].code, key === 'mandelbrot' ? 250000 : 100000)
 		finish(m)
 		if (key === 'input') {
 			expect(m.pendingInput?.type).toBe('integer')
@@ -58,6 +58,8 @@ describe('ARMv6-M Thumb', () => {
 			bitwise: '8\n14\n6',
 			input: '42',
 			bitmap: '',
+			mandelbrot: '',
+			ackermann: '61',
 		}
 		expect(m.console).toBe(outputs[key])
 		expect(m.halted).toBe(true)
@@ -68,9 +70,9 @@ describe('ARMv6-M Thumb', () => {
 			expect([m.registerValues().R2, m.registerValues().R3, m.registerValues().R4]).toEqual([8, 14, 6])
 		if (key === 'bitmap') {
 			const pixels = m.program.labels.get('pixels')!
-			for (let n = 0; n < 64; n++)
+			for (const n of [0, 31, 32, 35, 1023])
 				expect([0, 1, 2, 3].map((offset) => m.inspectMemory().byte(pixels + n * 4 + offset))).toEqual([
-					0, 255, 0, 0,
+					(n % 32) << 3, 0, Math.floor(n / 32) << 3, 0,
 				])
 		}
 		while (m.stepBack()) {

@@ -8,11 +8,8 @@
  * so the sink sees every change as an old word or an old depth, enough to undo.
  */
 
-export interface A32CallStackSink {
-	/** `index` is a word of the frame array, about to be overwritten. */
-	frameWord(index: number, old: number): void
-	depth(old: number): void
-}
+import { FrameStack, type FrameStackSink } from '../../../core/frameStack'
+export type A32CallStackSink = FrameStackSink
 
 export interface A32Frame {
 	/** Address of the BL or BLX. */
@@ -28,28 +25,8 @@ const CALLEE = 1
 const SP = 2
 const WIDTH = 3
 
-export class A32CallStack {
-	sink: A32CallStackSink | null = null
-	private count = 0
-	private words = new Float64Array(64 * WIDTH)
-
-	get depth(): number {
-		return this.count
-	}
-
-	/** Restores the depth; for rewind, not recorded. */
-	setDepth(depth: number) {
-		this.count = depth
-	}
-
-	/** Restores one frame word; for rewind, not recorded. */
-	setFrameWord(index: number, value: number) {
-		this.words[index] = value
-	}
-
-	clear() {
-		this.count = 0
-	}
+export class A32CallStack extends FrameStack {
+	constructor() { super(WIDTH, Float64Array) }
 
 	/** After the instruction at `pc` ran and left the PC at `next`: `call` when it was a BL or BLX that ran. Allocates nothing. */
 	observe(call: boolean, pc: number, next: number, sp: number) {
@@ -58,13 +35,7 @@ export class A32CallStack {
 			return
 		}
 		if (next === pc + 4) return
-		for (let index = this.count - 1; index >= 0; index--) {
-			if (this.words[index * WIDTH + RETURN] === next) {
-				this.sink?.depth(this.count)
-				this.count = index
-				return
-			}
-		}
+		this.popTo(next, RETURN)
 	}
 
 	/** The frames, outermost first. */
@@ -79,21 +50,11 @@ export class A32CallStack {
 	}
 
 	private push(pc: number, next: number, sp: number) {
-		const base = this.count * WIDTH
-		if (base + WIDTH > this.words.length) {
-			const grown = new Float64Array(this.words.length * 2)
-			grown.set(this.words)
-			this.words = grown
-		}
+		const base = this.allocateFrame()
 		this.write(base + RETURN, pc + 4)
 		this.write(base + CALLEE, next)
 		this.write(base + SP, sp)
-		this.sink?.depth(this.count)
-		this.count += 1
+		this.changeDepth(this.count + 1)
 	}
 
-	private write(index: number, value: number) {
-		this.sink?.frameWord(index, this.words[index])
-		this.words[index] = value
-	}
 }

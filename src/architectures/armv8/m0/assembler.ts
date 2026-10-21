@@ -1,3 +1,5 @@
+import { resolveRelativeSource } from '../../../core/assembly/sourceLines'
+import { splitOperands, stripAssemblyComment } from '../../../core/assembly/text'
 /** GNU unified Thumb syntax over the common two-pass assembler. No ARM/Thumb-2 fallback. */
 import {
 	assembleStatements,
@@ -33,56 +35,8 @@ function range(v: number, lo: number, hi: number) {
 function bytes(...words: number[]) {
 	return words.flatMap((w) => [w & 255, (w >>> 8) & 255])
 }
-function operands(text: string): string[] {
-	let depth = 0,
-		quote = '',
-		escaped = false,
-		start = 0
-	const out: string[] = []
-	for (let i = 0; i < text.length; i++) {
-		const ch = text[i]
-		if (escaped) {
-			escaped = false
-			continue
-		}
-		if (quote) {
-			if (ch === '\\') escaped = true
-			else if (ch === quote) quote = ''
-			continue
-		}
-		if (ch === '"' || ch === "'") {
-			quote = ch
-			continue
-		}
-		if ('[{('.includes(ch)) depth++
-		if (']})'.includes(ch)) depth--
-		if (ch === ',' && depth === 0) {
-			out.push(text.slice(start, i).trim())
-			start = i + 1
-		}
-	}
-	if (text.trim()) out.push(text.slice(start).trim())
-	return out
-}
-function stripComment(text: string) {
-	let quote = '',
-		escaped = false
-	for (let n = 0; n < text.length; n++) {
-		const ch = text[n]
-		if (escaped) {
-			escaped = false
-			continue
-		}
-		if (quote) {
-			if (ch === '\\') escaped = true
-			else if (ch === quote) quote = ''
-			continue
-		}
-		if (ch === '"' || ch === "'") quote = ch
-		else if (ch === '@' || (ch === '/' && text[n + 1] === '/')) return text.slice(0, n)
-	}
-	return text
-}
+const operands = (text: string) => splitOperands(text, { brackets: ['()', '[]', '{}'], unclosed: 'Unclosed string or operand' })
+const stripComment = (text: string) => stripAssemblyComment(text, ['@', '//'])
 export function encode(name: string, args: string[], c: HookContext, at: Position): number[] {
 	const count = (n: number) => {
 		if (args.length !== n) throw new Error(`${name} expects ${n} operands`)
@@ -347,8 +301,7 @@ export function assembleM0(sources: AssemblySources, memoryBytes: number): M0Pro
 				return m ? { name: m[1], nextIndex: index + 1 } : null
 			},
 			resolve: (name, from, token) => {
-				const path = from.name.slice(0, from.name.lastIndexOf('/') + 1) + name,
-					file = sources.files.find((f) => f.name === path || f.name === name)
+				const file = resolveRelativeSource(sources.files, name, from)
 				if (!file) throw new AssemblyError(`File not found: ${name}`, token.at)
 				return file
 			},

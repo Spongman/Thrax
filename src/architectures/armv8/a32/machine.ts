@@ -1,3 +1,5 @@
+import { LinuxConsole } from '../../../core/environments/linuxConsole'
+import { deltaHistoryEdit } from '../../../core/editTransaction'
 /**
  * An AArch32 user program as Linux would run it under the ARM EABI, in User
  * mode with no MMU: `svc #0` with the number in R7, arguments in R0-R2 and
@@ -17,8 +19,8 @@
 
 import { conditionPassed } from '../../arm/a32/alu'
 import type { ProgramImage } from '../../contracts'
-import { DATA_BASE, TEXT_BASE } from '../a64/layout'
-import { A64Keyboard } from '../a64/machine'
+import { DATA_BASE, MMIO_BASE, TEXT_BASE } from '../a64/layout'
+import { PolledTerminal } from '../../../core/devices/polledTerminal'
 import { A32CallStack } from './callStack'
 import { A32Cpu, STEP_FAULT, STEP_HALT, STEP_OK, STEP_WAIT, SVC_HALT, SVC_NEXT, SVC_REFUSED, SVC_WAIT, type A32Supervisor } from './cpu'
 import { A32History, ENTRY_EDIT } from './history'
@@ -29,73 +31,33 @@ export const SYS_WRITE = 4
 export const SYS_BRK = 45
 export const SYS_EXIT_GROUP = 248
 
-const EBADF = 9
-const EFAULT = 14
-const CR = 13
-const LF = 10
 const R_SP = 13
 
 /** Room left between the program break and the stack pointer. */
 const BREAK_GUARD = 4096
 
 /** The Linux system calls, attached to the CPU as its supervisor. */
-export class A32Linux implements A32Supervisor {
-	output = ''
-	/** Everything ever typed, kept so a rewound run reads the same characters again. */
-	input = ''
-	inputIndex = 0
-	/** True while a read waits for input. */
-	waiting = false
-	/** The exit status, once the program has exited; -1 before. */
-	exitCode = -1
-	/** The first address past the heap. */
-	programBreak = 0
-	/** Where the break started: the end of the data, rounded up. */
-	initialBreak = 0
-
-	feed(text: string) {
-		this.input += text
-	}
-
+export class A32Linux extends LinuxConsole implements A32Supervisor {
 	call(cpu: A32Cpu): number {
 		const number = cpu.r[7]
-		const [a0, a1, a2] = [cpu.r[0], cpu.r[1] >>> 0, cpu.r[2] >>> 0]
+		const [a0, a1, a2] = [cpu.r[0] >>> 0, cpu.r[1] >>> 0, cpu.r[2] >>> 0]
+		const count = a2
+		const memory = {
+			valid: (address: number, size: number) => cpu.offsetOf(address, size) >= 0,
+			byte: (address: number) => cpu.memory[address - cpu.base],
+			store: (address: number, value: number) => cpu.store(address, 1, value),
+		}
 		switch (number) {
-			case SYS_WRITE: {
-				if (a0 !== 1 && a0 !== 2) return this.result(cpu, -EBADF)
-				const at = cpu.offsetOf(a1, a2)
-				if (a2 > 0 && at < 0) return this.result(cpu, -EFAULT)
-				let text = ''
-				for (let index = 0; index < a2; index++) text += String.fromCharCode(cpu.memory[at + index])
-				this.output += text
-				return this.result(cpu, a2)
-			}
+			case SYS_WRITE: return this.result(cpu, this.write(Number(a0), Number(a1), count, memory))
 			case SYS_READ: {
-				if (a0 !== 0) return this.result(cpu, -EBADF)
-				if (a2 === 0) return this.result(cpu, 0)
-				const available = this.input.length - this.inputIndex
-				if (available === 0) {
-					this.waiting = true
-					return SVC_WAIT
-				}
-				const count = Math.min(a2, available)
-				if (cpu.offsetOf(a1, count) < 0) return this.result(cpu, -EFAULT)
-				for (let index = 0; index < count; index++) {
-					const code = this.input.charCodeAt(this.inputIndex++) & 0xFF
-					cpu.store(a1 + index, 1, code === CR ? LF : code)
-				}
-				this.waiting = false
-				return this.result(cpu, count)
+				const result = this.read(Number(a0), Number(a1), count, memory)
+				return result === null ? SVC_WAIT : this.result(cpu, result)
 			}
 			case SYS_EXIT: case SYS_EXIT_GROUP:
-				this.exitCode = a0 & 0xFF
+				this.exitCode = Number(a0 & 0xff)
 				return SVC_HALT
-			case SYS_BRK: {
-				const limit = (cpu.r[R_SP] >>> 0) - BREAK_GUARD
-				const wanted = a0 >>> 0
-				if (wanted >= this.initialBreak && wanted <= limit) this.programBreak = wanted
-				return this.result(cpu, this.programBreak)
-			}
+			case SYS_BRK:
+				return this.result(cpu, this.brk(Number(a0), (cpu.r[R_SP] >>> 0) - BREAK_GUARD))
 		}
 		cpu.faultDetail = `Unsupported system call ${number} (r7)`
 		return SVC_REFUSED
@@ -134,7 +96,7 @@ function isCall(word: number, cpsr: number): boolean {
 export class A32Machine {
 	readonly cpu: A32Cpu
 	readonly linux = new A32Linux()
-	readonly keyboard = new A64Keyboard()
+	readonly keyboard = new PolledTerminal(MMIO_BASE)
 	readonly callStack = new A32CallStack()
 	readonly history: A32History | null
 	halted = false
@@ -229,9 +191,6 @@ export class A32Machine {
 	}
 
 	private edit(change: () => void): boolean {
-		this.history?.begin(ENTRY_EDIT)
-		change()
-		this.history?.end()
-		return true
+		return deltaHistoryEdit(change, this.history, () => { this.history?.begin(ENTRY_EDIT) })
 	}
 }

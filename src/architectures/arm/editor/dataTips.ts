@@ -1,3 +1,8 @@
+import { stripAssemblyComment } from '../../../core/assembly/text'
+import { labelAt, formatIntegerValue, memoryTip } from '../../../core/inspection'
+import type { InstructionHelp } from '../../../core/instructionHelp'
+import { armInstructionHelp } from '../instructionHelp'
+import { registerTokenHover } from '../../../services/assemblyLanguage'
 /**
  * Data tips for ARM sources and disassembly: what a register, label, symbol
  * or number under the pointer is worth as the program stands.
@@ -12,11 +17,13 @@ import { ARM_LANGUAGE_ID } from './grammar'
 const TOKEN = /0x[0-9a-f]+|&[0-9a-f]+|0b[01]+|\d+|[A-Za-z_.$][\w.$]*/gi
 
 export interface ArmTipSources {
+	arch?: number
+	instructionHelp?(name: string): InstructionHelp | null
 	/** A symbol's value where it is not a label, such as `.equ COUNT, 3`. */
 	value?(name: string): number | undefined
 }
 
-const formatValue = (value: number) => `${formatWord(value)} (${value | 0}, unsigned ${value >>> 0})`
+const formatValue = (value: number) => formatIntegerValue(value, 32)
 
 function parseNumber(text: string): number | null {
 	const lower = text.toLowerCase()
@@ -26,27 +33,14 @@ function parseNumber(text: string): number | null {
 	return /^\d+$/.test(text) ? Number(text) | 0 : null
 }
 
-function labelAt(labels: ReadonlyMap<string, number>, address: number): string | undefined {
-	for (const [name, at] of labels) if (at === address) return name
-	return undefined
-}
 
 function memoryLine(state: DebugInspection, address: number): string[] {
 	const word = state.memory.word(address)
-	return word === undefined ? [] : [`\`[${formatWord(address)}]\` = \`${formatValue(word)}\``]
+	return memoryTip(address, word, value => formatValue(Number(value)))
 }
 
 /** Where a comment starts on `line`, or its length. */
-function commentStart(line: string): number {
-	let quoted = false
-	for (let index = 0; index < line.length; index++) {
-		const character = line[index]
-		if (character === '"') quoted = !quoted
-		if (quoted) continue
-		if (character === '@' || character === ';' || line.startsWith('//', index)) return index
-	}
-	return line.length
-}
+const commentStart = (line: string) => stripAssemblyComment(line, ['@', ';', '//']).length
 
 /** The register descriptor id a register name reads, R15 as PC. */
 export function registerId(name: string): string | undefined {
@@ -84,7 +78,8 @@ export function describeArmToken(line: string, offset: number, state: DebugInspe
 		}
 		const value = sources.value?.(text)
 		if (value !== undefined) return { ...span, contents: [`**${text}**\n\n\`${formatValue(value)}\``] }
-		return null
+		const contents = sources.instructionHelp ? sources.instructionHelp(text) : armInstructionHelp(text, sources.arch)
+		return contents ? { ...span, ...contents } : null
 	}
 	return null
 }
@@ -95,19 +90,14 @@ export interface ArmHoverSources {
 }
 
 /** Live data tips in ARM sources. */
-export function registerArmDataTips(monaco: typeof Monaco, sources: ArmHoverSources): Monaco.IDisposable {
-	return monaco.languages.registerHoverProvider(ARM_LANGUAGE_ID, {
-		provideHover(model, position) {
-			const state = sources.inspection?.()
-			if (!state) return null
-			const described = describeArmToken(model.getLineContent(position.lineNumber), position.column - 1, state, {
-				value: (name) => sources.values?.()?.get(name),
-			})
-			if (!described) return null
-			return {
-				range: new monaco.Range(position.lineNumber, described.start + 1, position.lineNumber, described.start + described.length + 1),
-				contents: described.contents.map((value) => ({ value })),
-			}
-		},
+export function registerArmDataTips(monaco: typeof Monaco, sources: ArmHoverSources, arch?: number): Monaco.IDisposable {
+	return registerTokenHover(monaco, ARM_LANGUAGE_ID, (line, offset) => {
+		const state = sources.inspection?.()
+		if (!state) return null
+		const described = describeArmToken(line, offset, state, {
+			arch,
+			value: (name) => sources.values?.()?.get(name),
+		})
+		return described
 	})
 }

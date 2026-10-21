@@ -1,3 +1,4 @@
+import type { PolledTerminal } from '../../../core/devices/polledTerminal'
 /**
  * AArch64 execution history: one entry per state-changing step, each owning a
  * run of effects that hold the values the step replaced. 64-bit values are
@@ -10,11 +11,12 @@
  */
 
 import { HistoryBufferLayout, type HistoryBufferSchema } from '../../../core/historyBuffers'
-import { HistoryLog } from '../../../core/historyLog'
+import { ReversibleHistory } from '../../../core/reversibleHistory'
+import { HistoryText } from '../../../core/historyCursor'
 import type { A64CallStack, A64CallStackSink } from './callStack'
 import { FAULT_NONE, type A64Cpu, type A64EffectSink } from './cpu'
 import { MASK32 } from './isa'
-import type { A64Keyboard, A64Linux } from './machine'
+import type { A64Linux } from './machine'
 
 const column = (name: string, type: 'u8' | 'u32' | 'f64') => Object.freeze({ name, type, elements: 1 })
 
@@ -23,11 +25,11 @@ const column = (name: string, type: 'u8' | 'u32' | 'f64') => Object.freeze({ nam
  * count before it. Effect: a kind, a size, and up to three values.
  */
 export const a64HistorySchema: HistoryBufferSchema = Object.freeze({
-	entry: Object.freeze([column('pc', 'f64'), column('word', 'u32'), column('kind', 'u8'), column('count', 'f64')]),
+	entry: Object.freeze([column('pc', 'f64'), column('word', 'u32'), column('kind', 'u8'), column('count', 'f64'), column('controlCount', 'f64')]),
 	effect: Object.freeze([column('kind', 'u8'), column('size', 'u8'), column('a', 'f64'), column('b', 'f64'), column('hi', 'u32')]),
 })
 
-/** Effect kinds; `b` (and `hi` above it, for 64-bit values) is always the old value. */
+/** Effect kinds; `b` (and `hi` for 64-bit values) exchanges with live state when navigating. */
 export const EFFECT_REGISTER = 0
 export const EFFECT_SP = 1
 export const EFFECT_PC = 2
@@ -61,7 +63,7 @@ export const ENTRY_EDIT = 1
 export interface A64HistoryTarget {
 	readonly cpu: A64Cpu
 	readonly linux: A64Linux
-	readonly keyboard: A64Keyboard
+	readonly keyboard: PolledTerminal
 	readonly callStack: A64CallStack
 	halted: boolean
 	instructionCount: number
@@ -72,6 +74,7 @@ const PC = layout.column('entry', 'pc', 'f64')
 const WORD = layout.column('entry', 'word', 'u32')
 const KIND = layout.column('entry', 'kind', 'u8')
 const COUNT = layout.column('entry', 'count', 'f64')
+const CONTROL_COUNT = layout.column('entry', 'controlCount', 'f64')
 const EFFECT_KIND = layout.column('effect', 'kind', 'u8')
 const EFFECT_SIZE = layout.column('effect', 'size', 'u8')
 const EFFECT_A = layout.column('effect', 'a', 'f64')
@@ -82,8 +85,9 @@ const low = (value: bigint) => Number(value & MASK32)
 const high = (value: bigint) => Number((value >> 32n) & MASK32)
 const join = (lo: number, hi: number) => (BigInt(hi) << 32n) | BigInt(lo >>> 0)
 
-export class A64History implements A64EffectSink, A64CallStackSink {
-	private readonly log = new HistoryLog(layout)
+export class A64History extends ReversibleHistory implements A64EffectSink, A64CallStackSink {
+	readonly outputText = new HistoryText()
+	readonly displayText = new HistoryText()
 	// The open entry's starting state.
 	private start = 0
 	private pcBefore = 0
@@ -99,20 +103,12 @@ export class A64History implements A64EffectSink, A64CallStackSink {
 	private instructionCount = 0
 
 	constructor(private readonly target: A64HistoryTarget, limit = DEFAULT_HISTORY_LIMIT) {
-		this.log.limit = limit
-	}
-
-	get length(): number {
-		return this.log.length
-	}
-
-	/** Id of the oldest entry held; ids count entries since the program loaded. */
-	get firstId(): number {
-		return this.log.first
+		super(layout, limit)
 	}
 
 	/** Opens an entry; call before the CPU steps, or before an edit with ENTRY_EDIT. */
 	begin(kind = ENTRY_INSTRUCTION) {
+		this.timeline.branch()
 		const { cpu, linux, keyboard } = this.target
 		this.kind = kind
 		this.instructionCount = this.target.instructionCount
@@ -132,13 +128,13 @@ export class A64History implements A64EffectSink, A64CallStackSink {
 	/** Closes the entry; returns whether the step changed anything and so was kept. */
 	end(): boolean {
 		const { cpu, linux, keyboard } = this.target
-		if (linux.output.length !== this.outputLength) this.push(EFFECT_OUTPUT, 0, 0, this.outputLength)
+		if (linux.output.length !== this.outputLength) this.push(EFFECT_OUTPUT, 0, linux.output.length, this.outputLength)
 		if (linux.inputIndex !== this.inputIndex) this.push(EFFECT_INPUT, 0, 0, this.inputIndex)
 		if (linux.waiting !== this.waiting) this.push(EFFECT_WAITING, 0, 0, this.waiting ? 1 : 0)
 		if (linux.exitCode !== this.exitCode) this.push(EFFECT_EXIT, 0, 0, this.exitCode)
 		if (linux.programBreak !== this.programBreak) this.push(EFFECT_BREAK, 0, 0, this.programBreak)
 		if (keyboard.keyIndex !== this.keyIndex) this.push(EFFECT_KEY, 0, 0, this.keyIndex)
-		if (keyboard.display.length !== this.displayLength) this.push(EFFECT_DISPLAY, 0, 0, this.displayLength)
+		if (keyboard.display.length !== this.displayLength) this.push(EFFECT_DISPLAY, 0, keyboard.display.length, this.displayLength)
 		if (this.target.halted !== this.halted) this.push(EFFECT_HALTED, 0, 0, this.halted ? 1 : 0)
 		const log = this.log
 		const position = log.openEntry
@@ -153,6 +149,7 @@ export class A64History implements A64EffectSink, A64CallStackSink {
 		columns[WORD][slot] = this.kind === ENTRY_EDIT ? 0 : cpu.instruction
 		columns[KIND][slot] = this.kind
 		columns[COUNT][slot] = this.instructionCount
+		columns[CONTROL_COUNT][slot] = this.instructionCount
 		log.close()
 		return true
 	}
@@ -234,49 +231,53 @@ export class A64History implements A64EffectSink, A64CallStackSink {
 		return join(this.effect(position, EFFECT_B), this.effect(position, EFFECT_HI))
 	}
 
-	stepBack(): boolean {
-		if (this.log.length === 0) return false
-		this.rewindTo(this.log.length - 1)
-		return true
-	}
-
-	/** Undoes entry `index` and every later one, then forgets them. */
-	rewindTo(index: number) {
+	protected exchange = (index: number, forward: boolean) => {
 		const log = this.log
-		if (!Number.isInteger(index) || index < 0 || index > log.length) throw new RangeError(`No history entry ${index}`)
-		if (index === log.length) return
 		const { cpu, linux, keyboard, callStack } = this.target
-		const stop = this.effectStartAt(index)
-		const count = this.countAt(index)
-		for (let position = log.effects.end - 1; position >= stop; position--) {
-			const a = this.effect(position, EFFECT_A)
-			const b = this.effect(position, EFFECT_B)
-			switch (this.effect(position, EFFECT_KIND)) {
-				case EFFECT_REGISTER: cpu.x[a] = this.effectValue(position); break
-				case EFFECT_SP: cpu.sp = this.effectValue(position); break
-				case EFFECT_PC: cpu.pc = b; break
-				case EFFECT_FLAGS: cpu.nzcv = b; break
-				case EFFECT_MEMORY: cpu.restore(a, this.effect(position, EFFECT_SIZE), this.effectValue(position)); break
-				case EFFECT_OUTPUT: linux.output = linux.output.slice(0, b); break
-				case EFFECT_INPUT: linux.inputIndex = b; break
-				case EFFECT_WAITING: linux.waiting = b !== 0; break
-				case EFFECT_HALTED: this.target.halted = b !== 0; break
-				case EFFECT_EXIT: linux.exitCode = b; break
-				case EFFECT_BREAK: linux.programBreak = b; break
-				case EFFECT_FRAME_WORD: callStack.setFrameWord(a, b); break
-				case EFFECT_FRAME_DEPTH: callStack.setDepth(b); break
-				case EFFECT_KEY: keyboard.keyIndex = b; break
-				case EFFECT_DISPLAY: keyboard.display = keyboard.display.slice(0, b); break
+		const start = log.effectStart(index), count = log.effectCount(index)
+		for (let offset = 0; offset < count; offset++) {
+			const position = start + (forward ? offset : count - offset - 1)
+			const columns = log.effects.block(position).arrays, slot = position % log.effects.capacity
+			const a = columns[EFFECT_A][slot], b = columns[EFFECT_B][slot]
+			const held = this.effectValue(position)
+			switch (columns[EFFECT_KIND][slot]) {
+				case EFFECT_REGISTER: {
+					const current = cpu.x[a]
+					columns[EFFECT_B][slot] = low(current)
+					columns[EFFECT_HI][slot] = high(current)
+					cpu.x[a] = held; break
+				}
+				case EFFECT_SP: {
+					const current = cpu.sp
+					columns[EFFECT_B][slot] = low(current)
+					columns[EFFECT_HI][slot] = high(current)
+					cpu.sp = held; break
+				}
+				case EFFECT_PC: columns[EFFECT_B][slot] = cpu.pc; cpu.pc = b; break
+				case EFFECT_FLAGS: columns[EFFECT_B][slot] = cpu.nzcv; cpu.nzcv = b; break
+				case EFFECT_MEMORY: {
+					const current = cpu.load(a, this.effect(position, EFFECT_SIZE))!
+					columns[EFFECT_B][slot] = low(current)
+					columns[EFFECT_HI][slot] = high(current)
+					cpu.restore(a, this.effect(position, EFFECT_SIZE), held); break
+				}
+				case EFFECT_OUTPUT: columns[EFFECT_B][slot] = linux.output.length; columns[EFFECT_A][slot] = b; linux.output = this.outputText.exchange(linux.output, b); break
+				case EFFECT_INPUT: columns[EFFECT_B][slot] = linux.inputIndex; linux.inputIndex = b; break
+				case EFFECT_WAITING: columns[EFFECT_B][slot] = +linux.waiting; linux.waiting = b !== 0; break
+				case EFFECT_HALTED: columns[EFFECT_B][slot] = +this.target.halted; this.target.halted = b !== 0; break
+				case EFFECT_EXIT: columns[EFFECT_B][slot] = linux.exitCode; linux.exitCode = b; break
+				case EFFECT_BREAK: columns[EFFECT_B][slot] = linux.programBreak; linux.programBreak = b; break
+				case EFFECT_FRAME_WORD: columns[EFFECT_B][slot] = callStack.frameWordAt(a); callStack.setFrameWord(a, b); break
+				case EFFECT_FRAME_DEPTH: columns[EFFECT_B][slot] = callStack.depth; callStack.setDepth(b); break
+				case EFFECT_KEY: columns[EFFECT_B][slot] = keyboard.keyIndex; keyboard.keyIndex = b; break
+				case EFFECT_DISPLAY: columns[EFFECT_B][slot] = keyboard.display.length; columns[EFFECT_A][slot] = b; keyboard.display = this.displayText.exchange(keyboard.display, b); break
 			}
 		}
+		const entrySlot = (log.first + index) % log.entries.capacity
+		const entries = log.entries.block(log.first + index).arrays
 		cpu.fault = FAULT_NONE
 		cpu.faultAddress = 0
-		this.target.instructionCount = count
-		log.truncate(index)
-	}
-
-	clear() {
-		this.log.clear()
+		{ const held = this.target.instructionCount; this.target.instructionCount = entries[CONTROL_COUNT][entrySlot]; entries[CONTROL_COUNT][entrySlot] = held }
 	}
 
 	private push(kind: number, size: number, a: number, b: number, hi = 0) {
@@ -290,13 +291,4 @@ export class A64History implements A64EffectSink, A64CallStackSink {
 		columns[EFFECT_HI][slot] = hi
 	}
 
-	private column(index: number, column: number): number {
-		if (!(index >= 0 && index < this.log.length)) throw new RangeError(`No history entry ${index}`)
-		const position = this.log.first + index
-		return this.log.entries.block(position).arrays[column][position % this.log.entries.capacity]
-	}
-
-	private effect(position: number, column: number): number {
-		return this.log.effects.block(position).arrays[column][position % this.log.effects.capacity]
-	}
 }

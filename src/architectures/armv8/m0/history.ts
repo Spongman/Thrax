@@ -1,11 +1,14 @@
+import { historyCount, historySlice } from '../../../core/historyView'
 import { HistoryBufferLayout } from '../../../core/historyBuffers'
 import { HistoryLog } from '../../../core/historyLog'
+import { HistoryCursor, exchangeHistoryValues, exchangeHistoryBytes, exchangeHistoryFrame } from '../../../core/historyCursor'
 import type { CallFrame, HistoryRecord, MachineHistory } from '../../contracts'
 
 /** The architecture declares all additional storage; shared log handles blocks and limits. */
 export const HISTORY_SCHEMA = {
 	entry: [
 		{ name: 'pc', type: 'u32', elements: 1 },
+		{ name: 'controlPc', type: 'u32', elements: 1 },
 		{ name: 'count', type: 'f64', elements: 1 },
 		{ name: 'word', type: 'u32', elements: 1 },
 		{ name: 'kind', type: 'u8', elements: 1 },
@@ -37,17 +40,22 @@ export interface SavedState {
 }
 export class M0History implements MachineHistory {
 	readonly log = new HistoryLog(new HistoryBufferLayout(HISTORY_SCHEMA))
+	readonly timeline = new HistoryCursor(this.log)
 	private nextId = 0
 	constructor(limit: number) {
 		this.log.limit = limit
 	}
+	get retention() { return this.log.retention }
+
 	get length() {
 		return this.log.length
 	}
 	begin(state: SavedState, word: number, edit = false) {
+		this.timeline.branch()
 		const slot = this.log.openEntryWith(this.nextId++),
 			c = this.log.entries.tail!.buffers.columns
 		c.pc[slot] = state.pc
+		c.controlPc[slot] = state.pc
 		c.count[slot] = state.count
 		c.word[slot] = word
 		c.kind[slot] = +edit
@@ -80,7 +88,7 @@ export class M0History implements MachineHistory {
 		this.log.close()
 	}
 	at(index: number): M0Record | undefined {
-		if (index < 0 || index >= this.length) return undefined
+		if (!Number.isInteger(index) || index < 0 || index >= this.length) return undefined
 		const pos = this.log.first + index,
 			c = this.log.entries.block(pos).buffers.columns,
 			slot = pos % this.log.entries.capacity
@@ -92,50 +100,25 @@ export class M0History implements MachineHistory {
 			kind: c.kind[slot] ? 'edit' : 'instruction',
 		}
 	}
-	instructionCountAt(index: number) {
-		return this.at(index)?.instructionCount ?? 0
-	}
-	slice(from: number, to: number) {
-		return Array.from({ length: Math.max(0, Math.min(to, this.length) - Math.max(0, from)) }, (_, i) =>
-			this.at(Math.max(0, from) + i)!,
-		)
-	}
+	instructionCountAt(index: number) { return historyCount(this.log, index, 'count') }
+	slice(from: number, to: number) { return historySlice(this, from, to) }
 	indexOfId(id: number) {
 		return this.log.indexOfId(id)
 	}
-	undo(restore: (state: SavedState) => void, write: (address: number, value: number) => void): boolean {
-		if (!this.length) return false
-		const index = this.length - 1,
-			pos = this.log.first + index,
-			c = this.log.entries.block(pos).buffers.columns,
-			slot = pos % this.log.entries.capacity
-		for (
-			let p = this.log.effectStart(index) + this.log.effectCount(index) - 1;
-			p >= this.log.effectStart(index);
-			p--
-		) {
-			const e = this.log.effects.block(p).buffers.columns,
-				s = p % this.log.effects.capacity
-			write(e.address[s], e.value[s])
+	undo(restore: (state: SavedState) => void, write: (address: number, value: number) => number, state: SavedState, frames: CallFrame[], forward = false): boolean {
+		const exchange = (index: number, replay: boolean) => {
+			const values = { controlPc: state.pc, registers: state.registers, halted: +state.halted, pending: +state.pending, outputLength: state.outputLength }
+			exchangeHistoryBytes(this.log, index, replay, write)
+			exchangeHistoryValues(this.log, index, values)
+			exchangeHistoryFrame(this.log, index, frames)
+			const position = this.log.first + index, slot = position % this.log.entries.capacity
+			const c = this.log.entries.block(position).buffers.columns
+			restore({
+				pc: values.controlPc, registers: state.registers, halted: !!values.halted,
+				pending: !!values.pending, outputLength: values.outputLength,
+				count: c.count[slot] + (replay && !c.kind[slot] ? 1 : 0),
+			})
 		}
-		restore({
-			pc: c.pc[slot],
-			count: c.count[slot],
-			registers: c.registers.subarray(slot * 22, slot * 22 + 22) as Int32Array,
-			halted: !!c.halted[slot],
-			outputLength: c.outputLength[slot],
-			pending: !!c.pending[slot],
-			frameAction: c.frameAction[slot],
-			frame:
-				c.frameAction[slot] === 2
-					? {
-							callAddress: c.frame[slot * 3],
-							returnAddress: c.frame[slot * 3 + 1],
-							targetAddress: c.frame[slot * 3 + 2],
-						}
-					: undefined,
-		})
-		this.log.truncate(index)
-		return true
+		return forward ? this.timeline.forward(exchange) : this.timeline.back(exchange)
 	}
 }

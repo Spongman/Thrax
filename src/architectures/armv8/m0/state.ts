@@ -1,4 +1,5 @@
-import { describeArmToken } from '../../arm/editor/dataTips'
+import { RGB32_LE } from '../../../core/bitmapFormats'
+import { describeM0Token } from './dataTips'
 import { RegisterFormat, type ArchitectureVariant, type RegisterDescriptor } from '../../contracts'
 import { memoryTop } from '../a64/layout'
 import type { ExecutionState } from '../executionState'
@@ -67,6 +68,7 @@ export function createM0State(): ExecutionState {
 		profile(settings) {
 			const top = memoryTop(settings.memoryBytes)
 			return {
+				bitmap: RGB32_LE,
 				resetPc: TEXT_BASE,
 				resetRegisters: {
 					...Object.fromEntries(REGISTERS.map((r) => [r.id, 0])),
@@ -85,22 +87,7 @@ export function createM0State(): ExecutionState {
 			}
 		},
 		disassembly,
-		describeToken(text, column, inspection) {
-			for (const match of text.matchAll(/\b(?:apsr|xpsr|msp|psp|control|primask)\b/gi)) {
-				if (column < match.index || column >= match.index + match[0].length) continue
-				const id = match[0].toUpperCase(),
-					value = inspection.registers[id]
-				return value === undefined
-					? null
-					: {
-							start: match.index,
-							length: match[0].length,
-							register: id,
-							contents: [`**${id}** = ${value} (0x${value.toString(16)})`],
-						}
-			}
-			return describeArmToken(text, column, inspection, { value: (name) => latest?.labels.get(name) })
-		},
+		describeToken: (text, column, inspection) => describeM0Token(text, column, inspection, (name) => latest?.labels.get(name)),
 		values: () => latest?.labels ?? null,
 	}
 }
