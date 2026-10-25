@@ -1,0 +1,1263 @@
+{
+  "generatedAt": "2026-10-24T07:45:23.920Z",
+  "environment": {
+    "node": "v24.17.0",
+    "platform": "win32",
+    "release": "10.0.19045",
+    "cpu": "Intel(R) Core(TM) i7-9700 CPU @ 3.00GHz"
+  },
+  "options": {
+    "steps": 50000,
+    "samples": 1,
+    "architectures": [
+      "m6800",
+      "i8051",
+      "powerpc",
+      "alpha",
+      "i8086",
+      "w65816",
+      "tms9900"
+    ]
+  },
+  "rows": [
+    {
+      "architecture": "m6800",
+      "variant": "default",
+      "settings": {},
+      "historyLimit": 2000,
+      "tools": false,
+      "median": {
+        "instructions": 50000,
+        "executionMs": 23.40039999999999,
+        "instructionsPerSecond": 2136715.611698946,
+        "snapshotMs": 0.08510000000023865,
+        "rewindEntries": 1448,
+        "rewindMs": 1.3695999999999913,
+        "rewindToolsMs": 0.004999999999654392,
+        "replayEntries": 1448,
+        "replayMs": 0.849699999999757,
+        "replayToolsMs": 0.0025000000000545697,
+        "retention": {
+          "entries": 2896,
+          "entryLimit": 2000,
+          "byteLimit": 268435456,
+          "liveBufferBytes": 360448,
+          "allocatedBufferBytes": 360448,
+          "payloadCount": 0,
+          "entryEvictions": 47104,
+          "byteEvictions": 0,
+          "oversizedEntries": 0,
+          "lastEviction": "entry-limit"
+        },
+        "liveBytesPerEntry": 124.46408839779005
+      },
+      "samples": [
+        {
+          "instructions": 50000,
+          "executionMs": 23.40039999999999,
+          "instructionsPerSecond": 2136715.611698946,
+          "snapshotMs": 0.08510000000023865,
+          "rewindEntries": 1448,
+          "rewindMs": 1.3695999999999913,
+          "rewindToolsMs": 0.004999999999654392,
+          "replayEntries": 1448,
+          "replayMs": 0.849699999999757,
+          "replayToolsMs": 0.0025000000000545697,
+          "retention": {
+            "entries": 2896,
+            "entryLimit": 2000,
+            "byteLimit": 268435456,
+            "liveBufferBytes": 360448,
+            "allocatedBufferBytes": 360448,
+            "payloadCount": 0,
+            "entryEvictions": 47104,
+            "byteEvictions": 0,
+            "oversizedEntries": 0,
+            "lastEviction": "entry-limit"
+          },
+          "liveBytesPerEntry": 124.46408839779005
+        }
+      ]
+    },
+    {
+      "architecture": "m6800",
+      "variant": "default",
+      "settings": {},
+      "historyLimit": 1000000,
+      "tools": false,
+      "median": {
+        "instructions": 50000,
+        "executionMs": 21.461099999999988,
+        "instructionsPerSecond": 2329796.70193979,
+        "snapshotMs": 0.1115999999997257,
+        "rewindEntries": 25000,
+        "rewindMs": 8.234500000000025,
+        "rewindToolsMs": 0.0052999999998064595,
+        "replayEntries": 25000,
+        "replayMs": 7.333999999999833,
+        "replayToolsMs": 0.0027000000000043656,
+        "retention": {
+          "entries": 50000,
+          "entryLimit": 1000000,
+          "byteLimit": 268435456,
+          "liveBufferBytes": 4392960,
+          "allocatedBufferBytes": 4392960,
+          "payloadCount": 0,
+          "entryEvictions": 0,
+          "byteEvictions": 0,
+          "oversizedEntries": 0,
+          "lastEviction": null
+        },
+        "liveBytesPerEntry": 87.8592
+      },
+      "samples": [
+        {
+          "instructions": 50000,
+          "executionMs": 21.461099999999988,
+          "instructionsPerSecond": 2329796.70193979,
+          "snapshotMs": 0.1115999999997257,
+          "rewindEntries": 25000,
+          "rewindMs": 8.234500000000025,
+          "rewindToolsMs": 0.0052999999998064595,
+          "replayEntries": 25000,
+          "replayMs": 7.333999999999833,
+          "replayToolsMs": 0.0027000000000043656,
+          "retention": {
+            "entries": 50000,
+            "entryLimit": 1000000,
+            "byteLimit": 268435456,
+            "liveBufferBytes": 4392960,
+            "allocatedBufferBytes": 4392960,
+            "payloadCount": 0,
+            "entryEvictions": 0,
+            "byteEvictions": 0,
+            "oversizedEntries": 0,
+            "lastEviction": null
+          },
+          "liveBytesPerEntry": 87.8592
+        }
+      ]
+    },
+    {
+      "architecture": "m6800",
+      "variant": "default",
+      "settings": {},
+      "historyLimit": 1000000,
+      "tools": true,
+      "median": {
+        "instructions": 50000,
+        "executionMs": 78.25710000000026,
+        "instructionsPerSecond": 638919.6635193463,
+        "snapshotMs": 0.18580000000019936,
+        "rewindEntries": 25000,
+        "rewindMs": 12.350400000000263,
+        "rewindToolsMs": 26.952999999999975,
+        "replayEntries": 25000,
+        "replayMs": 11.991500000000087,
+        "replayToolsMs": 25.781800000000203,
+        "retention": {
+          "entries": 50000,
+          "entryLimit": 1000000,
+          "byteLimit": 268435456,
+          "liveBufferBytes": 4392960,
+          "allocatedBufferBytes": 4392960,
+          "payloadCount": 0,
+          "entryEvictions": 0,
+          "byteEvictions": 0,
+          "oversizedEntries": 0,
+          "lastEviction": null
+        },
+        "liveBytesPerEntry": 87.8592
+      },
+      "samples": [
+        {
+          "instructions": 50000,
+          "executionMs": 78.25710000000026,
+          "instructionsPerSecond": 638919.6635193463,
+          "snapshotMs": 0.18580000000019936,
+          "rewindEntries": 25000,
+          "rewindMs": 12.350400000000263,
+          "rewindToolsMs": 26.952999999999975,
+          "replayEntries": 25000,
+          "replayMs": 11.991500000000087,
+          "replayToolsMs": 25.781800000000203,
+          "retention": {
+            "entries": 50000,
+            "entryLimit": 1000000,
+            "byteLimit": 268435456,
+            "liveBufferBytes": 4392960,
+            "allocatedBufferBytes": 4392960,
+            "payloadCount": 0,
+            "entryEvictions": 0,
+            "byteEvictions": 0,
+            "oversizedEntries": 0,
+            "lastEviction": null
+          },
+          "liveBytesPerEntry": 87.8592
+        }
+      ]
+    },
+    {
+      "architecture": "i8051",
+      "variant": "default",
+      "settings": {},
+      "historyLimit": 2000,
+      "tools": false,
+      "median": {
+        "instructions": 50000,
+        "executionMs": 41.40070000000014,
+        "instructionsPerSecond": 1207709.0483977282,
+        "snapshotMs": 0.0524000000000342,
+        "rewindEntries": 1448,
+        "rewindMs": 0.9059999999999491,
+        "rewindToolsMs": 0.0027000000000043656,
+        "replayEntries": 1448,
+        "replayMs": 1.0712000000003172,
+        "replayToolsMs": 0.002399999999852298,
+        "retention": {
+          "entries": 2896,
+          "entryLimit": 2000,
+          "byteLimit": 268435456,
+          "liveBufferBytes": 491520,
+          "allocatedBufferBytes": 491520,
+          "payloadCount": 0,
+          "entryEvictions": 47104,
+          "byteEvictions": 0,
+          "oversizedEntries": 0,
+          "lastEviction": "entry-limit"
+        },
+        "liveBytesPerEntry": 169.72375690607734
+      },
+      "samples": [
+        {
+          "instructions": 50000,
+          "executionMs": 41.40070000000014,
+          "instructionsPerSecond": 1207709.0483977282,
+          "snapshotMs": 0.0524000000000342,
+          "rewindEntries": 1448,
+          "rewindMs": 0.9059999999999491,
+          "rewindToolsMs": 0.0027000000000043656,
+          "replayEntries": 1448,
+          "replayMs": 1.0712000000003172,
+          "replayToolsMs": 0.002399999999852298,
+          "retention": {
+            "entries": 2896,
+            "entryLimit": 2000,
+            "byteLimit": 268435456,
+            "liveBufferBytes": 491520,
+            "allocatedBufferBytes": 491520,
+            "payloadCount": 0,
+            "entryEvictions": 47104,
+            "byteEvictions": 0,
+            "oversizedEntries": 0,
+            "lastEviction": "entry-limit"
+          },
+          "liveBytesPerEntry": 169.72375690607734
+        }
+      ]
+    },
+    {
+      "architecture": "i8051",
+      "variant": "default",
+      "settings": {},
+      "historyLimit": 1000000,
+      "tools": false,
+      "median": {
+        "instructions": 50000,
+        "executionMs": 41.92920000000004,
+        "instructionsPerSecond": 1192486.3818055186,
+        "snapshotMs": 0.08170000000018263,
+        "rewindEntries": 25000,
+        "rewindMs": 14.147100000000137,
+        "rewindToolsMs": 0.007000000000061846,
+        "replayEntries": 25000,
+        "replayMs": 14.809999999999945,
+        "replayToolsMs": 0.005500000000211003,
+        "retention": {
+          "entries": 50000,
+          "entryLimit": 1000000,
+          "byteLimit": 268435456,
+          "liveBufferBytes": 5990400,
+          "allocatedBufferBytes": 5990400,
+          "payloadCount": 0,
+          "entryEvictions": 0,
+          "byteEvictions": 0,
+          "oversizedEntries": 0,
+          "lastEviction": null
+        },
+        "liveBytesPerEntry": 119.808
+      },
+      "samples": [
+        {
+          "instructions": 50000,
+          "executionMs": 41.92920000000004,
+          "instructionsPerSecond": 1192486.3818055186,
+          "snapshotMs": 0.08170000000018263,
+          "rewindEntries": 25000,
+          "rewindMs": 14.147100000000137,
+          "rewindToolsMs": 0.007000000000061846,
+          "replayEntries": 25000,
+          "replayMs": 14.809999999999945,
+          "replayToolsMs": 0.005500000000211003,
+          "retention": {
+            "entries": 50000,
+            "entryLimit": 1000000,
+            "byteLimit": 268435456,
+            "liveBufferBytes": 5990400,
+            "allocatedBufferBytes": 5990400,
+            "payloadCount": 0,
+            "entryEvictions": 0,
+            "byteEvictions": 0,
+            "oversizedEntries": 0,
+            "lastEviction": null
+          },
+          "liveBytesPerEntry": 119.808
+        }
+      ]
+    },
+    {
+      "architecture": "i8051",
+      "variant": "default",
+      "settings": {},
+      "historyLimit": 1000000,
+      "tools": true,
+      "median": {
+        "instructions": 50000,
+        "executionMs": 103.4086000000002,
+        "instructionsPerSecond": 483518.77890233404,
+        "snapshotMs": 0.15009999999983847,
+        "rewindEntries": 25000,
+        "rewindMs": 19.043100000000322,
+        "rewindToolsMs": 28.780500000000302,
+        "replayEntries": 25000,
+        "replayMs": 18.49579999999969,
+        "replayToolsMs": 24.658500000000004,
+        "retention": {
+          "entries": 50000,
+          "entryLimit": 1000000,
+          "byteLimit": 268435456,
+          "liveBufferBytes": 5990400,
+          "allocatedBufferBytes": 5990400,
+          "payloadCount": 0,
+          "entryEvictions": 0,
+          "byteEvictions": 0,
+          "oversizedEntries": 0,
+          "lastEviction": null
+        },
+        "liveBytesPerEntry": 119.808
+      },
+      "samples": [
+        {
+          "instructions": 50000,
+          "executionMs": 103.4086000000002,
+          "instructionsPerSecond": 483518.77890233404,
+          "snapshotMs": 0.15009999999983847,
+          "rewindEntries": 25000,
+          "rewindMs": 19.043100000000322,
+          "rewindToolsMs": 28.780500000000302,
+          "replayEntries": 25000,
+          "replayMs": 18.49579999999969,
+          "replayToolsMs": 24.658500000000004,
+          "retention": {
+            "entries": 50000,
+            "entryLimit": 1000000,
+            "byteLimit": 268435456,
+            "liveBufferBytes": 5990400,
+            "allocatedBufferBytes": 5990400,
+            "payloadCount": 0,
+            "entryEvictions": 0,
+            "byteEvictions": 0,
+            "oversizedEntries": 0,
+            "lastEviction": null
+          },
+          "liveBytesPerEntry": 119.808
+        }
+      ]
+    },
+    {
+      "architecture": "powerpc",
+      "variant": "default",
+      "settings": {},
+      "historyLimit": 2000,
+      "tools": false,
+      "median": {
+        "instructions": 50000,
+        "executionMs": 21.382300000000214,
+        "instructionsPerSecond": 2338382.681002488,
+        "snapshotMs": 0.11750000000029104,
+        "rewindEntries": 1448,
+        "rewindMs": 0.7764999999999418,
+        "rewindToolsMs": 0.005000000000109139,
+        "replayEntries": 1448,
+        "replayMs": 0.5763999999999214,
+        "replayToolsMs": 0.003400000000056025,
+        "retention": {
+          "entries": 2896,
+          "entryLimit": 2000,
+          "byteLimit": 268435456,
+          "liveBufferBytes": 862208,
+          "allocatedBufferBytes": 862208,
+          "payloadCount": 0,
+          "entryEvictions": 47104,
+          "byteEvictions": 0,
+          "oversizedEntries": 0,
+          "lastEviction": "entry-limit"
+        },
+        "liveBytesPerEntry": 297.72375690607737
+      },
+      "samples": [
+        {
+          "instructions": 50000,
+          "executionMs": 21.382300000000214,
+          "instructionsPerSecond": 2338382.681002488,
+          "snapshotMs": 0.11750000000029104,
+          "rewindEntries": 1448,
+          "rewindMs": 0.7764999999999418,
+          "rewindToolsMs": 0.005000000000109139,
+          "replayEntries": 1448,
+          "replayMs": 0.5763999999999214,
+          "replayToolsMs": 0.003400000000056025,
+          "retention": {
+            "entries": 2896,
+            "entryLimit": 2000,
+            "byteLimit": 268435456,
+            "liveBufferBytes": 862208,
+            "allocatedBufferBytes": 862208,
+            "payloadCount": 0,
+            "entryEvictions": 47104,
+            "byteEvictions": 0,
+            "oversizedEntries": 0,
+            "lastEviction": "entry-limit"
+          },
+          "liveBytesPerEntry": 297.72375690607737
+        }
+      ]
+    },
+    {
+      "architecture": "powerpc",
+      "variant": "default",
+      "settings": {},
+      "historyLimit": 1000000,
+      "tools": false,
+      "median": {
+        "instructions": 50000,
+        "executionMs": 21.498399999999947,
+        "instructionsPerSecond": 2325754.474751615,
+        "snapshotMs": 0.0909999999998945,
+        "rewindEntries": 25000,
+        "rewindMs": 10.931499999999687,
+        "rewindToolsMs": 0.0136000000002241,
+        "replayEntries": 25000,
+        "replayMs": 10.077600000000075,
+        "replayToolsMs": 0.008400000000619912,
+        "retention": {
+          "entries": 50000,
+          "entryLimit": 1000000,
+          "byteLimit": 268435456,
+          "liveBufferBytes": 10659840,
+          "allocatedBufferBytes": 10659840,
+          "payloadCount": 0,
+          "entryEvictions": 0,
+          "byteEvictions": 0,
+          "oversizedEntries": 0,
+          "lastEviction": null
+        },
+        "liveBytesPerEntry": 213.1968
+      },
+      "samples": [
+        {
+          "instructions": 50000,
+          "executionMs": 21.498399999999947,
+          "instructionsPerSecond": 2325754.474751615,
+          "snapshotMs": 0.0909999999998945,
+          "rewindEntries": 25000,
+          "rewindMs": 10.931499999999687,
+          "rewindToolsMs": 0.0136000000002241,
+          "replayEntries": 25000,
+          "replayMs": 10.077600000000075,
+          "replayToolsMs": 0.008400000000619912,
+          "retention": {
+            "entries": 50000,
+            "entryLimit": 1000000,
+            "byteLimit": 268435456,
+            "liveBufferBytes": 10659840,
+            "allocatedBufferBytes": 10659840,
+            "payloadCount": 0,
+            "entryEvictions": 0,
+            "byteEvictions": 0,
+            "oversizedEntries": 0,
+            "lastEviction": null
+          },
+          "liveBytesPerEntry": 213.1968
+        }
+      ]
+    },
+    {
+      "architecture": "powerpc",
+      "variant": "default",
+      "settings": {},
+      "historyLimit": 1000000,
+      "tools": true,
+      "median": {
+        "instructions": 50000,
+        "executionMs": 68.6880000000001,
+        "instructionsPerSecond": 727929.1870486828,
+        "snapshotMs": 0.09110000000055152,
+        "rewindEntries": 25000,
+        "rewindMs": 14.121600000000399,
+        "rewindToolsMs": 24.368399999999383,
+        "replayEntries": 25000,
+        "replayMs": 14.347500000000764,
+        "replayToolsMs": 23.214199999999437,
+        "retention": {
+          "entries": 50000,
+          "entryLimit": 1000000,
+          "byteLimit": 268435456,
+          "liveBufferBytes": 10659840,
+          "allocatedBufferBytes": 10659840,
+          "payloadCount": 0,
+          "entryEvictions": 0,
+          "byteEvictions": 0,
+          "oversizedEntries": 0,
+          "lastEviction": null
+        },
+        "liveBytesPerEntry": 213.1968
+      },
+      "samples": [
+        {
+          "instructions": 50000,
+          "executionMs": 68.6880000000001,
+          "instructionsPerSecond": 727929.1870486828,
+          "snapshotMs": 0.09110000000055152,
+          "rewindEntries": 25000,
+          "rewindMs": 14.121600000000399,
+          "rewindToolsMs": 24.368399999999383,
+          "replayEntries": 25000,
+          "replayMs": 14.347500000000764,
+          "replayToolsMs": 23.214199999999437,
+          "retention": {
+            "entries": 50000,
+            "entryLimit": 1000000,
+            "byteLimit": 268435456,
+            "liveBufferBytes": 10659840,
+            "allocatedBufferBytes": 10659840,
+            "payloadCount": 0,
+            "entryEvictions": 0,
+            "byteEvictions": 0,
+            "oversizedEntries": 0,
+            "lastEviction": null
+          },
+          "liveBytesPerEntry": 213.1968
+        }
+      ]
+    },
+    {
+      "architecture": "alpha",
+      "variant": "default",
+      "settings": {},
+      "historyLimit": 2000,
+      "tools": false,
+      "median": {
+        "instructions": 50000,
+        "executionMs": 103.8099000000002,
+        "instructionsPerSecond": 481649.6307192272,
+        "snapshotMs": 0.10720000000037544,
+        "rewindEntries": 1448,
+        "rewindMs": 3.212899999999536,
+        "rewindToolsMs": 0.00709999999980937,
+        "replayEntries": 1448,
+        "replayMs": 2.539099999999962,
+        "replayToolsMs": 0.004800000000614091,
+        "retention": {
+          "entries": 2896,
+          "entryLimit": 2000,
+          "byteLimit": 268435456,
+          "liveBufferBytes": 1320960,
+          "allocatedBufferBytes": 1320960,
+          "payloadCount": 0,
+          "entryEvictions": 47104,
+          "byteEvictions": 0,
+          "oversizedEntries": 0,
+          "lastEviction": "entry-limit"
+        },
+        "liveBytesPerEntry": 456.1325966850829
+      },
+      "samples": [
+        {
+          "instructions": 50000,
+          "executionMs": 103.8099000000002,
+          "instructionsPerSecond": 481649.6307192272,
+          "snapshotMs": 0.10720000000037544,
+          "rewindEntries": 1448,
+          "rewindMs": 3.212899999999536,
+          "rewindToolsMs": 0.00709999999980937,
+          "replayEntries": 1448,
+          "replayMs": 2.539099999999962,
+          "replayToolsMs": 0.004800000000614091,
+          "retention": {
+            "entries": 2896,
+            "entryLimit": 2000,
+            "byteLimit": 268435456,
+            "liveBufferBytes": 1320960,
+            "allocatedBufferBytes": 1320960,
+            "payloadCount": 0,
+            "entryEvictions": 47104,
+            "byteEvictions": 0,
+            "oversizedEntries": 0,
+            "lastEviction": "entry-limit"
+          },
+          "liveBytesPerEntry": 456.1325966850829
+        }
+      ]
+    },
+    {
+      "architecture": "alpha",
+      "variant": "default",
+      "settings": {},
+      "historyLimit": 1000000,
+      "tools": false,
+      "median": {
+        "instructions": 50000,
+        "executionMs": 101.85999999999967,
+        "instructionsPerSecond": 490869.8213233866,
+        "snapshotMs": 0.09270000000014988,
+        "rewindEntries": 25000,
+        "rewindMs": 44.39059999999972,
+        "rewindToolsMs": 0.013100000000122236,
+        "replayEntries": 25000,
+        "replayMs": 44.131900000000314,
+        "replayToolsMs": 0.013799999999719148,
+        "retention": {
+          "entries": 50000,
+          "entryLimit": 1000000,
+          "byteLimit": 268435456,
+          "liveBufferBytes": 16394240,
+          "allocatedBufferBytes": 16394240,
+          "payloadCount": 0,
+          "entryEvictions": 0,
+          "byteEvictions": 0,
+          "oversizedEntries": 0,
+          "lastEviction": null
+        },
+        "liveBytesPerEntry": 327.8848
+      },
+      "samples": [
+        {
+          "instructions": 50000,
+          "executionMs": 101.85999999999967,
+          "instructionsPerSecond": 490869.8213233866,
+          "snapshotMs": 0.09270000000014988,
+          "rewindEntries": 25000,
+          "rewindMs": 44.39059999999972,
+          "rewindToolsMs": 0.013100000000122236,
+          "replayEntries": 25000,
+          "replayMs": 44.131900000000314,
+          "replayToolsMs": 0.013799999999719148,
+          "retention": {
+            "entries": 50000,
+            "entryLimit": 1000000,
+            "byteLimit": 268435456,
+            "liveBufferBytes": 16394240,
+            "allocatedBufferBytes": 16394240,
+            "payloadCount": 0,
+            "entryEvictions": 0,
+            "byteEvictions": 0,
+            "oversizedEntries": 0,
+            "lastEviction": null
+          },
+          "liveBytesPerEntry": 327.8848
+        }
+      ]
+    },
+    {
+      "architecture": "alpha",
+      "variant": "default",
+      "settings": {},
+      "historyLimit": 1000000,
+      "tools": true,
+      "median": {
+        "instructions": 50000,
+        "executionMs": 158.2507999999998,
+        "instructionsPerSecond": 315954.1689520689,
+        "snapshotMs": 0.09879999999975553,
+        "rewindEntries": 25000,
+        "rewindMs": 48.72270000000026,
+        "rewindToolsMs": 26.622800000000097,
+        "replayEntries": 25000,
+        "replayMs": 47.74330000000009,
+        "replayToolsMs": 20.46020000000044,
+        "retention": {
+          "entries": 50000,
+          "entryLimit": 1000000,
+          "byteLimit": 268435456,
+          "liveBufferBytes": 16394240,
+          "allocatedBufferBytes": 16394240,
+          "payloadCount": 0,
+          "entryEvictions": 0,
+          "byteEvictions": 0,
+          "oversizedEntries": 0,
+          "lastEviction": null
+        },
+        "liveBytesPerEntry": 327.8848
+      },
+      "samples": [
+        {
+          "instructions": 50000,
+          "executionMs": 158.2507999999998,
+          "instructionsPerSecond": 315954.1689520689,
+          "snapshotMs": 0.09879999999975553,
+          "rewindEntries": 25000,
+          "rewindMs": 48.72270000000026,
+          "rewindToolsMs": 26.622800000000097,
+          "replayEntries": 25000,
+          "replayMs": 47.74330000000009,
+          "replayToolsMs": 20.46020000000044,
+          "retention": {
+            "entries": 50000,
+            "entryLimit": 1000000,
+            "byteLimit": 268435456,
+            "liveBufferBytes": 16394240,
+            "allocatedBufferBytes": 16394240,
+            "payloadCount": 0,
+            "entryEvictions": 0,
+            "byteEvictions": 0,
+            "oversizedEntries": 0,
+            "lastEviction": null
+          },
+          "liveBytesPerEntry": 327.8848
+        }
+      ]
+    },
+    {
+      "architecture": "i8086",
+      "variant": "default",
+      "settings": {},
+      "historyLimit": 2000,
+      "tools": false,
+      "median": {
+        "instructions": 50000,
+        "executionMs": 43.41309999999976,
+        "instructionsPerSecond": 1151726.091893928,
+        "snapshotMs": 0.052800000000388536,
+        "rewindEntries": 1448,
+        "rewindMs": 0.9456000000000131,
+        "rewindToolsMs": 0.0027000000000043656,
+        "replayEntries": 1448,
+        "replayMs": 0.8427999999994427,
+        "replayToolsMs": 0.0011000000004059984,
+        "retention": {
+          "entries": 2896,
+          "entryLimit": 2000,
+          "byteLimit": 268435456,
+          "liveBufferBytes": 557056,
+          "allocatedBufferBytes": 557056,
+          "payloadCount": 0,
+          "entryEvictions": 47104,
+          "byteEvictions": 0,
+          "oversizedEntries": 0,
+          "lastEviction": "entry-limit"
+        },
+        "liveBytesPerEntry": 192.353591160221
+      },
+      "samples": [
+        {
+          "instructions": 50000,
+          "executionMs": 43.41309999999976,
+          "instructionsPerSecond": 1151726.091893928,
+          "snapshotMs": 0.052800000000388536,
+          "rewindEntries": 1448,
+          "rewindMs": 0.9456000000000131,
+          "rewindToolsMs": 0.0027000000000043656,
+          "replayEntries": 1448,
+          "replayMs": 0.8427999999994427,
+          "replayToolsMs": 0.0011000000004059984,
+          "retention": {
+            "entries": 2896,
+            "entryLimit": 2000,
+            "byteLimit": 268435456,
+            "liveBufferBytes": 557056,
+            "allocatedBufferBytes": 557056,
+            "payloadCount": 0,
+            "entryEvictions": 47104,
+            "byteEvictions": 0,
+            "oversizedEntries": 0,
+            "lastEviction": "entry-limit"
+          },
+          "liveBytesPerEntry": 192.353591160221
+        }
+      ]
+    },
+    {
+      "architecture": "i8086",
+      "variant": "default",
+      "settings": {},
+      "historyLimit": 1000000,
+      "tools": false,
+      "median": {
+        "instructions": 50000,
+        "executionMs": 39.422199999999975,
+        "instructionsPerSecond": 1268320.8953330873,
+        "snapshotMs": 0.0793999999996231,
+        "rewindEntries": 25000,
+        "rewindMs": 9.085500000000138,
+        "rewindToolsMs": 0.010299999999915599,
+        "replayEntries": 25000,
+        "replayMs": 9.059699999999793,
+        "replayToolsMs": 0.006400000000212458,
+        "retention": {
+          "entries": 50000,
+          "entryLimit": 1000000,
+          "byteLimit": 268435456,
+          "liveBufferBytes": 6819840,
+          "allocatedBufferBytes": 6819840,
+          "payloadCount": 0,
+          "entryEvictions": 0,
+          "byteEvictions": 0,
+          "oversizedEntries": 0,
+          "lastEviction": null
+        },
+        "liveBytesPerEntry": 136.3968
+      },
+      "samples": [
+        {
+          "instructions": 50000,
+          "executionMs": 39.422199999999975,
+          "instructionsPerSecond": 1268320.8953330873,
+          "snapshotMs": 0.0793999999996231,
+          "rewindEntries": 25000,
+          "rewindMs": 9.085500000000138,
+          "rewindToolsMs": 0.010299999999915599,
+          "replayEntries": 25000,
+          "replayMs": 9.059699999999793,
+          "replayToolsMs": 0.006400000000212458,
+          "retention": {
+            "entries": 50000,
+            "entryLimit": 1000000,
+            "byteLimit": 268435456,
+            "liveBufferBytes": 6819840,
+            "allocatedBufferBytes": 6819840,
+            "payloadCount": 0,
+            "entryEvictions": 0,
+            "byteEvictions": 0,
+            "oversizedEntries": 0,
+            "lastEviction": null
+          },
+          "liveBytesPerEntry": 136.3968
+        }
+      ]
+    },
+    {
+      "architecture": "i8086",
+      "variant": "default",
+      "settings": {},
+      "historyLimit": 1000000,
+      "tools": true,
+      "median": {
+        "instructions": 50000,
+        "executionMs": 92.1259,
+        "instructionsPerSecond": 542735.5390829289,
+        "snapshotMs": 0.10260000000016589,
+        "rewindEntries": 25000,
+        "rewindMs": 13.650399999999536,
+        "rewindToolsMs": 27.52809999999954,
+        "replayEntries": 25000,
+        "replayMs": 13.126099999999497,
+        "replayToolsMs": 21.90180000000055,
+        "retention": {
+          "entries": 50000,
+          "entryLimit": 1000000,
+          "byteLimit": 268435456,
+          "liveBufferBytes": 6819840,
+          "allocatedBufferBytes": 6819840,
+          "payloadCount": 0,
+          "entryEvictions": 0,
+          "byteEvictions": 0,
+          "oversizedEntries": 0,
+          "lastEviction": null
+        },
+        "liveBytesPerEntry": 136.3968
+      },
+      "samples": [
+        {
+          "instructions": 50000,
+          "executionMs": 92.1259,
+          "instructionsPerSecond": 542735.5390829289,
+          "snapshotMs": 0.10260000000016589,
+          "rewindEntries": 25000,
+          "rewindMs": 13.650399999999536,
+          "rewindToolsMs": 27.52809999999954,
+          "replayEntries": 25000,
+          "replayMs": 13.126099999999497,
+          "replayToolsMs": 21.90180000000055,
+          "retention": {
+            "entries": 50000,
+            "entryLimit": 1000000,
+            "byteLimit": 268435456,
+            "liveBufferBytes": 6819840,
+            "allocatedBufferBytes": 6819840,
+            "payloadCount": 0,
+            "entryEvictions": 0,
+            "byteEvictions": 0,
+            "oversizedEntries": 0,
+            "lastEviction": null
+          },
+          "liveBytesPerEntry": 136.3968
+        }
+      ]
+    },
+    {
+      "architecture": "w65816",
+      "variant": "default",
+      "settings": {},
+      "historyLimit": 2000,
+      "tools": false,
+      "median": {
+        "instructions": 50000,
+        "executionMs": 32.40270000000055,
+        "instructionsPerSecond": 1543081.2864359806,
+        "snapshotMs": 0.05029999999987922,
+        "rewindEntries": 1448,
+        "rewindMs": 0.5354000000006636,
+        "rewindToolsMs": 0.0018999999992956873,
+        "replayEntries": 1448,
+        "replayMs": 0.5073999999995067,
+        "replayToolsMs": 0.001299999999901047,
+        "retention": {
+          "entries": 2896,
+          "entryLimit": 2000,
+          "byteLimit": 268435456,
+          "liveBufferBytes": 430080,
+          "allocatedBufferBytes": 430080,
+          "payloadCount": 0,
+          "entryEvictions": 47104,
+          "byteEvictions": 0,
+          "oversizedEntries": 0,
+          "lastEviction": "entry-limit"
+        },
+        "liveBytesPerEntry": 148.50828729281767
+      },
+      "samples": [
+        {
+          "instructions": 50000,
+          "executionMs": 32.40270000000055,
+          "instructionsPerSecond": 1543081.2864359806,
+          "snapshotMs": 0.05029999999987922,
+          "rewindEntries": 1448,
+          "rewindMs": 0.5354000000006636,
+          "rewindToolsMs": 0.0018999999992956873,
+          "replayEntries": 1448,
+          "replayMs": 0.5073999999995067,
+          "replayToolsMs": 0.001299999999901047,
+          "retention": {
+            "entries": 2896,
+            "entryLimit": 2000,
+            "byteLimit": 268435456,
+            "liveBufferBytes": 430080,
+            "allocatedBufferBytes": 430080,
+            "payloadCount": 0,
+            "entryEvictions": 47104,
+            "byteEvictions": 0,
+            "oversizedEntries": 0,
+            "lastEviction": "entry-limit"
+          },
+          "liveBytesPerEntry": 148.50828729281767
+        }
+      ]
+    },
+    {
+      "architecture": "w65816",
+      "variant": "default",
+      "settings": {},
+      "historyLimit": 1000000,
+      "tools": false,
+      "median": {
+        "instructions": 50000,
+        "executionMs": 35.45480000000043,
+        "instructionsPerSecond": 1410246.285411267,
+        "snapshotMs": 0.07450000000062573,
+        "rewindEntries": 25000,
+        "rewindMs": 9.976399999999558,
+        "rewindToolsMs": 0.00769999999920401,
+        "replayEntries": 25000,
+        "replayMs": 9.084799999999632,
+        "replayToolsMs": 0.004799999999704596,
+        "retention": {
+          "entries": 50000,
+          "entryLimit": 1000000,
+          "byteLimit": 268435456,
+          "liveBufferBytes": 5345280,
+          "allocatedBufferBytes": 5345280,
+          "payloadCount": 0,
+          "entryEvictions": 0,
+          "byteEvictions": 0,
+          "oversizedEntries": 0,
+          "lastEviction": null
+        },
+        "liveBytesPerEntry": 106.9056
+      },
+      "samples": [
+        {
+          "instructions": 50000,
+          "executionMs": 35.45480000000043,
+          "instructionsPerSecond": 1410246.285411267,
+          "snapshotMs": 0.07450000000062573,
+          "rewindEntries": 25000,
+          "rewindMs": 9.976399999999558,
+          "rewindToolsMs": 0.00769999999920401,
+          "replayEntries": 25000,
+          "replayMs": 9.084799999999632,
+          "replayToolsMs": 0.004799999999704596,
+          "retention": {
+            "entries": 50000,
+            "entryLimit": 1000000,
+            "byteLimit": 268435456,
+            "liveBufferBytes": 5345280,
+            "allocatedBufferBytes": 5345280,
+            "payloadCount": 0,
+            "entryEvictions": 0,
+            "byteEvictions": 0,
+            "oversizedEntries": 0,
+            "lastEviction": null
+          },
+          "liveBytesPerEntry": 106.9056
+        }
+      ]
+    },
+    {
+      "architecture": "w65816",
+      "variant": "default",
+      "settings": {},
+      "historyLimit": 1000000,
+      "tools": true,
+      "median": {
+        "instructions": 50000,
+        "executionMs": 83.10059999999976,
+        "instructionsPerSecond": 601680.3729455641,
+        "snapshotMs": 0.12820000000010623,
+        "rewindEntries": 25000,
+        "rewindMs": 13.084399999999732,
+        "rewindToolsMs": 27.012800000000425,
+        "replayEntries": 25000,
+        "replayMs": 13.333599999999933,
+        "replayToolsMs": 22.78729999999996,
+        "retention": {
+          "entries": 50000,
+          "entryLimit": 1000000,
+          "byteLimit": 268435456,
+          "liveBufferBytes": 5345280,
+          "allocatedBufferBytes": 5345280,
+          "payloadCount": 0,
+          "entryEvictions": 0,
+          "byteEvictions": 0,
+          "oversizedEntries": 0,
+          "lastEviction": null
+        },
+        "liveBytesPerEntry": 106.9056
+      },
+      "samples": [
+        {
+          "instructions": 50000,
+          "executionMs": 83.10059999999976,
+          "instructionsPerSecond": 601680.3729455641,
+          "snapshotMs": 0.12820000000010623,
+          "rewindEntries": 25000,
+          "rewindMs": 13.084399999999732,
+          "rewindToolsMs": 27.012800000000425,
+          "replayEntries": 25000,
+          "replayMs": 13.333599999999933,
+          "replayToolsMs": 22.78729999999996,
+          "retention": {
+            "entries": 50000,
+            "entryLimit": 1000000,
+            "byteLimit": 268435456,
+            "liveBufferBytes": 5345280,
+            "allocatedBufferBytes": 5345280,
+            "payloadCount": 0,
+            "entryEvictions": 0,
+            "byteEvictions": 0,
+            "oversizedEntries": 0,
+            "lastEviction": null
+          },
+          "liveBytesPerEntry": 106.9056
+        }
+      ]
+    },
+    {
+      "architecture": "tms9900",
+      "variant": "default",
+      "settings": {},
+      "historyLimit": 2000,
+      "tools": false,
+      "median": {
+        "instructions": 50000,
+        "executionMs": 49.92609999999968,
+        "instructionsPerSecond": 1001480.1877174529,
+        "snapshotMs": 0.05169999999998254,
+        "rewindEntries": 1448,
+        "rewindMs": 1.163100000000668,
+        "rewindToolsMs": 0.0023999999993975507,
+        "replayEntries": 1448,
+        "replayMs": 1.1161999999994805,
+        "replayToolsMs": 0.0015999999995983671,
+        "retention": {
+          "entries": 2896,
+          "entryLimit": 2000,
+          "byteLimit": 268435456,
+          "liveBufferBytes": 595968,
+          "allocatedBufferBytes": 595968,
+          "payloadCount": 0,
+          "entryEvictions": 47104,
+          "byteEvictions": 0,
+          "oversizedEntries": 0,
+          "lastEviction": "entry-limit"
+        },
+        "liveBytesPerEntry": 205.79005524861878
+      },
+      "samples": [
+        {
+          "instructions": 50000,
+          "executionMs": 49.92609999999968,
+          "instructionsPerSecond": 1001480.1877174529,
+          "snapshotMs": 0.05169999999998254,
+          "rewindEntries": 1448,
+          "rewindMs": 1.163100000000668,
+          "rewindToolsMs": 0.0023999999993975507,
+          "replayEntries": 1448,
+          "replayMs": 1.1161999999994805,
+          "replayToolsMs": 0.0015999999995983671,
+          "retention": {
+            "entries": 2896,
+            "entryLimit": 2000,
+            "byteLimit": 268435456,
+            "liveBufferBytes": 595968,
+            "allocatedBufferBytes": 595968,
+            "payloadCount": 0,
+            "entryEvictions": 47104,
+            "byteEvictions": 0,
+            "oversizedEntries": 0,
+            "lastEviction": "entry-limit"
+          },
+          "liveBytesPerEntry": 205.79005524861878
+        }
+      ]
+    },
+    {
+      "architecture": "tms9900",
+      "variant": "default",
+      "settings": {},
+      "historyLimit": 1000000,
+      "tools": false,
+      "median": {
+        "instructions": 50000,
+        "executionMs": 51.275400000000445,
+        "instructionsPerSecond": 975126.4739036568,
+        "snapshotMs": 0.09359999999924185,
+        "rewindEntries": 25000,
+        "rewindMs": 20.35820000000058,
+        "rewindToolsMs": 0.009000000000014552,
+        "replayEntries": 25000,
+        "replayMs": 19.569900000000416,
+        "replayToolsMs": 0.015499999999519787,
+        "retention": {
+          "entries": 50000,
+          "entryLimit": 1000000,
+          "byteLimit": 268435456,
+          "liveBufferBytes": 7434240,
+          "allocatedBufferBytes": 7434240,
+          "payloadCount": 0,
+          "entryEvictions": 0,
+          "byteEvictions": 0,
+          "oversizedEntries": 0,
+          "lastEviction": null
+        },
+        "liveBytesPerEntry": 148.6848
+      },
+      "samples": [
+        {
+          "instructions": 50000,
+          "executionMs": 51.275400000000445,
+          "instructionsPerSecond": 975126.4739036568,
+          "snapshotMs": 0.09359999999924185,
+          "rewindEntries": 25000,
+          "rewindMs": 20.35820000000058,
+          "rewindToolsMs": 0.009000000000014552,
+          "replayEntries": 25000,
+          "replayMs": 19.569900000000416,
+          "replayToolsMs": 0.015499999999519787,
+          "retention": {
+            "entries": 50000,
+            "entryLimit": 1000000,
+            "byteLimit": 268435456,
+            "liveBufferBytes": 7434240,
+            "allocatedBufferBytes": 7434240,
+            "payloadCount": 0,
+            "entryEvictions": 0,
+            "byteEvictions": 0,
+            "oversizedEntries": 0,
+            "lastEviction": null
+          },
+          "liveBytesPerEntry": 148.6848
+        }
+      ]
+    },
+    {
+      "architecture": "tms9900",
+      "variant": "default",
+      "settings": {},
+      "historyLimit": 1000000,
+      "tools": true,
+      "median": {
+        "instructions": 50000,
+        "executionMs": 106.33550000000014,
+        "instructionsPerSecond": 470209.8546581333,
+        "snapshotMs": 0.13109999999960564,
+        "rewindEntries": 25000,
+        "rewindMs": 24.172200000000885,
+        "rewindToolsMs": 29.42830000000049,
+        "replayEntries": 25000,
+        "replayMs": 23.44549999999981,
+        "replayToolsMs": 24.801100000000588,
+        "retention": {
+          "entries": 50000,
+          "entryLimit": 1000000,
+          "byteLimit": 268435456,
+          "liveBufferBytes": 7434240,
+          "allocatedBufferBytes": 7434240,
+          "payloadCount": 0,
+          "entryEvictions": 0,
+          "byteEvictions": 0,
+          "oversizedEntries": 0,
+          "lastEviction": null
+        },
+        "liveBytesPerEntry": 148.6848
+      },
+      "samples": [
+        {
+          "instructions": 50000,
+          "executionMs": 106.33550000000014,
+          "instructionsPerSecond": 470209.8546581333,
+          "snapshotMs": 0.13109999999960564,
+          "rewindEntries": 25000,
+          "rewindMs": 24.172200000000885,
+          "rewindToolsMs": 29.42830000000049,
+          "replayEntries": 25000,
+          "replayMs": 23.44549999999981,
+          "replayToolsMs": 24.801100000000588,
+          "retention": {
+            "entries": 50000,
+            "entryLimit": 1000000,
+            "byteLimit": 268435456,
+            "liveBufferBytes": 7434240,
+            "allocatedBufferBytes": 7434240,
+            "payloadCount": 0,
+            "entryEvictions": 0,
+            "byteEvictions": 0,
+            "oversizedEntries": 0,
+            "lastEviction": null
+          },
+          "liveBytesPerEntry": 148.6848
+        }
+      ]
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 import { activateArchitecture, knownArchitectures } from '../src/architectures/registry'
 import { variantOf, type ArchitectureDefinition, type Machine } from '../src/architectures/contracts'
-import type { TargetSettings } from '../src/core/settings'
+import { variantConfigurations } from '../src/core/variants'
 import { createToolRegistry } from '../src/tools/registry'
 
 interface Options { steps: number, samples: number, architectures?: string[] }
@@ -8,12 +8,9 @@ interface Options { steps: number, samples: number, architectures?: string[] }
 function configurations(definition: ArchitectureDefinition) {
 	const defaults = definition.settings.defaults
 	const out = [{ label: 'default', settings: defaults }]
-	// Runtime model/state/ISA choices, without varying memory sizes or dialects.
-	for (const field of definition.settings.fields) {
-		if (!['cpuModel', 'executionState', 'isa'].includes(field.key) || field.control.kind !== 'choice') continue
-		for (const option of field.control.options) {
-			if (option.value !== defaults[field.key]) out.push({ label: `${field.key}=${option.value}`, settings: { ...defaults, [field.key]: option.value } as TargetSettings })
-		}
+	for (const settings of variantConfigurations(definition.settings)) {
+		const changes = Object.entries(settings).filter(([key, value]) => value !== defaults[key])
+		if (changes.length) out.push({ label: changes.map(([key, value]) => `${key}=${value}`).join(','), settings })
 	}
 	return out
 }
@@ -68,6 +65,7 @@ export async function runBenchmark(options: Options, progress: (label: string) =
 			try {
 				const { settings, label } = configuration
 				const code = variantOf(definition, settings).examples.mandelbrot.code
+				await services.prepare?.(settings)
 				const program = services.assemble({ files: [{ name: 'main.asm', code }], entries: ['main.asm'] }, settings)
 				const errors = program.diagnostics.filter(d => d.severity === 'error')
 				if (errors.length) throw new Error(`${id}/${label}: ${errors.map(d => d.message).join(', ')}`)

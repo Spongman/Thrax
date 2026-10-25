@@ -2,6 +2,186 @@
 
 Reviewed and updated 21 October 2026 for the shared workbench refactor.
 
+## Follow-up: command ownership and control availability (23 October 2026)
+
+- Shared asynchronous controls carry a command token as well as the session
+  generation. Pause, Stop and later execution commands supersede both successful
+  and failed completions of an earlier command on the same machine. Overlapping
+  run controls are ignored while the current run is active.
+- Execution failures preserve the machine's console output and publish errors
+  separately as diagnostics. This applies to Run, stepping, Step Over and input
+  resume; ordinary assembly-error reporting is unchanged.
+- Toolbar controls, editor shortcuts and store commands use common availability
+  rules. Step Back depends on retained past history and an idle machine, so Halt,
+  Stop and Fault do not disable rewind. Forward step controls are unavailable
+  while running. The controls still allow stepping to assemble an unloaded
+  program.
+
+These changes operate at command/UI boundaries and do not alter instruction
+execution, typed history columns or capture costs. Validation passed 5,270 tests
+in 213 files, with two tests/files skipped. Type checking, ESLint, production
+build and `git diff --check` passed. Live Edge checks reproduced the rapid
+Pause/Continue sequence, preserved output before a RISC-V fault, and rewound from
+normal completion through the Step Back button on all nine CPU families, with
+no page errors. Browser checks used the installed Playwright/Edge fallback after
+the collaborative preview timeouts reported in the preceding follow-up.
+
+## Follow-up: session teardown, model checks and stop reasons (23 October 2026)
+
+- Common session teardown detaches tool observers, releases the owned machine and
+  detaches the debugger for file invalidation, reset, explicit assembly failure
+  and target replacement. Service ownership stops and disposes released machines;
+  expected-machine checks protect replacements. Progress callbacks and async
+  control completions cannot publish into a replacement session, including Run
+  and console-input resume.
+- Shared service provenance records the selected variant with each assembled
+  program. Configurable families supply their variant identity locally, plus
+  native program identity where available. A mismatched load fails before native
+  construction or disposal of the current machine. Exact variant changes require
+  reassembly, even when the instruction subsets overlap.
+- Machines expose a common structured stop reason: guest halt/exit, debugger
+  Stop, or unhandled fault with native message and address. The execution
+  controller shares fault classification and adapters expose native fault state.
+  Handled guest exceptions remain native; breakpoints, pause and input waits have
+  no terminal reason. Toolbar status, Run and F5 use this common state.
+- Typed history column layouts and native capture strategies are unchanged.
+  Thrown faults use lazily allocated sparse metadata for terminal replay; ordinary
+  instruction recording allocates no new reason objects or columns. MIPS records
+  its native halted state and preserves the unretired instruction count when a
+  recorded fault is replayed. No throughput improvement is claimed.
+
+Validation: 5,255 tests passed in 211 files, with two tests/files skipped, using
+`npm test -- --testTimeout=15000`. Type checking, ESLint and the production build
+passed. Live Edge checks covered fault details, restart after a paused fault,
+guest completion, resumable pause, debugger Stop and file teardown, with no page
+errors. The first concurrent validation run timed out in the 6502 Mandelbrot
+test; the complete suite passed when rerun without the concurrent build/lint.
+T3 preview snapshots timed out twice, so browser checks used the installed
+Playwright/Edge fallback.
+
+## Follow-up: program context, instruction catalogs and backend loading (23 October 2026)
+
+- The common service lifetime selects the loaded program for inspection, or the
+  last successful preview before a machine is loaded. Beta, ARM26, Z80, 6502,
+  RISC-V, 68k and ARM state adapters now derive their symbol/decoder context from
+  that selection. A successful or failed background assembly cannot replace the
+  loaded context. ARM state adapters receive the inspection program explicitly;
+  their assembly functions no longer mutate a last-program field. Cortex-M0 also
+  retains assembled equate values for its symbol hovers.
+- Machine factories reject programs with assembly-error diagnostics centrally,
+  before native construction or disposal of the existing machine. Native
+  program-type, memory-map and ISA compatibility checks remain local.
+- AVR, RISC-V, 68k and Z80 instruction catalogs supply completion names and hover
+  documentation from the same native tables. RISC-V C-extension and 68k minimum
+  models are declared in those tables; completion providers read current settings
+  without reinstallation. Other families retain names generated from their opcode
+  tables, instruction schemas or bundled macros. Native encoders are unchanged.
+- Optional `prepare(settings)`/`isPrepared(settings)` service hooks keep backend
+  loading asynchronous while assembly, profile access and stepping remain
+  synchronous after preparation. ARM loads A64/A32/M0 backend factories through
+  its local variant catalog. M0 register/language metadata is independent of its
+  CPU/assembler. Startup prepares the saved variant, without loading A64 first.
+  Activation and setting changes retain their previous target/settings on failure
+  and ignore superseded completions; concurrent imports of one variant are shared.
+
+The ARM metadata entry chunk is 35,025 bytes in this build, versus roughly 191 KB
+before this extraction. Backend entry chunks and shared dependencies load
+separately; this is not a total-download or execution-throughput measurement.
+No changes were made to CPU instruction execution, native history codecs, typed
+buffer layouts or tool replay in this follow-up.
+
+Validation: 5,208 tests passed in 208 files, with two tests/files skipped, using
+`npm test -- --testTimeout=15000`. Type checking, ESLint and production build
+passed. Live Edge checks selected M0, A32 and A64 through Settings and ran Sum
+successfully on each. Reload restored saved M0 settings and fetched only M0's
+backend state module. No page errors occurred. T3 preview snapshots timed out
+twice, so these checks used the installed Playwright/Edge fallback.
+
+## Follow-up: edit validation, RAM inspection and comments (23 October 2026)
+
+- All runtime adapters use `ExecutionController.canEdit` before debugger edits:
+  disposed sessions, non-finite numbers and fractional values are rejected before
+  native masking or typed-array coercion. Register widths, readonly registers,
+  aliases and native wrapping rules stay local. Failed edits preserve retained
+  future history. Explicit PC moves become no-ops for invalid numeric values or
+  disposed sessions; RISC-V register edits report false for misaligned PCs.
+- A64 W-register edits mask bigint values before conversion to number, preserving
+  their low 32 bits exactly and retaining native zero-extension into X registers.
+- Plain RAM inspection shares `RamInspector`, configured by word width, byte order
+  and base address. It validates addresses before alignment, avoids implicit
+  32-bit wrapping, preserves live-buffer reads and checks partial final words.
+  Byte composition avoids an extra DataView allocation in ARM observer callbacks.
+  MIPS sparse memory and AVR Harvard/device mappings remain native, with their
+  inspection entry points also rejecting invalid addresses before alignment.
+- Comment truncation and offset-preserving multiline masking share one lexical
+  scanner. Beta definitions and A64 assembly/definitions use the shared masker;
+  configuration preserves GNU character constants with optional closing quotes,
+  quoted comment markers, escaped quotes and Z80 register apostrophes. Line
+  endings and source positions are retained, including CRLF and CR-only input.
+
+The native instruction executors, typed history storage/codecs and tool replay
+are unchanged by this follow-up. Validation covers rejected edits, retained
+futures and disposal across every registered variant, plus RAM byte order,
+boundaries, exact A64 bigint edits and comment source positions. The full suite
+passed 5,173 tests in 204 files, with two tests/files skipped, using
+`npm test -- --testTimeout=15000`. Type checking, ESLint and the production build
+passed. Performance figures below belong to the earlier adapter pass;
+no new throughput measurements are claimed for this follow-up.
+
+## Follow-up: shared adapters (23 October 2026)
+
+The subsequent pass implements review items 1, 3, 4, 5, 6 and 8. Items 2
+(history codec/storage consolidation) and 7 (tool replay optimization) remain
+explicitly excluded.
+
+- ExecutionController now owns successful seek completion and disposal cleanup.
+  All runtimes bind native undo/notification callbacks once, avoiding new command
+  closures on repeated Step Back. Captured edits share close/undo/discard cleanup.
+- Snapshot-history effect comparisons share display-only register, memory,
+  console and halt traversal. Native capture, restoration, effect semantics and
+  schemas are retained. No history row is built during instruction recording.
+- Definition providers share symbol selection and file/line/range traversal,
+  with dialect patterns and scope/library rules kept locally. Basic AVR/RISC-V/68k
+  register/label hovers share token inspection and quote-aware comment boundaries.
+- AVR/RISC-V/68k share configurable expression tokenization and precedence setup;
+  RISC-V/68k also share string/data/reservation helpers. Data statements stream to
+  the assembler. Encoders, width checks, shifts, directives and limits remain native.
+  String directives reject non-string operands, and empty numeric data directives
+  are diagnosed rather than silently emitting no bytes.
+- RISC-V, Cortex-M0 and 68k select common educational-console handlers using
+  explicit native service numbers, argument/result registers, memory readers and
+  retirement callbacks. Other syscall environments retain their own behavior.
+- Each configurable family has an architecture-local variant catalog connecting
+  settings choices with register/example metadata; ARM also connects its backend
+  factories and editor loaders there. ARM and 6502 language providers load on
+  demand and clean up late arrivals. Runtime modules still load per CPU family;
+  synchronous machine/assembly APIs have not been made asynchronous.
+- Variant fields carry a semantic role for tests and benchmarks. Settings section
+  IDs distinguish architecture groups from common groups even when titles match.
+
+The typed column-store layouts, full-register versus delta capture strategies,
+block pooling, entry/byte budgets and tool replay implementation are unchanged.
+This pass introduces no per-instruction schema interpretation or generic event
+allocation. The common seek command binds callbacks once per machine. The 68k
+console adapter is initialized after the existing CPU fields to preserve their
+placement in the frequently accessed native state.
+
+Validation: the full suite passed 5,155 tests in 202 files, with two tests/files
+skipped. The command used `npm test -- --testTimeout=15000`: the original five-second
+timeout was too short for some Mandelbrot runs on this host. Focused checks,
+type checking, ESLint and the production build passed. The browser preview could
+not reconnect to its automation host; lazy provider loading, deduplication and
+late cleanup are covered by the shared provider tests.
+
+The 48-case before/after matrix retained identical counters and typed-buffer
+usage in all cases. Final alternating checks against commit `b88aec3` use fresh
+machines, 250,000 steps, no tools, a one-million-entry target, two warmup pairs,
+11 measured pairs for RISC-V/MIPS and 15 for 68k. Median paired recording-time
+changes were +0.3%, -2.7% and -2.5%, respectively; rewind changes were +2.6%,
++6.9% and +1.9%. These are small but measurable timing differences, not a claim
+of zero overhead. Assembly, construction, React and host scheduling are excluded.
+Samples and environment details are in [runtime-sharing-benchmark.json](runtime-sharing-benchmark.json).
+
 ## Implemented follow-up
 
 The confirmed debugger inconsistencies have now been fixed through shared machinery:
@@ -344,3 +524,49 @@ The shared history log supplies retention counters through every machine history
 one common History footer. Per-architecture typed columns and the existing pooling,
 entry-target and byte-budget policies remain in place. See the benchmark report for
 remaining full-register codecs, tool overhead and deferred-replay costs.
+
+## Seven additional CPU families (24 October 2026)
+
+Motorola 6800, Intel 8051, PowerPC, Alpha, Intel 8086, WDC 65C816 and TMS9900
+now use the same configurable functional-CPU adapter in `src/core/configuredCpu.ts`,
+`configuredRuntime.ts` and `assembly/configured.ts`. Each architecture directory owns
+its native encodings, instruction semantics, explicit history schema, reset/address
+hooks, instruction help, manifest and examples. The registry remains the sole
+concrete architecture import site in common production code.
+
+The adapter shares execution scheduling, reversible input/output, typed column
+history, edits and rollback, call frames, decode invalidation, register/memory
+inspection, tool observer metadata, source indexing/disassembly and Monaco providers.
+No shared controller branches on architecture ids. Segment translation/wrapped word
+access, memory aliases, unmapped regions, canonical RAM-backed registers, instruction
+fetch wrap and mode-sensitive decode keys are reusable capabilities. Native modules
+choose CS/DS/SS, program/data banks, workspace pointers and register-bank rules.
+
+Documentation tables cover every advertised instruction/alias. Completions and
+source/disassembly hovers use the common format and reference corner action.
+Definition providers resolve labels and equates using native comment markers;
+loaded program symbols remain pinned while another source is previewed. Contract
+tests cover shared tools and rewind/replay on all seven families. Pipeline timing
+and the MIPS X-Ray are deliberately unavailable where no native model is supplied.
+
+All example modules across existing and new families now import standalone source
+assets: 216 `.asm`/`.uasm` files under architecture/backend `examples/` directories.
+The extraction preserves the previous source and menu metadata exactly. Each new
+family offers all ten standard topics, including recursively computed Ackermann,
+interactive input and native fixed-point Mandelbrot. Graphics tests compare all
+1,024 pixels against independent reference calculations.
+
+The history overflow seam preserves atomic rollback of a failed or waiting native
+instruction even if a large write exceeded the typed-buffer budget. An extra undo
+journal is allocated only on overflow. Ordinary steps retain typed snapshots and
+byte deltas. Canonical register snapshots use reusable scratch space, and decoded
+instructions/metadata are reused until code or mode changes. See
+[the new CPU benchmark](new-cpu-benchmarks.md) for measured execution, rewind,
+tool overhead and the larger Alpha/PowerPC register footprints.
+
+Final validation for this integration: 230 test files passed, two skipped;
+5,519 tests passed, two skipped. ESLint, type checking, the production build and
+`git diff --check` passed. Browser checks switched through all seven families,
+ran Sum, rewound history, opened and ran Bitmap, and verified instruction hover
+syntax/manual buttons. The build retains the existing large application/Monaco
+chunk warning. Long-running 6502/Z80 Mandelbrot tests use a 30-second allowance.

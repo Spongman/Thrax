@@ -1,6 +1,6 @@
 # THRAX - Teaching Harness for Runtime Assembly eXecution
 
-A son of MARS (but in a different language). A modern, interactive web-based assembly workbench, built with React, Monaco Editor, and execution engines implemented in TypeScript. It runs nine CPU families in a shared workspace, including MIPS under MARS rules and the MIT Beta under BSim rules.
+A son of MARS (but in a different language). A modern, interactive web-based assembly workbench, built with React, Monaco Editor, and execution engines implemented in TypeScript. It runs sixteen CPU families in a shared workspace, including MIPS under MARS rules and the MIT Beta under BSim rules.
 
 ![THRAX](https://img.shields.io/badge/THRAX-Web%20Edition-blue)
 ![TypeScript](https://img.shields.io/badge/Language-TypeScript-3178C6)
@@ -12,7 +12,7 @@ A son of MARS (but in a different language). A modern, interactive web-based ass
 ## 🚀 Features
 
 ### Core Functionality
-- ✅ **Nine Architecture Families**: MIPS (MARS), the MIT Beta (BSim), MOS 6502 / WDC 65C02, Zilog Z80, ARM (AArch64, AArch32 and Cortex-M0 Thumb), 26-bit ARM (ARMv2a), AVR, RISC-V (RV32IM / RV32IMC) and Motorola 68k (68000 / 68010 / 68020), chosen in Settings; each loads only when selected, and the files, line breakpoints and layout carry across
+- ✅ **Sixteen Architecture Families**: MIPS (MARS), the MIT Beta (BSim), MOS 6502 / WDC 65C02 / WDC 65C816, Zilog Z80, ARM (AArch64, AArch32, Cortex-M0 Thumb, ARM2 and ARM3), AVR, RISC-V (RV32IM / RV32IMC), Motorola 68k (68000 / 68010 / 68020), Motorola 6800 / 6809 / 68HC11, Intel 8051, PowerPC, DEC Alpha, Intel 8086, TMS9900, SPARC V8 and SuperH (SH-1 / SH-2), chosen in Settings; each loads only when selected, and the files, line breakpoints and layout carry across
 - ✅ **Complete MIPS Assembler**: Lexer → Parser → Machine Code Generator, with errors reported on the line that earned them
 - ✅ **Full MIPS Simulator**: The whole MARS instruction table, coprocessors 0 and 1, delayed branching, and device interrupts
 - ✅ **Monaco Editor**: Syntax highlighting, completion offering every instruction with its docs, and consistent source/disassembly instruction hovers with syntax, descriptions and a corner manual-link button
@@ -229,6 +229,11 @@ The ARM target offers AArch64 and AArch32 ARMv8-A profiles, plus an ARMv6-M
 Cortex-M0 Thumb profile. Its persisted target id remains `armv8` for compatibility.
 The execution-state setting chooses AArch64 or AArch32; switching rebuilds,
 and the Registers panel, the Examples menu and the editor language follow it.
+Floating point is on by default for both (scalar FP for A64, VFPv4-D16 for
+A32); the **Floating point** setting turns it off, making the FP instructions
+undefined, rejecting them in the assembler, and offering the fixed-point
+Mandelbrot example in place of the floating-point one. Advanced SIMD (NEON)
+vector operations are not supported in either state.
 
 AArch64 user programs at EL0, as Linux runs them, with no MMU: X0-X30, SP and
 the PC as exact 64-bit values (the Registers panel shows them in full, with a
@@ -238,7 +243,22 @@ subtract with immediates, shifted and extended registers, carry, logical
 and divide, conditional select and compare, every branch, and loads and stores
 of every width with sign extension, pre- and post-index, register offsets,
 pairs, unscaled offsets and literals. `svc`, `hlt`, `brk` and `nop` complete it.
-Floating point and SIMD are not supported.
+
+Scalar floating point in V0-V31, viewed as S and D (a scalar write clears the
+rest of the register), with FPCR (AHP, DN, FZ and RMode; trap enables read as
+zero) and FPSR: `fmov` (register, general and immediate), `ldr`/`str`/`ldur`/
+`stur`/`ldp`/`stp` of B, H, S, D and Q, `fadd`/`fsub`/`fmul`/`fdiv`/`fnmul`,
+`fmadd`/`fmsub`/`fnmadd`/`fnmsub` (fused), `fsqrt`, `fabs`/`fneg`,
+`fmax`/`fmin`/`fmaxnm`/`fminnm`, `fcmp`/`fcmpe` (also with `#0.0`),
+`fccmp`/`fccmpe`, `fcsel`, `fcvt` between S and D, `frintn`/`p`/`m`/`z`/`a`/`x`/`i`,
+`scvtf`/`ucvtf` and `fcvtzs`/`fcvtzu` (also fixed point with `#fbits`),
+`fcvtns`/`nu`/`as`/`au`/`ps`/`pu`/`ms`/`mu`, and `mrs`/`msr` of `fpcr`, `fpsr`
+and `nzcv`. Results follow the Arm ARM's pseudocode exactly: rounding modes,
+NaN propagation and default NaN, flush-to-zero, saturating conversions and the
+cumulative exception flags. Half precision and Advanced SIMD vectors are not
+supported. The Registers panel's FP tab lists each Vn as Sn (`f`) or Dn (`d`)
+with FPCR and FPSR; every FP effect, the upper half of a Q included, steps
+back exactly.
 
 The machine:
 - Memory from `0x00400000`: code there, `.data` at `0x00420000`, the program break after the data, and SP starting at the top. The size is a setting (1, 4 or 16 MB); anything outside it faults. Unaligned data accesses are allowed and SP alignment is not checked
@@ -248,15 +268,15 @@ The machine:
 
 Assembly is GNU as for AArch64 (`.s`/`.S`):
 - `//` and `/* */` comments, `;` between statements, `name:` and numeric `1:` labels referred to as `1b`/`1f`; the program starts at `_start`, else `main`
-- Registers `x0`-`x30`, `w0`-`w30`, `sp`, `wsp`, `xzr`, `wzr`, `lr`, `fp`; `#` before immediates is optional; `:lo12:` with `adrp`; `ldr x0, =value` becomes a `mov` where one encodes the value, else loads from a literal pool placed at `.ltorg`/`.pool` or the end of the section
+- Registers `x0`-`x30`, `w0`-`w30`, `sp`, `wsp`, `xzr`, `wzr`, `lr`, `fp`, and `b0`-`b31`, `h0`, `s0`, `d0`, `q0` and so on; real immediates such as `#1.5` or `#-2.5e-3`; `#` before immediates is optional; `:lo12:` with `adrp`; `ldr x0, =value` becomes a `mov` where one encodes the value, else loads from a literal pool placed at `.ltorg`/`.pool` or the end of the section
 - The preferred aliases: `mov`, `mvn`, `neg`, `cmp`, `cmn`, `tst`, `lsl`/`lsr`/`asr`/`ror`, `ubfx`/`sbfx`/`ubfiz`/`sbfiz`/`bfi`/`bfxil`/`bfc`, `sxtb`/`uxth`..., `cset`/`csetm`/`cinc`/`cinv`/`cneg`, `mul`/`mneg`/`smull`/`umull`; `b.eq` or `beq`. The disassembly prints them too
-- Directives: `.text`, `.data`, `.bss`, `.rodata`, `.section`, `.byte`, `.hword`, `.word`, `.quad` (and their GNU synonyms), `.ascii`, `.asciz`, `.string`, `.align`/`.p2align`, `.balign`, `.space`/`.skip`/`.zero`, `.fill`, `.equ`/`.set`/`=`, `.global`, `.include`, `.macro`/`.endm` with `\param`, defaults and `\@`, `.rept`/`.endr`, `.inst`, `.end`; object-file directives such as `.type` and `.cfi_*` are accepted and ignored
+- Directives: `.text`, `.data`, `.bss`, `.rodata`, `.section`, `.byte`, `.hword`, `.word`, `.quad` (and their GNU synonyms), `.float`/`.single` and `.double`, `.ascii`, `.asciz`, `.string`, `.align`/`.p2align`, `.balign`, `.space`/`.skip`/`.zero`, `.fill`, `.equ`/`.set`/`=`, `.global`, `.include`, `.macro`/`.endm` with `\param`, defaults and `\@`, `.rept`/`.endr`, `.inst`, `.end`; object-file directives such as `.type` and `.cfi_*` are accepted and ignored
 - Literals are exact to 64 bits; arithmetic on symbols is exact within 2^53
 - Not supported: conditionals (`.if`), `.irp`, sections other than text and data, and relocations other than `:lo12:`
-- Sources use the `aarch64` editor language with data tips for X and W registers, effective addresses, symbols and numbers; new files are `.s`
+- Sources use the `aarch64` editor language with data tips for X and W registers, S and D registers as floats, effective addresses, symbols and numbers; new files are `.s`
 
 AArch32 user programs in User mode, as Linux runs them under the EABI, with the
-A32 instruction set only: no Thumb (T32), VFP, Advanced SIMD or coprocessors.
+A32 instruction set only: no Thumb (T32), Advanced SIMD or other coprocessors.
 R0-R14, a 32-bit PC that reads (and stores) as the instruction's address + 8,
 and the CPSR with N Z C V Q and GE; User mode has no SPSR, and MSR writes only
 the flags and GE. Everything the 26-bit ARM runs except `SWP` and the P forms,
@@ -268,6 +288,23 @@ gives 0), `UBFX`/`SBFX`/`BFI`/`BFC`, `REV`/`REV16`/`REVSH`/`RBIT`,
 by `B` or `BL` interworks: an odd address, like `BLX` to a label, would enter
 Thumb, so it stops the program with an error saying so, changing nothing.
 
+VFPv4-D16 floating point: S0-S31, overlaid as D0-D15 (D16-D31 are undefined),
+and FPSCR (N Z C V, AHP, DN, FZ, RMode and the cumulative flags; Len and
+Stride read as zero). `vmov` (core to S, core pair to D and back, immediate,
+register), `vldr`/`vstr`, `vldm`/`vstm` (IA, DB, `!`), `vpush`/`vpop`,
+`vadd`/`vsub`/`vmul`/`vdiv`/`vnmul`, `vmla`/`vmls`/`vnmla`/`vnmls` (two
+roundings) and `vfma`/`vfms`/`vfnma`/`vfnms` (fused), `vsqrt`, `vabs`/`vneg`,
+`vcmp`/`vcmpe` (also with `#0`), `vmrs` (`APSR_nzcv` or a core register) and
+`vmsr` of FPSCR, and `vcvt` between F32 and F64, between floats and S32/U32
+(toward zero, or `vcvtr` in the FPSCR mode) and to and from fixed point
+(S16/U16/S32/U32 with `#fbits`). Every one takes a condition (`vaddeq.f32`).
+Arithmetic follows the same Arm pseudocode as A64. The Registers panel's VFP
+tab lists S0-S31 (`f`) or D0-D15 (`d`) with FPSCR, and every FP effect steps
+back exactly. Not supported: D16-D31, half precision (`vcvtb`/`vcvtt`), the
+ARMv8 additions (`vrint`, `vsel`, `vmaxnm`), `vldr` of an `=` literal, and in
+armasm sources real constants and dotted types (`vadd.f32`; write
+`vadd s0, s1, s2`).
+
 The machine:
 - The AArch64 state's memory layout, keyboard and display, and Bitmap Display; `LDR`, `STR` and the halfword forms may be unaligned and read the bytes they name, while `LDRD`, `STRD`, `LDM`, `STM` and the exclusives need a word-aligned address
 - System calls by `svc #0` with the number in R7 and the result in R0: `read` (3), `write` (4), `exit` (1), `exit_group` (248), `brk` (45), as for AArch64
@@ -278,7 +315,9 @@ Assembly is the 26-bit ARM's GNU as and armasm (below), under ARMv8 rules:
 Mnemonics may be divided (`ldreqh`) or unified (`ldrheq`), and the disassembly
 is unified (`addseq`, `push`, `pop`). A `mov` of a 16-bit value no rotation
 fits becomes `movw`, and `movw`/`movt` take `#:lower16:` and `#:upper16:`.
-Sources use the `arm` editor language with ARMv8's mnemonics.
+Sources use the `arm` editor language with ARMv8's mnemonics, VFP's included;
+GNU sources take `.float`/`.single` and `.double`, and real immediates such as
+`#1.5`.
 
 The Cortex-M0 profile executes ARMv6-M Thumb integer instructions, including
 16-bit operations and 32-bit `BL`, through the common debugger and typed history.
@@ -296,7 +335,9 @@ string at R0, 5 reads an integer into R0, and 11 prints a character. Other
 services and unsupported instructions fault. See [the Cortex-M0 notes](src/architectures/armv8/m0/README.md).
 
 ### ARM (26-bit, ARMv2a)
-The 26-bit ARM of the Acorn Archimedes: selectable ARM2 and ARM3 (default). R15
+The 26-bit ARM of the Acorn Archimedes: ARM2 and ARM3 are variants under ARM.
+Migrating an old ARM26 workspace retains its selected model (ARM3 by default);
+the combined ARM family's default remains AArch64. R15
 holds the PC in bits 2-25 and N Z C V I F and the mode in the rest; USR, FIQ,
 IRQ and SVC bank R13-R14 (FIQ R8-R14), and the Registers panel shows the
 current view, the status flags, R15 whole, and every banked register on its own
@@ -315,7 +356,7 @@ The machine:
 - The Keyboard and Display tool's registers sit above RAM: `KBD_STATUS` at `0x03FF0000` (bit 0 a key waits, bit 1 enables an IRQ while one does), `KBD_DATA` at `0x03FF0004`, `TTY_STATUS` at `0x03FF0008` and `TTY_DATA` at `0x03FF000C`, all predefined symbols; the tool's own help text names MARS's addresses. The Bitmap Display reads words anywhere in RAM
 - ARM3 adds privileged CP15 cache controls and a functional 4 KB unified cache, with cacheable/updateable/disruptive regions, write-through updates and flushing. ARM2 rejects SWP and CP15. The common Registers window shows clock ticks and an ARM3 CP15 bank
 - The shared pipeline displays actual fetch/decode/execute schedules, including multi-cycle loads/stores, block transfers, register shifts, operand-dependent multiplication and CP15 transfers. Configurable memory latency and sequential transfer costs distinguish S/N/I cycles; ARM3 adds cache-hit/miss timing, overlapping line fills and the datasheet's worst-case clock synchronization
-- A two-word instruction queue performs speculative PC+8 fetches, preserves stale instructions after stores, and defers prefetch aborts until execution. PC redirects discard queued words and refill; CP15 flushing leaves the queue intact. Typed history preserves queue, cache, clock and timing state through rewind, at increased memory cost per entry. The Instruction Prefetch example demonstrates self-modifying code. MEMC, DRAM refresh and electrical clock phase remain outside the model; see [the ARM26 notes](src/architectures/arm26/README.md)
+- A two-word instruction queue performs speculative PC+8 fetches, preserves stale instructions after stores, and defers prefetch aborts until execution. PC redirects discard queued words and refill; CP15 flushing leaves the queue intact. Typed history preserves queue, cache, clock and timing state through rewind, at increased memory cost per entry. The Instruction Prefetch example demonstrates self-modifying code. MEMC, DRAM refresh and electrical clock phase remain outside the model; see [the ARM26 notes](src/architectures/armv8/arm26/README.md)
 - `BL` and returns to its link keep the call stack; every effect, banked registers and status bits included, steps back exactly
 
 Two assembler dialects, chosen by file: `.s`/`.S` are GNU as, `.armasm` is armasm, and any other file (`.asm`, new files) by its content when an indented `AREA` or a GNU directive says which, else by the dialect setting:
@@ -399,6 +440,104 @@ through the shared typed history with the existing limits.
 These targets use the shared register, memory, call-stack, history and
 debugger windows, with typed history buffers and the common history limits.
 They do not supply a cycle-accurate pipeline model or an X-Ray panel.
+
+### Additional integer teaching CPUs
+
+These additional backends use one configurable assembler frontend, runtime, debugger,
+typed column history store, editor integration and common tool adapter. Native
+modules supply instruction encodings and semantics, registers, address translation,
+reset state and documentation. They support the same standard example menu,
+including recursive Ackermann, interactive input, bitmap and Mandelbrot programs.
+
+| CPU | Memory model | Native scope and limitations |
+| --- | --- | --- |
+| [Motorola 6800](src/architectures/m6800/README.md) | 64 KiB, big endian | Selectable 6800, 6809 and 68HC11 native encodings/registers/addressing; excludes native hardware interrupt and peripheral delivery |
+| [Intel 8051](src/architectures/i8051/README.md) | Separate 64 KiB code and XDATA, 128-byte IRAM and SFR window | Documented MCS-51 instructions, banked registers, bit addressing, MOVC/MOVX; excludes timers, serial and port devices |
+| [PowerPC](src/architectures/powerpc/README.md) | 1 MiB, big endian | 32-bit integer arithmetic, memory, condition fields and branches; excludes floating point, vectors, privileged/MMU and atomic operations |
+| [DEC Alpha](src/architectures/alpha/README.md) | 1 MiB, little endian | Exact 64-bit integer registers and memory, integer branches and BWX; excludes floating point, locked memory, privileged PALcode and MMU |
+| [Intel x86](src/architectures/i8086/README.md) | 1 MiB with 20-bit segment translation and native segment-boundary rules | 8086/8088 and 80186/80188, optional 8087 extended-precision arithmetic; excludes PC devices and bus/prefetch timing |
+| [WDC 65C816](src/architectures/mos6502/w65816/README.md) | 16 MiB with program/data banks | Native/emulation modes, live M/X widths, decimal operations and banked calls; excludes external hardware and cycle timing |
+| [TMS9900](src/architectures/tms9900/README.md) | 64 KiB, big endian, RAM-backed workspaces | Integer instructions, native addressing and workspace context switches; excludes CRU devices/instructions, X execution and external interrupts |
+| [SPARC V8](src/architectures/sparc/README.md) | 1 MiB, big endian, eight overlapping register windows | Integer arithmetic, Y multiply/divide, delayed/annulled branches, calls and SAVE/RESTORE; excludes floating point, privileged traps/MMU, automatic window spilling and transfers inside delay slots |
+| [SuperH](src/architectures/sh/README.md) | 1 MiB, big endian, SH-1/SH-2 | Integer arithmetic, memory/special registers, native delay slots, stepwise divide and exact multiply/MAC; excludes SH-2A/SH-2E extensions, native exceptions/devices and cycle timing |
+| [DEC VAX](src/architectures/vax/README.md) | 1 MiB, little endian, kernel mode, physical addressing | All general addressing modes, integer/field/string/control instructions, CALLS/CALLG/RET frames and DEC F/D/G/H floating point rounded as the VAX does; excludes decimal strings, EDITPC/CRC/MATCHC/MOVTC, POLY/EMOD, queues, memory management and exception vectors |
+| [DEC PDP-11](src/architectures/pdp11/README.md) | 64 KiB, little endian, no MMU, I/O page at 160000 (octal) | All eight addressing modes, the 11/20 base set, 11/40 additions with EIS, optional KE11-F FIS or FP11 F/D floating point rounded as DEC does, traps through vectors, a console DL11, octal display; excludes the MMU, user/supervisor modes, interrupts and other devices |
+| [IBM System/360](src/architectures/s360/README.md) | 1 MiB of the 24-bit space, big endian, EBCDIC | Standard instruction set with BC-mode PSW, USING base resolution, decimal (packed, ED/EDMK) and hexadecimal floating point; System/370 MVCL/CLCL/ICM/STCM/CLM/SRP and extended float; excludes privileged/I/O instructions, interruption handlers, storage protection and DAT |
+
+These are functional instruction simulators. They do not model complete boards,
+operating systems or cycle-accurate pipelines. Each supplies an explicitly
+documented THRAX monitor through a native trap/call instruction for example I/O.
+The shared statistics, profile, cache, branch history and memory-reference tools
+consume native execution events. A hardware pipeline model and MIPS X-Ray are
+unavailable on these families. Cache results are an educational tool simulation.
+See the family notes for exact instruction and monitor restrictions and the
+[performance measurements](docs/new-cpu-benchmarks.md) for history and observer costs.
+
+### CPU family defaults
+
+The architecture list states each family's default. CPU variant menus also mark
+the declared default, independently of option order or a saved selection.
+Fixed-profile families have no variant selector. These are simulator profiles;
+support for an ISA does not imply a complete board or every optional extension.
+
+| Family | Default profile | Other selectable variants |
+| --- | --- | --- |
+| MIPS | MIPS32 under MARS rules | — |
+| MIT Beta | Beta under BSim rules | — |
+| 6502 family | MOS 6502 NMOS | W65C02S CMOS, W65C816S |
+| Zilog | Z80 | — |
+| ARM | AArch64/A64 | AArch32/A32, Cortex-M0 Thumb, 26-bit ARM2, 26-bit ARM3 |
+| AVR | AVR8 teaching core | — |
+| RISC-V | RV32IM | RV32IMC |
+| Motorola 68k | MC68000 | MC68010, MC68020 |
+| Motorola 6800 family | 6800 | 6809, 68HC11 |
+| Intel MCS-51 | 8051 | — |
+| PowerPC | 32-bit integer PowerPC | — |
+| DEC Alpha | Alpha integer core with BWX | — |
+| Intel x86 | 8086, no numeric coprocessor | 8088, 80186, 80188; independent optional 8087 |
+| TI | TMS9900 | — |
+| SPARC | SPARC V8 integer core | — |
+| SuperH | SH-2 | SH-1 |
+| DEC VAX | VAX-11/780 | MicroVAX II with or without the 78132 FPU |
+| DEC PDP-11 | PDP-11/40 | PDP-11/20; 11/40 with KE11-F FIS; 11/45 and 11/70 or LSI-11/23, each with or without FP11 |
+| IBM System/360 | Model 50/65 (decimal and floating point) | Model 30 with optional decimal and floating-point features; System/370 |
+
+65C816 now lives under `mos6502/w65816/`, and the ARM2/ARM3 backend under
+`armv8/arm26/`. Old `w65816` and `arm26` saved targets migrate into the
+corresponding family choice. Existing family selections and layouts are retained.
+Native backends load when selected, and release their previous run on a switch;
+history schemas and byte budgets remain native and unchanged by the grouping.
+ARM26 timing/dialect controls and the 6502 decimal-mode option appear only where
+they apply. New source filenames follow the selected backend's extension.
+
+Every variant supplies a complete effective example catalog. Compatible variants
+reuse the same text asset and override individual topics explicitly: for example,
+68HC11 reuses 6800 sources but overrides Factorial with MUL and Hello with
+Y-indexed loads. Incompatible instruction sets have separate ports. There is no
+automatic fallback based on the order of variants. Common tests execute the
+effective catalog on every selectable CPU.
+
+Loading an example reuses an empty, unedited editor or opens a new tab, with a
+topic-based filename and no unsaved marker until the text is edited. It links
+that document to its catalog topic. CPU, variant and
+FPU changes load the matching port only while its text exactly matches the
+loaded source. Edited documents stay untouched, including after Save clears
+their unsaved marker; Undo back to the original text restores following.
+Untouched inactive or hidden example tabs follow too, without changing the
+active tab or filename. Missing ports leave the current source in place.
+Destination bitmap settings and required windows are applied through the same
+shared load controller. Native workspace saves retain links for unchanged
+examples; ordinary imported files are never identified by matching text alone.
+
+The x86 CPU selector and math-coprocessor selector are independent. Enabling the
+8087 exposes its register bank and a floating-point example, without replacing
+integer or fixed-point ports. Requirements appear in the shared example menu.
+80186/80188 reuse the 8086 catalog with a native immediate-IMUL Factorial port.
+The generic mixed-width register adapter presents exact 80-bit values over
+explicit u32 history columns. With no coprocessor selected, x86 retains its
+14-word register schema; the 8087 configuration stores 46 words. The one-million
+entry history target and 256 MiB typed-buffer budget still apply. See the
+[x86 scope and numerical limits](src/architectures/i8086/README.md).
 
 ### Files, Folders and Links
 The workspace autosaves to the browser as you type, so a reload picks up where you
@@ -508,13 +647,21 @@ src/
 │   ├── registry.ts        # Loads and activates architectures; the only place that names them
 │   ├── mips/              # MARS assembler and simulator (core/), history, editor, examples, MIPS-only tools
 │   ├── beta/              # Beta CPU, BSim machine, UASM dialect and beta.uasm, editor, examples
-│   ├── mos6502/           # Shared NMOS 6502 / W65C02S CPU, ca65-style dialect, editor, examples
+│   ├── mos6502/           # NMOS 6502 / W65C02S plus w65816/, dialects, editor and examples
 │   ├── z80/               # Z80 CPU, device page machine, Zilog-syntax dialect, editor, examples
-│   ├── armv8/             # ARM profiles: a64/, a32/ and Cortex-M0 Thumb in m0/
-│   ├── arm26/             # 26-bit ARMv2a
+│   ├── armv8/             # ARM profiles: a64/, a32/, m0/ and 26-bit arm26/
+│   ├── armv8/arm26/       # 26-bit ARMv2a
 │   ├── avr/               # Classic AVR integer teaching profile
 │   ├── riscv/             # Shared RV32IM / RV32IMC assembler and CPU
-│   └── m68k/              # Shared 68000 / 68010 / 68020 integer teaching profiles
+│   ├── m68k/              # Shared 68000 / 68010 / 68020 integer teaching profiles
+│   ├── m6800/, i8051/     # Native encodings, execution, documentation and examples
+│   ├── powerpc/, alpha/   # 32-bit PowerPC and exact 64-bit Alpha integer cores
+│   ├── sparc/             # SPARC V8 integer core with register windows and delay slots
+│   ├── sh/               # SuperH SH-1/SH-2 with native delay slots and MAC state
+│   ├── vax/              # DEC VAX: VAX MACRO, CALLS frames and F/D/G/H floating point
+│   ├── pdp11/            # DEC PDP-11: MACRO-11 syntax, octal radix, EIS, FIS and FP11
+│   ├── s360/             # IBM System/360/370: HLASM-style USING assembler, EBCDIC, decimal and HFP
+│   └── i8086/, tms9900/   # Segmented memory and RAM workspace-based cores
 ├── core/                  # Shared assembler engine (assembly/), diagnostics, source index, history, settings
 ├── debug/                 # Debug session: breakpoints and stepping
 ├── tools/                 # Statistics, profile, cache, branch history, pipeline, memory reference
@@ -535,6 +682,34 @@ and an `index.ts` whose default export is an `ArchitectureDefinition` from
 Shared code never imports an architecture directly. See
 [docs/FEATURE_ARCHITECTURE.md](docs/FEATURE_ARCHITECTURE.md).
 
+For functional CPUs, `src/core/configuredCpu.ts` exposes a configurable adapter.
+It shares assembly layout, native decode caching, execution scheduling, input,
+debugger edits, call frames, history replay, memory inspection, tool observers,
+source navigation and editor providers. The architecture declares its own typed
+history schema, register/memory mappings and native hooks; shared code does not
+switch on CPU ids. Segment translation and wrapped word access are common helpers,
+while native code chooses segments, banks, workspace pointers and instruction modes.
+
+Programs live as plain `.asm` or `.uasm` files in each architecture's `examples/`
+directory (or its backend directory). `examples.ts` holds menu metadata and `?raw`
+imports. The source tree includes 252 standalone example programs and snippets;
+there are no assembly template strings in the example modules. Constants remain
+hardcoded in each program, including the common Mandelbrot iteration count/palette.
+
+Targets with lazy backends expose `services.prepare(settings)` and
+`services.isPrepared(settings)`. Await preparation before synchronous assembly,
+profile reads or machine creation. Activation prepares the saved variant before
+publishing it; variant changes prepare before committing their settings. ARM's
+A64, A32 and Cortex-M0 backends load separately through its local variant catalog.
+Failed or superseded loads keep the previous target and settings.
+
+The shared service factory rejects assembly errors before constructing a machine.
+Inspection uses the loaded program's decoder and symbol values; background
+diagnostics cannot replace that context. Before the first load, inspection may use
+the latest successful assembly. Local instruction catalogs connect completion
+names, hover documentation and model availability; encoding tables and macro
+libraries remain authoritative where they already supply those names.
+
 Example declarations are data (`name`, `description`, `code`). Use the shared topic
 IDs in `src/core/exampleCatalog.ts` for equivalent programs. `ExamplesMenu` owns
 the SVG icons, canonical names, order and row layout for every architecture;
@@ -554,6 +729,13 @@ remain in the CPU modules. Assembler frontends share quote-aware text scanning,
 integer arithmetic and bounded include traversal while retaining their dialects.
 Pipeline dependencies can name multiple destinations, flags and overlapping register
 resources, including separate memory results and base writeback.
+
+The Pipeline panel names its model and timing assumptions. MIPS and Beta use
+teaching pipeline estimates; A32/A64 share an explicitly hypothetical five-stage
+model. ARM2/ARM3 show their recorded execution-clock schedules. Other CPU models
+currently report that pipeline timing is unavailable. Decode-stage branch/jump
+operands, MIPS delay slots, A32 predicate outcomes and measured ARM refill ticks
+are preserved through history replay. See [pipeline models and limits](docs/pipeline-models.md).
 
 Shared views and tools preserve exact nonnegative addresses up to
 `Number.MAX_SAFE_INTEGER`, rather than wrapping them to 32 bits. Wider register
@@ -635,11 +817,24 @@ web port is documented in [docs/FEATURE_ARCHITECTURE.md](docs/FEATURE_ARCHITECTU
 - A run has no instruction limit; execution yields between bounded batches, including code without source mappings. Pause allows Continue; Stop ends the run until a rewind, PC edit or fresh assembly. Step Over checks return address and frame depth so recursive calls finish correctly
 - Sparse virtual memory covers the segments of the selected memory configuration. An address outside all of them faults, as does a load from or store into `.text` unless self-modifying code is enabled
 - The history keeps the last 1,000,000 instructions by default; this is also the maximum configurable limit. Every architecture uses the same limit and shared typed-buffer storage; memory use and recording cost depend on its history schema and the effects of each instruction. Stepping back past what it holds is not possible, and neither is replaying what came before it
-- The History footer shows retained entries, live/allocated typed-buffer bytes and eviction counts for every CPU. The default typed-buffer budget is 256 MiB; payload heap is additional, so the entry limit is a retention target subject to that budget. Expand the footer for details. Runtime/rewind measurements and the reproducible benchmark command are in [the benchmark report](docs/runtime-benchmarks.md).
+- The History info icon opens a tooltip with retained entries, live/allocated typed-buffer bytes and eviction counts for every CPU. The default typed-buffer budget is 256 MiB; payload heap is additional, so the entry limit is a retention target subject to that budget. Runtime/rewind measurements and reproducible benchmark commands are in [the existing CPU report](docs/runtime-benchmarks.md) and [the seven new CPU report](docs/new-cpu-benchmarks.md).
 - Moving through history preserves later entries on every CPU. Stepping forward replays recorded effects, including console input and manual edits. Changing registers, memory or the PC while rewound discards the previous future and starts a new path
 - Beta memory is one flat region of 64 KB to 16 MB, 1 MB by default. A program and its data must fit in it; an access past the end stops the run
 - Settings are stored per architecture (under `thrax-web.settings.architecture.<id>`); settings saved before there was more than one architecture are read as MIPS settings
 - Only one architecture is active at a time. Switching stops the run and discards registers, memory, history and address breakpoints; source files, line breakpoints and the layout are kept
+- File operations that invalidate execution, explicit assembly failures and resets stop and dispose the old machine through shared session teardown. Late callbacks and asynchronous completions cannot overwrite a replacement session.
+- Programs assembled for a configurable CPU variant must be reassembled before loading under another variant, including NMOS 6502 versus W65C02. A rejected load leaves the current machine intact.
+- The toolbar distinguishes guest completion (Halted), debugger Stop (Stopped) and unhandled native faults (Fault, with details on hover). Breakpoints, pauses and console-input waits remain resumable; handled guest exceptions retain their native behavior.
+- Step Back remains available after Halt, Stop or Fault when retained history can be rewound. Toolbar and keyboard controls share availability rules; rapid Pause/Continue commands cannot let an earlier run overwrite the current control state. Execution-fault diagnostics preserve preceding program output.
+
+## Instruction references
+
+Instruction hovers prefer checked HTML entries, including named instruction pages and
+shared manual sections. PDP-11 core links open individual scanned handbook pages.
+Where an HTML reference does not cover an operation, its existing PDF page remains
+the destination. The [reference audit](docs/instruction-references.md) lists sources,
+coverage gaps and remaining PDF dependencies. Reference lookup runs only while
+building documentation; execution and history storage are unaffected.
 
 ## 📖 MIPS Reference
 
