@@ -7,11 +7,12 @@ import { formatHex, formatAddress } from '../core/format'
 import { splitHex } from './HexNumber'
 import type { HexDimming } from '../core/settings'
 import { useTHRAXStore } from '../store/thraxStore'
+import { debugControls } from '../debug/controlAvailability'
 import { setFindReplaceEditor } from '../services/findReplace'
 import { heatLevel } from '../tools/profile'
 import { useFlash } from './highlight'
 import { TokenTooltipContent } from './TokenTooltip'
-import { tipParagraphs } from '../services/tokenTooltip'
+import { installTooltipLinks, tipParagraphs } from '../services/tokenTooltip'
 import './SourcePane.css'
 
 /** Gutter columns are separated, and closed off, by two spaces. */
@@ -327,6 +328,7 @@ function SourcePane({ documentId }: SourcePaneProps) {
 			}
 		}
 		editorDomNode?.addEventListener('copy', captureBreakpointCopy)
+		const tooltipLinks = editorDomNode && installTooltipLinks(editorDomNode)
 		editorInstance.onMouseDown((event) => {
 			if (event.target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN) {
 				const line = event.target.position?.lineNumber
@@ -395,7 +397,10 @@ function SourcePane({ documentId }: SourcePaneProps) {
 			for (const relativeLine of copied.relativeLines) nextLines.add(event.range.startLineNumber + relativeLine)
 			setBreakpointLinesRef.current(titleRef.current, nextLines)
 		})
-		editorInstance.onDidDispose(() => editorDomNode?.removeEventListener('copy', captureBreakpointCopy))
+		editorInstance.onDidDispose(() => {
+			editorDomNode?.removeEventListener('copy', captureBreakpointCopy)
+			tooltipLinks?.dispose()
+		})
 	}, [])
 
 	// The toolbar's Find opens Monaco's find widget on the file in front of the
@@ -413,6 +418,7 @@ function SourcePane({ documentId }: SourcePaneProps) {
 		const handler = (event: KeyboardEvent) => {
 			if (!/^F(5|7|8|9|10)$/.test(event.key) || event.repeat) return
 			const store = useTHRAXStore.getState()
+			const controls = debugControls(store)
 			const line = editorRef.current?.getPosition()?.lineNumber
 			// Blank and comment lines carry no address, so aim at the next line that does.
 			const addressAt = (from?: number) =>
@@ -426,14 +432,14 @@ function SourcePane({ documentId }: SourcePaneProps) {
 					} else if (event.shiftKey) {
 						store.reset()
 						void store.run()
-					} else if (store.isRunning) store.pause()
-					else if (store.isPaused) void store.continue()
+					} else if (controls.runAction === 'pause') store.pause()
+					else if (controls.runAction === 'continue') void store.continue()
 					else void store.run()
 					break
 				case 'F7': {
 					// Step out needs no cursor address, so it comes first.
 					if (event.shiftKey && !event.ctrlKey) {
-						void store.stepToReturn()
+						if (controls.canStep) void store.stepToReturn()
 						break
 					}
 					const address = addressAt(line)
@@ -443,13 +449,13 @@ function SourcePane({ documentId }: SourcePaneProps) {
 					break
 				}
 				case 'F8':
-					store.step()
+					if (controls.canStep) store.step()
 					break
 				case 'F9':
 					if (line !== undefined) store.toggleBreakpointLine(title, line)
 					break
 				case 'F10':
-					void store.stepOver()
+					if (controls.canStep) void store.stepOver()
 					break
 			}
 			event.preventDefault()

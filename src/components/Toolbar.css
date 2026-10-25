@@ -196,3 +196,13 @@
 .gutter-toggle.active + .gutter-toggle.active {
 	border-left-color: var(--accent-active);
 }
+
+.execution-status {
+	font-size: 12px;
+	color: var(--text-muted);
+	white-space: nowrap;
+}
+
+.execution-status[data-kind='fault'] {
+	color: var(--danger-text);
+}

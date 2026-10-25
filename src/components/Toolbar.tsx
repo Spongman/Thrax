@@ -1,5 +1,6 @@
 import React from 'react'
 import type { Example } from '../architectures/contracts'
+import { debugControls } from '../debug/controlAvailability'
 import { DEFAULT_GUTTER_COLUMNS, RUN_SPEEDS, useTHRAXStore } from '../store/thraxStore'
 import { AddressIcon, ArchiveIcon, BrowserLoadIcon, BrowserSaveIcon, CodeBytesIcon, DisassemblyIcon, ExportIcon, FilesIcon, GitBranchIcon, GlobeIcon, HeatLinesIcon, HeatMapIcon, LinkIcon, NewFileIcon, OpenFolderIcon, PauseIcon, ResetIcon, RunIcon, SaveAllIcon, SaveIcon, StepBackIcon, StepIntoIcon, StepOutIcon, StepOverIcon, StopIcon } from './icons'
 import { nextToggles } from './toggleGroup'
@@ -24,7 +25,9 @@ interface ToolbarProps {
  * the menu, and what belongs to the file sits on the right.
  */
 function Toolbar({ onRun, onReset }: ToolbarProps) {
-	const { activeDocumentId, assemble, continue: continueExecution, createDocument, exportHexText, gutterColumns, halted, hasMachine, hasSavedProgram, heatMap, heatMapLines, isPaused, isRunning, loadProgram, openPanels, pause, runSpeed, saveProgram, setGutterColumns, setHeatMap, setHeatMapLines, setRunSpeed, step, stepBack, stepOver, stepToReturn, stop } = useTHRAXStore()
+	const store = useTHRAXStore()
+	const { activeDocumentId, assemble, continue: continueExecution, createDocument, exportHexText, gutterColumns, hasSavedProgram, heatMap, heatMapLines, isRunning, loadProgram, openPanels, pause, runSpeed, saveProgram, setGutterColumns, setHeatMap, setHeatMapLines, setRunSpeed, step, stepBack, stepOver, stepToReturn, stop, stopReason } = store
+	const controls = debugControls(store)
 	const [showSettings, setShowSettings] = React.useState(false)
 	const [showGitHub, setShowGitHub] = React.useState(false)
 	const [storageMessage, setStorageMessage] = React.useState<string | null>(null)
@@ -107,12 +110,12 @@ function Toolbar({ onRun, onReset }: ToolbarProps) {
 			<div className="btn-group">
 				<button
 					className={`btn btn-icon${isRunning ? ' btn-primary' : ''}`}
-					onClick={() => (isRunning ? pause() : isPaused ? void continueExecution() : void onRun())}
-					title={isRunning ? 'Pause (F5)' : isPaused ? 'Continue (F5)' : 'Run (F5)'}
+					onClick={() => (controls.runAction === 'pause' ? pause() : controls.runAction === 'continue' ? void continueExecution() : void onRun())}
+					title={controls.runAction === 'pause' ? 'Pause (F5)' : controls.runAction === 'continue' ? 'Continue (F5)' : 'Run (F5)'}
 				>
 					{isRunning ? <PauseIcon /> : <RunIcon />}
 				</button>
-				<button className="btn btn-icon" onClick={stop} disabled={!hasMachine || halted} title="Stop">
+				<button className="btn btn-icon" onClick={stop} disabled={!controls.canStop} title="Stop">
 					<StopIcon />
 				</button>
 				<button className="btn btn-icon" onClick={onReset} title="Reset (alt+F5), restart with shift+F5">
@@ -121,19 +124,23 @@ function Toolbar({ onRun, onReset }: ToolbarProps) {
 			</div>
 
 			<div className="btn-group">
-				<button className="btn btn-icon" onClick={() => stepBack()} disabled={!isPaused} title="Step back">
+				<button className="btn btn-icon" onClick={() => stepBack()} disabled={!controls.canStepBack} title="Step back">
 					<StepBackIcon />
 				</button>
-				<button className="btn btn-icon" onClick={() => step()} title="Step into (F8)">
+				<button className="btn btn-icon" onClick={() => step()} disabled={!controls.canStep} title="Step into (F8)">
 					<StepIntoIcon />
 				</button>
-				<button className="btn btn-icon" onClick={() => void stepOver()} title="Step over (F10)">
+				<button className="btn btn-icon" onClick={() => void stepOver()} disabled={!controls.canStep} title="Step over (F10)">
 					<StepOverIcon />
 				</button>
-				<button className="btn btn-icon" onClick={() => void stepToReturn()} title="Step out (shift+F7)">
+				<button className="btn btn-icon" onClick={() => void stepToReturn()} disabled={!controls.canStep} title="Step out (shift+F7)">
 					<StepOutIcon />
 				</button>
 			</div>
+
+			{stopReason && <span className="execution-status" data-kind={stopReason.kind} role="status" title={stopReason.kind === 'fault' ? stopReason.message : undefined}>
+				{stopReason.kind === 'fault' ? 'Fault' : stopReason.kind === 'stop' ? 'Stopped' : 'Halted'}
+			</span>}
 
 			<label className="toolbar-speed" title="Instructions per second while running; the rightmost notch runs at full speed">
 				<span className="toolbar-speed-icon" aria-hidden="true">🐢</span>

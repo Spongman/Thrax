@@ -3,7 +3,7 @@ import { shownDocuments, useTHRAXStore } from '../store/thraxStore'
 import { connectedFolder, rememberedFolder, supportsFolders } from '../services/localFiles'
 import { useGitHubSession } from '../services/githubSession'
 import { clearProject, deleteCurrentGist, deleteDocumentEverywhere, downloadWorkspaceZip, newGistProject, openFilesFromDisk, reconnectProjectFolder, saveDocument, saveToCurrentGist, saveToNewGist } from '../services/workspaceActions'
-import { ExportIcon, NewFileIcon, NewGistIcon, OpenIcon, TrashIcon, UploadIcon, UploadNewIcon } from './icons'
+import { ArchiveIcon, NewFileIcon, NewGistIcon, OpenIcon, TrashIcon, UploadIcon, UploadNewIcon } from './icons'
 import './FilesView.css'
 
 /**
@@ -81,7 +81,7 @@ export function FilesPanel() {
 				<div className="btn-group" role="group" aria-label="Project">
 					<button className="btn btn-icon" onClick={createDocument} title="New file" aria-label="New file"><NewFileIcon /></button>
 					<button className="btn btn-icon" onClick={() => report(openFilesFromDisk())} title="Open files, or a .zip of them, from this machine" aria-label="Open files"><OpenIcon /></button>
-					<button className="btn btn-icon" onClick={() => report(downloadWorkspaceZip())} title="Download the workspace as a .zip" aria-label="Download workspace"><ExportIcon /></button>
+					<button className="btn btn-icon" onClick={() => report(downloadWorkspaceZip())} title="Download the workspace as a .zip" aria-label="Download workspace"><ArchiveIcon /></button>
 					<button className="btn btn-icon" onClick={clearAll} title="Remove every file from the project" aria-label="Remove all files"><TrashIcon /></button>
 				</div>
 				{viewer && (

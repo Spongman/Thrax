@@ -1,14 +1,16 @@
 import type { BitmapFormat } from '../architectures/contracts'
 import { create } from 'zustand'
 import { HOVER_KINDS, NOTHING_HOVERED, type Hovered } from './hover'
-import { ActivationSuperseded, activateArchitecture, activeArchitecture, knownArchitectures, onArchitectureActivated, peekArchitecture } from '../architectures/registry'
-import { EMPTY_HISTORY, EMPTY_MEMORY, variantOf, type ArchitectureActivation, type ArchitectureDefinition, type ArchitectureServices, type ArchitectureVariant, type AssembledProgram, type CallFrame, type CodeRow, type DataDeclaration, type Diagnostic, type Example, type HistoryFormatter, type KeyboardDisplayState, type Machine, type MachineHistory, type MachineProfile, type MemoryInspector, type PendingInput, type RegisterValue, type Registers, type SourceFile, type SourceLocation, type SymbolTables } from '../architectures/contracts'
+import { ActivationSuperseded, activateArchitecture, activeArchitecture, architectureSelection, knownArchitectures, onArchitectureActivated, peekArchitecture } from '../architectures/registry'
+import { EMPTY_HISTORY, EMPTY_MEMORY, variantOf, type ArchitectureActivation, type ArchitectureDefinition, type ArchitectureServices, type ArchitectureVariant, type AssembledProgram, type CallFrame, type CodeRow, type DataDeclaration, type Diagnostic, type Example, type HistoryFormatter, type KeyboardDisplayState, type Machine, type MachineHistory, type MachineStopReason, type MachineProfile, type MemoryInspector, type PendingInput, type RegisterValue, type Registers, type SourceFile, type SourceLocation, type SymbolTables } from '../architectures/contracts'
 import type { ExecutionObserver } from '../core/observer'
 import { formatDiagnostic, hasErrors } from '../core/diagnostics'
 import { DEFAULT_SETTINGS, isRecord, SETTINGS_VALIDATORS, validSettings, type TargetSettings, type ThraxSettings } from '../core/settings'
+import { cleanExampleSource, exampleSource, type ExampleSource } from '../core/exampleCatalog'
 import { codeRowOf, EMPTY_SOURCE_INDEX, type SourceIndex } from '../core/sourceIndex'
 import { moveToEntry } from '../core/historyLog'
 import { DebugSession } from '../debug/session'
+import { debugControls } from '../debug/controlAvailability'
 import { isFlagSet, readStoredSetting, writeStoredSetting } from '../hooks/useStoredState'
 import { downloadHexText } from '../services/hexTextExport'
 import { DEFAULT_ARCHITECTURE, fromWorkspaceDocument, newFileExtension, toWorkspaceDocument, type WorkspaceFile, type WorkspaceSnapshot } from '../services/workspace'
@@ -34,6 +36,8 @@ const SAVED_PROGRAM_KEY = 'thrax-web.saved-program'
  */
 const AUTOSAVE_KEY = 'thrax-web.autosave'
 const AUTOSAVE_DELAY_MS = 400
+/** How often a full-speed run refreshes the workspace while it goes. */
+const FULL_SPEED_REFRESH_MS = 100
 const INITIAL_CODE = '# Simple addition example\n# $t0 = 5, $t1 = 3, $t2 = $t0 + $t1\naddi $t0, $zero, 5\naddi $t1, $zero, 3\nadd $t2, $t0, $t1\n\n# Print result (syscall 1)\nmove $a0, $t2\naddi $v0, $zero, 1\nsyscall\n\n# Exit (syscall 10)\naddi $v0, $zero, 10\nsyscall\n'
 /** The shape the browser slot held before it was a workspace document. */
 interface SavedProgram {
@@ -96,7 +100,7 @@ const targetSettingsKey = (id: string) => `architecture.${id}`
  * were per architecture carries over what the shared keys held, and keeps it
  * under the architecture's own key from then on.
  */
-function readTargetSettings(definition: ArchitectureDefinition): TargetSettings {
+export function readTargetSettings(definition: ArchitectureDefinition<unknown>): TargetSettings {
 	const { id, settings: schema } = definition
 	const stored = readStoredSetting<unknown>(targetSettingsKey(id), null, isRecord)
 	if (stored !== null) return validSettings(schema, stored)
@@ -122,6 +126,8 @@ export interface SourceDocument {
 	title: string
 	code: string
 	dirty: boolean
+	/** Baseline of an explicitly loaded example; edited text is never replaced. */
+	example?: ExampleSource
 	/**
 	 * In the project but off the tab bar.  Closing a tab puts a file here rather
 	 * than out of the program, so it still assembles and `.include` still finds
@@ -194,7 +200,17 @@ function fromSavedProgram(value: unknown): WorkspaceSnapshot | null {
 	return { files: documents.map(({ title, code }) => ({ title, code })), active, assembleAll: program.assembleAllFiles === true, architecture: DEFAULT_ARCHITECTURE }
 }
 
-const isKnownArchitecture = (id: string) => knownArchitectures().includes(id)
+const isKnownArchitecture = (id: string) => knownArchitectures().includes(architectureSelection(id).id)
+
+/** Migrate obsolete top-level targets using registry-owned selection metadata. */
+export function migrateWorkspaceTarget(workspace: WorkspaceSnapshot): WorkspaceSnapshot {
+	const oldSettings = readStoredSetting<unknown>(targetSettingsKey(workspace.architecture), {}, isRecord) as TargetSettings
+	const selection = architectureSelection(workspace.architecture, oldSettings)
+	if (selection.id === workspace.architecture) return workspace
+	const existing = readStoredSetting<unknown>(targetSettingsKey(selection.id), {}, isRecord) as TargetSettings
+	writeStoredSetting(targetSettingsKey(selection.id), { ...existing, ...selection.settings })
+	return { ...workspace, architecture: selection.id }
+}
 
 function unknownArchitectureDiagnostic(id: string): Diagnostic {
 	return {
@@ -220,8 +236,10 @@ function writeStoredWorkspace(key: string, snapshot: WorkspaceSnapshot): boolean
  * they are everywhere else, since a workspace saved before that can collide.
  */
 function documentsFrom(files: readonly WorkspaceFile[]): SourceDocument[] {
-	return files.reduce<SourceDocument[]>((all, file) =>
-		[...all, { id: newDocumentId(), title: uniqueTitle(file.title, all), code: file.code, dirty: false }], [])
+	return files.reduce<SourceDocument[]>((all, file) => {
+		const example = cleanExampleSource(file.example, file.code)
+		return [...all, { id: newDocumentId(), title: uniqueTitle(file.title, all), code: file.code, dirty: false, ...(example ? { example } : {}) }]
+	}, [])
 }
 
 const NO_KEYBOARD_DISPLAY: KeyboardDisplayState = Object.freeze({ queuedInput: '', displayOutput: '' })
@@ -240,6 +258,8 @@ interface THRAXStore {
 	bitmapFormat: BitmapFormat | null
 	bitmapPalette: readonly number[] | null
 	loadExample: (example: Example) => void
+	/** Shared UI side effects of explicit loads and successful automatic port changes. */
+	exampleActivation: { example: Example; documentId: string; focus: boolean } | null
 	code: string
 	documents: SourceDocument[]
 	activeDocumentId: string
@@ -268,6 +288,7 @@ interface THRAXStore {
 	console: string
 	pc: number
 	halted: boolean
+	stopReason: MachineStopReason | null
 	instructionCount: number
 	/** Which line of which file every machine word of the program came from. */
 	sourceIndex: SourceIndex
@@ -378,7 +399,7 @@ interface THRAXStore {
 	/** Changes one setting; the ones the assembler reads rebuild the program. */
 	setSetting: <Key extends keyof ThraxSettings>(key: Key, value: ThraxSettings[Key]) => void
 	/** Changes one of the active architecture's settings; a value its field refuses is ignored. */
-	setTargetSetting: (key: string, value: unknown) => void
+	setTargetSetting: (key: string, value: unknown) => void | Promise<void>
 	/** Writes the workspace to this browser's slot; `loadProgram` reads it back. */
 	saveProgram: () => boolean
 	loadProgram: () => boolean
@@ -554,7 +575,8 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 		// A program that did not assemble is not worth loading; its diagnostics stand
 		// for it, and the stale program it would have replaced is let go.
 		if (hasErrors(diagnostics)) {
-			debug.detach()
+			teardownSession()
+			set({ ...resetExecution(), ...debug.view(), ...tools.views() })
 			return { simulator: null, diagnostics }
 		}
 		const nextSimulator = services().createMachine(program, get().targetSettings, {
@@ -562,8 +584,17 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 			// How far back the workspace is willing to let the program be rewound.
 			historyLimit: settings.backstepLimit,
 		})
+		if (debug.machine) teardownSession()
 		// A paced run is worth watching, so refresh the workspace between batches.
-		nextSimulator.onProgress = () => set({ ...simulatorView(), ...tools.views(), isRunning: true, isPaused: false })
+		// A full-speed run refreshes less often: every refresh redraws the panels.
+		let published = 0
+		nextSimulator.onProgress = () => {
+			if (debug.machine !== nextSimulator) return
+			const now = performance.now()
+			if (get().runSpeed === null && now - published < FULL_SPEED_REFRESH_MS) return
+			published = now
+			set({ ...simulatorView(), ...tools.views(), isRunning: true, isPaused: false })
+		}
 		// Attach first: connecting before the run exists would push the observers
 		// onto the machine being replaced, and configure them with its device port.
 		tools.attach(nextSimulator, nextSimulator.toolConfig())
@@ -607,6 +638,7 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 			console: machine.console,
 			pc: machine.pc,
 			halted: machine.halted,
+			stopReason: machine.stopReason,
 			instructionCount: machine.instructionCount,
 			isRunning: false,
 			isPaused: machine.paused,
@@ -628,6 +660,9 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 			...tools.views(),
 		}
 	}
+
+	/** Native output remains replayable; execution errors are separate diagnostics. */
+	const controlFailure = (error: unknown) => ({ ...reportException(error), ...simulatorView(), isRunning: false })
 
 	/**
 	 * An explicit build - Assemble, Run, or a control pressed before there was a
@@ -652,27 +687,32 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 	 * program to drive says so rather than throwing, and a fault in the program
 	 * is reported as a diagnostic.
 	 */
+	let executionCommand = 0
 	const controlled = (action: () => boolean, after: Partial<THRAXStore> = {}) => {
+		executionCommand++
 		try {
 			// Nothing to drive still clears the run flag the caller may have raised.
 			set(action() ? { ...simulatorView(), ...after } : { isRunning: false })
 		} catch (error) {
-			set({ ...reportException(error), isRunning: false })
+			set(controlFailure(error))
 		}
 	}
 
 	let executionGeneration = 0
 	const controlledAsync = async (action: () => Promise<boolean>, after: () => Partial<THRAXStore> = () => ({})) => {
 		const target = peekArchitecture()
-		const generation = executionGeneration
+		const command = ++executionCommand
+		let generation = executionGeneration
 		try {
-			const acted = await action()
-			// A target switched in meanwhile has already published its own view.
-			if (peekArchitecture() !== target || generation !== executionGeneration) return
+			const pending = action()
+			generation = executionGeneration
+			const acted = await pending
+			// A newer command or session owns the view, even on the same machine.
+			if (peekArchitecture() !== target || generation !== executionGeneration || command !== executionCommand) return
 			set(acted ? { ...simulatorView(), ...after() } : { isRunning: false })
 		} catch (error) {
-			if (peekArchitecture() !== target || generation !== executionGeneration) return
-			set({ ...reportException(error), isRunning: false })
+			if (peekArchitecture() !== target || generation !== executionGeneration || command !== executionCommand) return
+			set(controlFailure(error))
 		}
 	}
 
@@ -680,6 +720,7 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 
 	/** A control that runs on its own until something stops it, lit as running meanwhile. */
 	const freeRunning = (action: () => Promise<boolean>, after?: () => Partial<THRAXStore>) => {
+		if (!debugControls(get()).canStep) return Promise.resolve()
 		set({ isRunning: true, isPaused: false })
 		return controlledAsync(action, after)
 	}
@@ -701,7 +742,7 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 
 	/** Each architecture's settings once read, so switching back finds them as left. */
 	const targetSettingsCache = new Map<string, TargetSettings>()
-	const targetSettingsOf = (definition: ArchitectureDefinition) => {
+	const targetSettingsOf = (definition: ArchitectureDefinition<unknown>) => {
 		let values = targetSettingsCache.get(definition.id)
 		if (!values) {
 			values = readTargetSettings(definition)
@@ -710,12 +751,16 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 		return values
 	}
 
+	let targetSettingGeneration = 0
+	let pendingTargetSettings: TargetSettings | null = null
+
 	// Takes the settings rather than reading them, so a reset caused by changing
 	// the memory configuration lays out from the new one and not the old.
 	const resetExecution = (settings: TargetSettings = get().targetSettings) => {
 		const profile = profileFor(settings)
 		const definition = peekArchitecture()?.definition
 		return {
+			hasMachine: false,
 			targetProfile: profile,
 			targetVariant: definition ? variantOf(definition, settings) : null,
 			registers: profile?.resetRegisters ?? {},
@@ -723,6 +768,7 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 			console: '',
 			pc: profile?.resetPc ?? 0,
 			halted: false,
+			stopReason: null,
 			instructionCount: 0,
 			sourceIndex: EMPTY_SOURCE_INDEX,
 			codeWords: new Map<string, Map<number, CodeRow[]>>(),
@@ -745,30 +791,50 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 	}
 
 	/** A model or memory-layout change invalidates the machine, including a run in flight. */
-	const detachForRebuild = () => {
+	const teardownSession = () => {
 		executionGeneration++
 		const machine = debug.machine
-		if (machine) {
-			machine.onProgress = null
-			machine.stop()
-			machine.dispose()
+		try {
+			tools.detach()
+		} finally {
+			try { get().target?.services.releaseMachine(machine ?? undefined) }
+			finally { debug.detach() }
 		}
-		tools.detach()
-		debug.detach()
+	}
+
+	/** Called only after a target request wins; check live text, including pending edits. */
+	const followExamples = (variant: ArchitectureVariant): Partial<THRAXStore> => {
+		const state = get()
+		let activeExample: Example | undefined, changed = false
+		const documents = state.documents.map(document => {
+			const link = document.example, code = document.id === state.activeDocumentId ? state.code : document.code
+			if (!link || code !== link.source || !Object.prototype.hasOwnProperty.call(variant.examples, link.id)) return document
+			const example = variant.examples[link.id]
+			if (document.id === state.activeDocumentId) activeExample = example
+			if (example.code === code) return document
+			changed = true
+			return { ...document, code: example.code, dirty: false, example: { id: link.id, source: example.code } }
+		})
+		return {
+			...(changed ? { documents, code: documents.find(document => document.id === state.activeDocumentId)!.code } : {}),
+			...(activeExample ? { bitmapFormat: activeExample.bitmap ?? null, bitmapPalette: activeExample.bitmapPalette ?? null,
+				exampleActivation: { example: activeExample, documentId: state.activeDocumentId, focus: false } } : { exampleActivation: null }),
+		}
 	}
 
 	// A committed activation is the only place a target takes effect.  Nothing
 	// the old one assembled, ran or recorded can be read as the new CPU, so the
 	// machine and address breakpoints go; the files and line breakpoints stay.
 	onArchitectureActivated((activation) => {
-		debug.detach()
+		targetSettingGeneration++
+		pendingTargetSettings = null
+		teardownSession()
 		debug.forgetAddresses()
-		tools.detach()
 		const targetSettings = targetSettingsOf(activation.definition)
 		// The old target's diagnostics describe a build that is gone; the first
 		// activation keeps what startup reported.
 		const diagnostics = get().target ? { diagnostics: [] } : {}
-		set({ bitmapFormat: null, bitmapPalette: null, target: activation, architecture: activation.definition.id, targetSettings, ...resetExecution(targetSettings), ...debug.view(), ...contributeTools(activation.services), ...diagnostics })
+		set({ bitmapFormat: null, bitmapPalette: null, target: activation, architecture: activation.definition.id, targetSettings, ...resetExecution(targetSettings), ...debug.view(), ...contributeTools(activation.services), ...diagnostics, ...followExamples(variantOf(activation.definition, targetSettings)) })
 	})
 
 	// `get()` has nothing to return while the initial state is being built.
@@ -777,7 +843,8 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 	const initialTargetSettings = initialTarget ? targetSettingsOf(initialTarget.definition) : {}
 
 	// What was open when the page was last here, or the first example when it never was.
-	const stored = readStoredWorkspace(AUTOSAVE_KEY)
+	const storedSnapshot = readStoredWorkspace(AUTOSAVE_KEY)
+	const stored = storedSnapshot && migrateWorkspaceTarget(storedSnapshot)
 	const unopenable = stored && !isKnownArchitecture(stored.architecture) ? stored : null
 	const autosaved = unopenable ? null : stored
 	const initialDocuments = autosaved ? documentsFrom(autosaved.files) : [{ id: 'main', title: 'main.asm', code: INITIAL_CODE, dirty: false }]
@@ -821,14 +888,29 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 		pipelineSettings: toolSettings.pipeline,
 		memoryReferenceSettings: toolSettings.memoryReference,
 
-		bitmapFormat: null, bitmapPalette: null,
+		bitmapFormat: null, bitmapPalette: null, exampleActivation: null,
 		loadExample: (example) => {
-			get().setCode(example.code)
-			set({ bitmapFormat: example.bitmap ?? null, bitmapPalette: example.bitmapPalette ?? null })
+			const state = get(), link = exampleSource(state.targetVariant?.examples ?? {}, example)
+			const current = state.documents.find(document => document.id === state.activeDocumentId)
+			const replace = current && state.code === '' && !current.dirty
+			const id = replace ? current.id : newDocumentId()
+			const stem = (link?.id ?? example.name).toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || 'example'
+			const document: SourceDocument = {
+				id, title: uniqueTitle(`${stem}${newFileExtension(state.target?.definition, state.targetVariant)}`, state.documents, replace ? id : undefined),
+				code: example.code, dirty: false, ...(link ? { example: link } : {}),
+			}
+			teardownSession()
+			set({ ...resetExecution(), code: example.code,
+				documents: replace ? state.documents.map(candidate => candidate.id === id ? document : candidate) : [...state.documents, document],
+				activeDocumentId: id, entryDocumentId: id,
+				bitmapFormat: example.bitmap ?? null, bitmapPalette: example.bitmapPalette ?? null,
+				exampleActivation: { example, documentId: id, focus: true },
+			})
 		},
 
 		// An edit leaves the machine alone; refreshAssembly decides what it changes.
 		setCode: (newCode) => {
+			if (newCode === get().code) return
 			set((state) => ({
 				code: newCode,
 				documents: state.documents.map((document) => document.id === state.activeDocumentId
@@ -844,7 +926,7 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 				return
 			}
 			set({
-				documents: state.documents.map((document) => document.id === documentId
+				documents: state.documents.map((document) => document.id === documentId && document.code !== newCode
 					? { ...document, code: newCode, dirty: true }
 					: document),
 			})
@@ -859,7 +941,7 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 				set({ settings })
 				return
 			}
-			detachForRebuild()
+			teardownSession()
 			set({ settings, ...resetExecution(), ...debug.view(), ...tools.views() })
 		},
 
@@ -867,22 +949,40 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 			const { target } = get()
 			const field = target?.definition.settings.fields.find((one) => one.key === key)
 			if (!target || !field?.isValid(value)) return
-			const targetSettings = { ...get().targetSettings, [key]: value }
-			targetSettingsCache.set(target.definition.id, targetSettings)
-			writeStoredSetting(targetSettingsKey(target.definition.id), targetSettings)
-			if (!field.rebuild) {
-				set({ targetSettings })
-				return
+			const request = ++targetSettingGeneration
+			const targetSettings = { ...(pendingTargetSettings ?? get().targetSettings), [key]: value }
+			pendingTargetSettings = targetSettings
+			const commit = () => {
+				if (request !== targetSettingGeneration || !target.isCurrent()) return
+				pendingTargetSettings = null
+				targetSettingsCache.set(target.definition.id, targetSettings)
+				writeStoredSetting(targetSettingsKey(target.definition.id), targetSettings)
+				const rebuild = target.definition.settings.fields.some(one => one.rebuild && get().targetSettings[one.key] !== targetSettings[one.key])
+				if (!rebuild) {
+					set({ targetSettings })
+					return
+				}
+				teardownSession()
+				set({ targetSettings, ...resetExecution(targetSettings), ...debug.view(), ...tools.views(), ...followExamples(variantOf(target.definition, targetSettings)) })
 			}
-			detachForRebuild()
-			set({ targetSettings, ...resetExecution(targetSettings), ...debug.view(), ...tools.views() })
+			if (target.services.isPrepared?.(targetSettings) !== false) return commit()
+			debug.machine?.stop()
+			set(simulatorView())
+			return target.services.prepare!(targetSettings).then(commit).catch(error => {
+				if (request !== targetSettingGeneration || !target.isCurrent()) return
+				pendingTargetSettings = null
+				set(reportException(error))
+			})
 		},
 
 		workspaceSnapshot: () => {
 			const { activeDocumentId, code, documents, settings } = get()
 			return {
 				// The tab being typed into holds its live text in `code`.
-				files: documents.map((document) => ({ title: document.title, code: document.id === activeDocumentId ? code : document.code })),
+				files: documents.map((document) => {
+					const source = document.id === activeDocumentId ? code : document.code, example = cleanExampleSource(document.example, source)
+					return { title: document.title, code: source, ...(example ? { example } : {}) }
+				}),
 				active: documents.find((document) => document.id === activeDocumentId)?.title,
 				assembleAll: settings.assembleAll,
 				architecture: get().architecture,
@@ -897,7 +997,8 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 		},
 
 		loadProgram: () => {
-			const workspace = readStoredWorkspace(SAVED_PROGRAM_KEY)
+			const saved = readStoredWorkspace(SAVED_PROGRAM_KEY)
+			const workspace = saved && migrateWorkspaceTarget(saved)
 			if (!workspace) return false
 			if (!isKnownArchitecture(workspace.architecture)) {
 				set(report([unknownArchitectureDiagnostic(workspace.architecture)]))
@@ -916,7 +1017,8 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 			const replaced = new Map(files.map((file) => [file.title, file]))
 			const updated = kept.map((document) => {
 				const file = replaced.get(document.title)
-				return file ? { id: document.id, title: document.title, code: file.code, dirty: false } : document
+				const example = file && cleanExampleSource(file.example, file.code)
+				return file ? { id: document.id, title: document.title, code: file.code, dirty: false, ...(example ? { example } : {}) } : document
 			})
 			const added = documentsFrom(files.filter((file) => !kept.some((document) => document.title === file.title)))
 			const documents = [...updated, ...added]
@@ -925,9 +1027,10 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 			const settings = options.assembleAll === undefined ? state.settings : { ...state.settings, assembleAll: options.assembleAll }
 			if (settings !== state.settings) writeStoredSetting(SETTING_KEYS.assembleAll, settings.assembleAll)
 			if (options.architecture !== undefined && options.architecture !== state.architecture) void state.switchArchitecture(options.architecture)
-			debug.detach()
+			teardownSession()
 			set({
 				code: active.code,
+				exampleActivation: null,
 				documents,
 				activeDocumentId: active.id,
 				documentSelection: state.documentSelection + 1,
@@ -963,11 +1066,11 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 			const id = newDocumentId()
 			const document: SourceDocument = {
 				id,
-				title: uniqueTitle(`untitled${newFileExtension(get().target?.definition)}`, get().documents),
+				title: uniqueTitle(`untitled${newFileExtension(get().target?.definition, get().targetVariant)}`, get().documents),
 				code: '',
 				dirty: false,
 			}
-			debug.detach()
+			teardownSession()
 			set((state) => ({
 				documents: [...state.documents, document],
 				activeDocumentId: id,
@@ -999,7 +1102,7 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 		},
 
 		renameDocument: (documentId, title) => {
-			debug.detach()
+			teardownSession()
 			set((state) => {
 				const wanted = uniqueTitle(title, state.documents, documentId)
 				return {
@@ -1048,12 +1151,12 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 			const state = get()
 			if (!state.documents.some((document) => document.id === documentId)) return
 			const documents = state.documents.filter((document) => document.id !== documentId)
-			const remainingDocuments = documents.length ? documents : [{ id: newDocumentId(), title: `untitled${newFileExtension(state.target?.definition)}`, code: '', dirty: false }]
+			const remainingDocuments = documents.length ? documents : [{ id: newDocumentId(), title: `untitled${newFileExtension(state.target?.definition, state.targetVariant)}`, code: '', dirty: false }]
 			const index = state.documents.findIndex((document) => document.id === documentId)
 			const activeDocument = documentId === state.activeDocumentId
 				? (neighbourOf(remainingDocuments, state.documents, index) ?? remainingDocuments[Math.max(0, index - 1)])
 				: remainingDocuments.find((document) => document.id === state.activeDocumentId)!
-			debug.detach()
+			teardownSession()
 			set({
 				documents: remainingDocuments,
 				activeDocumentId: activeDocument.id,
@@ -1134,8 +1237,7 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 
 		submitInput: async (input, cancelled = false) => {
 			if (!debug.machine?.provideInput(input, cancelled)) return
-			await debug.continue()
-			set(simulatorView())
+			await freeRunning(() => debug.continue())
 		},
 
 		driveTool: (key, action) => {
@@ -1152,8 +1254,7 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 			set(simulatorView())
 		},
 
-		// Assembly failures are reported, not thrown: only an unexpected exception
-		// reaches the error bar above the workspace.
+		// Assembly failures and native execution faults use the shared diagnostics.
 		run: async (): Promise<void> => {
 			pinEntryToActiveDocument()
 			const created = createSimulator()
@@ -1170,11 +1271,15 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 				runToken: get().runToken + 1,
 				consoleAttention: 'none',
 			})
-			await created.simulator.run()
-			set(simulatorView())
+			await controlledAsync(async () => {
+				await created.simulator!.run()
+				return true
+			})
 		},
 
-		step: () => controlled(() => debug.step(), paused),
+		step: () => {
+			if (debugControls(get()).canStep) controlled(() => debug.step(), paused)
+		},
 
 		/**
 		 * Puts the machine at one history entry, publishing once.
@@ -1199,7 +1304,9 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 			return true
 		}, paused),
 
-		stepBack: () => controlled(() => debug.stepBack()),
+		stepBack: () => {
+			if (debugControls(get()).canStepBack) controlled(() => debug.stepBack())
+		},
 
 		focusMemoryAddress: (address: number) => set((state) => ({
 			focusedMemory: { address, request: (state.focusedMemory?.request ?? 0) + 1 },
@@ -1230,7 +1337,9 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 
 		runToAddress: (address) => freeRunning(() => debug.runTo(address), () => ({ isPaused: !debug.machine?.halted })),
 
-		setProgramCounter: (address) => controlled(() => debug.setProgramCounter(address), paused),
+		setProgramCounter: (address) => {
+			if (debugControls(get()).canStep) controlled(() => debug.setProgramCounter(address), paused)
+		},
 
 		continue: () => freeRunning(() => debug.continue()),
 
@@ -1299,6 +1408,8 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 		},
 
 		switchArchitecture: async (id) => {
+			const original = id, selection = architectureSelection(id, readStoredSetting<unknown>(targetSettingsKey(id), {}, isRecord) as TargetSettings)
+			id = selection.id
 			if (!isKnownArchitecture(id)) {
 				set(report([unknownArchitectureDiagnostic(id)]))
 				return false
@@ -1308,7 +1419,13 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 			// The run ends now, at an instruction boundary, rather than racing the load.
 			if (changing) debug.machine?.stop()
 			try {
-				await activateArchitecture(id)
+				if (id !== original) {
+					const existing = targetSettingsCache.get(id) ?? readStoredSetting<unknown>(targetSettingsKey(id), {}, isRecord) as TargetSettings
+					targetSettingsCache.delete(id)
+					writeStoredSetting(targetSettingsKey(id), { ...existing, ...selection.settings })
+				}
+				await activateArchitecture(id, targetSettingsOf)
+				if (!changing && id !== original) for (const [key, value] of Object.entries(selection.settings)) await get().setTargetSetting(key, value)
 				// Nothing committed, but an earlier request may have stopped the machine.
 				if (!changing) set(simulatorView())
 				return true
@@ -1322,6 +1439,7 @@ export const useTHRAXStore = create<THRAXStore>((set, get) => {
 		},
 
 		reset: () => {
+			teardownSession()
 			debug.clear()
 			set({
 				...resetExecution(),

@@ -9,14 +9,16 @@ import { panelById } from '../panels'
 
 describe('shared examples menu', () => {
 	it('labels required windows and keeps their metadata when an example is selected', () => {
-		const example: Example = { name: 'Graphics', description: 'Draw pixels.', code: 'draw', tools: ['bitmap', 'keyboardDisplay'] }
+		const example: Example = { name: 'Graphics', description: 'Draw pixels.', code: 'draw', tools: ['bitmap', 'keyboardDisplay'], requirements: ['Optional numeric unit'] }
 		let loaded: Example | undefined
 		const props = { examples: { graphics: example }, onLoad: (selection: Example) => { loaded = selection } }
 		const markup = renderToStaticMarkup(<ExamplesMenu {...props} />)
 		expect(markup).toContain('Opens: Bitmap Display, Keyboard and Display MMIO')
+		expect(markup).toContain('Requires: Optional numeric unit')
 		ExamplesMenu(props)[0].props.onClick()
 		expect(loaded?.code).toBe('draw')
 		expect(loaded?.tools).toEqual(['bitmap', 'keyboardDisplay'])
+		expect(loaded?.requirements).toEqual(['Optional numeric unit'])
 	})
 	it('gives equivalent programs the same names, order and SVG presentation', () => {
 		const examples: Record<string, Example> = {

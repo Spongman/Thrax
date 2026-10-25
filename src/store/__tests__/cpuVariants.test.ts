@@ -88,7 +88,7 @@ describe('CPU variants in the shared workbench', () => {
 
 	it('selects Cortex-M0 inside ARM and returns to the existing AArch64 profile', async () => {
 		await state().switchArchitecture('armv8')
-		state().setTargetSetting('executionState', 'cortex-m0')
+		await state().setTargetSetting('executionState', 'cortex-m0')
 		expect(state().targetSettings.executionState).toBe('cortex-m0')
 		expect(state().targetVariant!.language).toBe('thrax-thumb-m0')
 		expect(state().targetVariant!.registers.some(register => register.id === 'MSP')).toBe(true)
@@ -104,7 +104,7 @@ describe('CPU variants in the shared workbench', () => {
 		expect(state().registers.R0).toBe(5)
 		await state().continue()
 		expect(state().halted).toBe(true)
-		state().setTargetSetting('executionState', 'aarch64')
+		await state().setTargetSetting('executionState', 'aarch64')
 		expect(state().hasMachine).toBe(false)
 		expect(state().targetVariant!.language).toBe('aarch64')
 		expect(state().registers.X0).toBe(0n)

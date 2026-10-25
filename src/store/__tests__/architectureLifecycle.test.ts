@@ -37,7 +37,7 @@ vi.mock('monaco-editor', () => {
 		registerDefinitionProvider: disposable,
 		CompletionItemKind: { Function: 1, Variable: 4, Keyword: 17, Snippet: 27 },
 	}
-	const editor = { registerEditorOpener: disposable, getModel: () => null, getModels: () => [], createModel: () => null }
+	const editor = { registerEditorOpener: disposable, registerLinkOpener: disposable, getModel: () => null, getModels: () => [], createModel: () => null }
 	class Range { constructor(...args: number[]) { Object.assign(this, args) } }
 	return { languages, editor, Range, Uri: { from: () => ({}) } }
 })

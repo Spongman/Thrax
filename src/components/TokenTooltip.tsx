@@ -1,5 +1,5 @@
 import type { TokenDescription } from '../architectures/contracts'
-import { tipParagraphs, tipRuns, tokenTooltipMarkdown } from '../services/tokenTooltip'
+import { referenceDestination, REFERENCE_TARGET, tipParagraphs, tipRuns, tokenTooltipMarkdown } from '../services/tokenTooltip'
 import './TokenTooltip.css'
 
 /** The disassembly uses Monaco's hover shell and the same content/link helper. */
@@ -9,7 +9,7 @@ export function TokenTooltipContent({ token }: { token: Pick<TokenDescription, '
 			{tipRuns(paragraph).map((run, runIndex) => (
 				run.kind === 'strong' ? <strong key={runIndex}>{run.text}</strong>
 					: run.kind === 'code' ? <code key={runIndex}>{run.text}</code>
-						: run.kind === 'link' ? <a key={runIndex} href={run.href} title={run.title} aria-label={run.title} target="_blank" rel="noreferrer">{run.text}</a>
+						: run.kind === 'link' ? <a key={runIndex} href={referenceDestination(run.href)} title={run.title} aria-label={run.title} target={REFERENCE_TARGET}>{run.strong ? <strong>{run.text}</strong> : run.text}</a>
 							: <span key={runIndex}>{run.text}</span>
 			))}
 		</p>)}

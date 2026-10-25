@@ -3,7 +3,7 @@ import EditorWorker from 'monaco-editor/editor/common/services/editorWebWorkerMa
 import { loader } from '@monaco-editor/react'
 import { connectEditor, initializeArchitecture } from './architectures/registry'
 import { restoreGitHubSession } from './services/githubSession'
-import { useTHRAXStore } from './store/thraxStore'
+import { readTargetSettings, useTHRAXStore } from './store/thraxStore'
 
 // Vite cannot bundle the core editor worker from Monaco's internal
 // `new URL('...editorWebWorkerMain.js', import.meta.url)` reference, so supply it
@@ -31,9 +31,10 @@ if (!root) throw new Error('Unable to find the application root')
 
 async function start() {
 	// The workspace reopens on the target it was saved for.
-	await initializeArchitecture(useTHRAXStore.getState().architecture)
+	await initializeArchitecture(useTHRAXStore.getState().architecture, readTargetSettings)
 	// Every activation installs its language, go-to-definition and data tips.
 	await connectEditor(monaco, {
+		settings: () => useTHRAXStore.getState().targetSettings,
 		files: () => useTHRAXStore.getState().workspaceSnapshot().files,
 		active: () => useTHRAXStore.getState().workspaceSnapshot().active,
 		open: (file, line) => useTHRAXStore.getState().focusSourceLine(file, line),

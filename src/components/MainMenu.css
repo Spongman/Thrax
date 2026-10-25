@@ -145,7 +145,8 @@
 	color: var(--text-muted);
 }
 
-.example-tools {
+.example-tools,
+.example-requirements {
 	display: block;
 	margin-top: 3px;
 	color: var(--text-secondary);

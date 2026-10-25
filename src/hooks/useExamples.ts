@@ -9,14 +9,20 @@ interface LoadExampleEvent extends Event {
 
 export function useExamples() {
 	const loadExample = useTHRAXStore((state) => state.loadExample)
+	const activation = useTHRAXStore((state) => state.exampleActivation)
+
+	useEffect(() => {
+		if (!activation) return
+		const state = useTHRAXStore.getState()
+		if (state.activeDocumentId !== activation.documentId || state.code !== activation.example.code) return
+		if (activation.focus) state.selectDocument(activation.documentId)
+		for (const id of activation.example.tools ?? []) openPanel(id)
+	}, [activation])
 
 	useEffect(() => {
 		const handleLoadExample = (event: Event) => {
 			const { detail } = event as LoadExampleEvent
 			loadExample(detail)
-			const state = useTHRAXStore.getState()
-			state.selectDocument(state.activeDocumentId)
-			for (const id of detail.tools ?? []) openPanel(id)
 		}
 
 		window.addEventListener('load-example', handleLoadExample)

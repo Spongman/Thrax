@@ -37,6 +37,7 @@ const icons = new Map<string, Icon>(Object.entries({
 	interrupts: KeyboardIcon,
 	mandelbrot: MandelbrotIcon,
 	coprocessors: CoprocessorIcon,
+	floatingpoint: CoprocessorIcon,
 	stack: RecursionIcon,
 	call: RecursionIcon,
 	memory: ExamplesIcon,
@@ -50,8 +51,8 @@ export const exampleIcon = (id: string): Icon => icons.get(id) ?? icons.get(id.r
 export function exampleItems(examples: Readonly<Record<string, Example>>) {
 	return Object.entries(examples)
 		.map(([id, example]) => ({
-			id,
 			...example,
+			id,
 			name: exampleName(id, example.name),
 			icon: exampleIcon(id)
 		}))
@@ -78,6 +79,7 @@ export default function ExamplesMenu({
 			<span className="item-name">{example.name}</span>
 			<span className="item-desc">
 				{example.description}
+				{example.requirements?.length ? <span className="example-requirements">Requires: {example.requirements.join(', ')}</span> : null}
 				{example.tools?.length ? <span className="example-tools">Opens: {example.tools.map((id) => {
 					const panel = panelById(id, panels)
 					return panel ? menuLabel(panel) : id
