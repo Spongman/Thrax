@@ -11,6 +11,7 @@ import { manifest as riscvManifest } from './riscv/manifest'
 import { manifest as z80Manifest } from './z80/manifest'
 import { manifest as m6800Manifest } from './m6800/manifest'
 import { manifest as i8051Manifest } from './i8051/manifest'
+import { manifest as powerpcManifest } from './powerpc/manifest'
 import { manifest as alphaManifest } from './alpha/manifest'
 import { manifest as tms9900Manifest } from './tms9900/manifest'
 import type { TargetSettings } from '../core/settings'
@@ -53,6 +54,7 @@ const loaders: Record<string, Loader<ArchitectureServices>> = {
 	m68k: () => import('./m68k'),
 	m6800: () => import('./m6800'),
 	i8051: () => import('./i8051'),
+	powerpc: () => import('./powerpc'),
 	alpha: () => import('./alpha'),
 	tms9900: () => import('./tms9900'),
 }
@@ -68,6 +70,7 @@ const manifests: Readonly<Record<string, ArchitectureManifest>> = {
 	m68k: m68kManifest,
 	m6800: m6800Manifest,
 	i8051: i8051Manifest,
+	powerpc: powerpcManifest,
 	alpha: alphaManifest,
 	tms9900: tms9900Manifest,
 }
