@@ -2,6 +2,7 @@
 
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { DATA_BASE, DEFAULT_MEMORY_BYTES, TEXT_BASE } from '../a64/layout'
+import { variantOf } from '../../contracts'
 
 const storage = new Map<string, string>()
 
@@ -36,9 +37,12 @@ const OUTPUT: Record<string, string> = {
 	bitmap: '',
 	macros: 'counting: 12345\n123\n',
 	mandelbrot: '',
+	floatingpoint: 'sqrt(2) = 1.414\npi * 2.5^2 = 19.635\n1 / 3 = 0.333\nfrintn(-7.5) = -8.000\n',
 }
 
 const examples = () => state().target!.definition.examples
+/** The examples the settings offer now. */
+const offered = () => variantOf(state().target!.definition, state().targetSettings).examples
 
 beforeAll(async () => {
 	await initializeArchitecture('mips')
@@ -179,6 +183,24 @@ describe('ARMv8-A in the workbench', () => {
 		expect(tip?.contents.join('\n')).toContain('2432902008176640000')
 		const label = state().target!.services.describeToken!('\tldr x0, =label', 11, inspection)
 		expect(label?.address).toBe(DATA_BASE)
+	})
+
+	it('turns floating point off and back on, swapping the examples', async () => {
+		await state().setTargetSetting('floatingPoint', false)
+		try {
+			expect(offered().floatingpoint).toBeUndefined()
+			expect(offered().mandelbrot.code).toMatch(/16\.16 fixed point/)
+			state().setCode('\tfmov d0, #1.0\n\thlt #0\n')
+			await state().run()
+			expect(state().diagnostics.map((diagnostic) => diagnostic.message).join()).toMatch(/floating point, which is off/)
+		} finally {
+			await state().setTargetSetting('floatingPoint', true)
+		}
+		expect(offered().mandelbrot.code).toMatch(/single precision/)
+		state().setCode('\tfmov d0, #1.0\n\thlt #0\n')
+		await state().run()
+		expect(state().diagnostics.filter((diagnostic) => diagnostic.severity === 'error')).toEqual([])
+		expect(state().registers['V0:hi']).toBe(0x3FF00000)
 	})
 
 	it('names a new file .s', () => {

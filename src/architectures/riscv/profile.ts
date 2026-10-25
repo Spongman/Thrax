@@ -1,6 +1,6 @@
 import { RGB32_LE } from '../../core/bitmapFormats'
-import type { MachineProfile, RegisterDescriptor } from '../contracts'
-import { ABI, DATA_BASE, MEMORY_BYTES, TEXT_BASE } from './isa'
+import { RegisterFormat, type MachineProfile, type RegisterDescriptor } from '../contracts'
+import { ABI, DATA_BASE, FABI, MEMORY_BYTES, TEXT_BASE } from './isa'
 export const REGISTERS: readonly RegisterDescriptor[] = [
 	...ABI.map((name, index) => ({
 		id: `x${index}`,
@@ -12,6 +12,26 @@ export const REGISTERS: readonly RegisterDescriptor[] = [
 		role: index === 1 ? ('link' as const) : index === 2 ? ('stackPointer' as const) : undefined
 	})),
 	{ id: 'PC', name: 'PC', bank: 'cpu', bits: 32, editable: true, role: 'programCounter' }
+]
+/**
+ * f0-f31 show their low word, which holds a single (NaN-boxed under D). With D
+ * each pairs with a high word `fN.hi`, so the double view reads all 64 bits.
+ */
+export const floatRegisters = (flen: number): RegisterDescriptor[] => [
+	...FABI.map((name, index) => ({
+		id: `f${index}`,
+		name: `f${index} (${name})`,
+		bank: 'fpu',
+		group: 'Floating Point',
+		bits: 32,
+		editable: true,
+		format: RegisterFormat.FLOAT,
+		aliases: [name],
+		pairsWith: flen === 64 ? `f${index}.hi` : undefined
+	})),
+	{ id: 'fcsr', name: 'fcsr', bank: 'fpu', group: 'Control and Status', bits: 8, editable: true },
+	{ id: 'frm', name: 'frm', bank: 'fpu', group: 'Control and Status', bits: 3, editable: true },
+	{ id: 'fflags', name: 'fflags', bank: 'fpu', group: 'Control and Status', bits: 5, editable: true }
 ]
 export const riscvProfile: MachineProfile = {
 	bitmap: RGB32_LE,

@@ -1,4 +1,4 @@
-import { a32Dependencies, a32LoadWrites } from '../../arm/a32/dependencies'
+import { a32Dependencies, a32LoadWrites } from '../shared/a32/dependencies'
 /**
  * A32 instruction metadata for the shared tools, under the ARMv8 profile.
  * The opaque instruction an observer is handed is the instruction word; what
@@ -6,11 +6,12 @@ import { a32Dependencies, a32LoadWrites } from '../../arm/a32/dependencies'
  * the AArch64 state's five-stage model.
  */
 
-import { A32_ALU, A32_BRANCH, A32_JUMP, A32_LOAD, A32_STORE, A32_SWI, classifyA32 } from '../../arm/a32/classify'
-import { disassembleA32 } from '../../arm/a32/disassemble'
-import { ARCH_V8, FORMAT_NAMES, FORMAT_UNDEFINED, REGISTER_NAMES } from '../../arm/a32/isa'
+import { A32_ALU, A32_BRANCH, A32_JUMP, A32_LOAD, A32_STORE, A32_SWI, classifyA32 } from '../shared/a32/classify'
+import { disassembleA32 } from '../shared/a32/disassemble'
+import { ARCH_V8, FORMAT_NAMES, FORMAT_UNDEFINED, REGISTER_NAMES } from '../shared/a32/isa'
 import { InstructionCategory, type HistoryRecord, type InstructionInfo, type InstructionSet } from '../../contracts'
 import { A64_PIPELINE } from '../a64/instructions'
+import { predicatedInstructions } from '../../../core/instructionEffects'
 
 const { ALU, BRANCH, JUMP, MEMORY, OTHER, TRAP } = InstructionCategory
 
@@ -36,6 +37,7 @@ function infoOf(word: number): InstructionInfo {
 		isLoad: (flags & A32_LOAD) !== 0,
 		isBranch: (flags & A32_BRANCH) !== 0,
 		isJump: (flags & A32_JUMP) !== 0,
+		controlResult: writes & (1 << 15) ? flags & A32_LOAD ? 'load' : 'alu' : undefined,
 	}
 }
 
@@ -54,15 +56,18 @@ export function describeWord(word: number): InstructionInfo {
 /** A history record that carries the word it ran. */
 export interface A32Executed extends HistoryRecord {
 	readonly word: number
+	readonly passed?: boolean
 }
+
+export const executedInstructions = predicatedInstructions(describeWord, [16])
 
 export const a32InstructionSet: InstructionSet = {
 	encodings: FORMAT_NAMES,
 	registerNames: [...REGISTER_NAMES, 'NZCV'],
 	pipeline: A64_PIPELINE,
-	describe: (instruction) => describeWord(instruction as number),
+	describe: executedInstructions.describe,
 	decodeExecuted(entry) {
-		const { kind, word } = entry as A32Executed
-		return kind === 'instruction' ? word : null
+		const { kind, word, passed = true } = entry as A32Executed
+		return kind === 'instruction' ? executedInstructions.executed(word, passed) : null
 	},
 }

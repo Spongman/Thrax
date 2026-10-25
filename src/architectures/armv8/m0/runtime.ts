@@ -1,12 +1,11 @@
+import { RamInspector } from '../../../core/ramInspector'
 import { REGISTER_IDS, describe } from './instructions'
-import { describeValueEffect, textChange } from '../../../core/historyView'
-import { parseIntegerInput, readCString } from '../../../core/console'
+import { snapshotEffects } from '../../../core/historyView'
+import { TeachingConsole, recordIntegerInput } from '../../../core/environments/teachingConsole'
 import { HistoryText } from '../../../core/historyCursor'
 import { notifyHistorySeek } from '../../../core/observer'
-import { editTransaction } from '../../../core/editTransaction'
-import { rewindHistoryTo } from '../../../core/historyCursor'
+import { capturedHistoryEdit } from '../../../core/editTransaction'
 import { MemoryEdits } from '../../../core/memoryEdits'
-import { historyNeighbour } from '../../../core/historyCursor'
 /** Thread-mode ARMv6-M teaching machine. Faults are atomic; NVIC/exception entry is not emulated. */
 import type { ExecutionObserver } from '../../../core/observer'
 import { ExecutionController } from '../../../core/executionController'
@@ -18,8 +17,8 @@ import {
 	shiftByImmediate,
 	shiftByRegister,
 	shifter,
-} from '../../arm/a32/alu'
-import { FLAG_C, FLAG_V, FLAG_N, FLAG_Z } from '../../arm/a32/isa'
+} from '../shared/a32/alu'
+import { FLAG_C, FLAG_V, FLAG_N, FLAG_Z } from '../shared/a32/isa'
 import type {
 	CallFrame,
 	DescribedEffect,
@@ -48,11 +47,19 @@ export class M0Runtime implements Machine {
 	readonly historyFormat: HistoryFormatter
 	onProgress: (() => void) | null = null
 	private cpuHalted = false
+	get stopReason() { return this.execution.reason(this.cpuHalted) }
 	get halted() { return this.cpuHalted || this.execution.stopped }
 	set halted(value: boolean) { this.cpuHalted = value }
 	paused = false
 	instructionCount = 0
 	console = ''
+	private readonly teachingConsole = new TeachingConsole({ integer: 1, character: 11, string: 4, exit: [0] }, {
+		argument: () => this.registers[0],
+		write: text => { this.console += text },
+		read: address => { this.range(address, 1); return this.memory[address - TEXT_BASE] },
+		stringLimit: () => this.memory.length,
+		halt: () => { this.halted = true },
+	})
 	private readonly outputText = new HistoryText()
 	private waiting = false
 	private disposed = false
@@ -71,6 +78,11 @@ export class M0Runtime implements Machine {
 		pacedAddresses: () => this.paced,
 		depth: () => this.callStack.length,
 		ready: () => !this.waiting || this.history.timeline.ahead,
+	})
+	private readonly historyCommands = this.execution.historyCommands({
+		history: () => this.history, cursor: () => this.historyCursor,
+		undo: () => !this.disposed && this.moveHistory(),
+		after: () => notifyHistorySeek(this.observers, this.instructionCount),
 	})
 
 	private readonly memoryEdits = new MemoryEdits({
@@ -214,14 +226,16 @@ export class M0Runtime implements Machine {
 		if (this.disposed) return
 		if (this.moveHistory(true)) return
 		if (this.halted || this.waiting) return
-		const i = this.instruction(),
-			address = this.pc
-		if (i.name === 'svc' && i.imm === 5) {
-			this.waiting = true
-			return
-		}
-		this.history.begin(this.saved(), (i.word | (i.second << 16)) >>> 0)
+		let captured = false
 		try {
+			const i = this.instruction(),
+				address = this.pc
+			if (i.name === 'svc' && i.imm === 5) {
+				this.waiting = true
+				return
+			}
+			this.history.begin(this.saved(), (i.word | (i.second << 16)) >>> 0)
+			captured = true
 			for (const o of this.observers) o.onInstruction?.(address, i, this.instructionCount)
 			this.pc += i.size
 			this.execute(i, address)
@@ -230,10 +244,13 @@ export class M0Runtime implements Machine {
 			this.instructionCount++
 			this.history.close()
 		} catch (error) {
-			this.history.close()
-			this.moveHistory()
-			this.history.timeline.branch()
-			notifyHistorySeek(this.observers, this.instructionCount)
+			if (captured) {
+				this.history.close()
+				this.moveHistory()
+				this.history.timeline.branch()
+				notifyHistorySeek(this.observers, this.instructionCount)
+			}
+			this.execution.recordFault(error)
 			throw error
 		}
 	}
@@ -435,30 +452,22 @@ export class M0Runtime implements Machine {
 	}
 	/** Teaching ABI: SVC 0 halt, 1 integer, 4 NUL string, 5 integer input, 11 character; R0 holds argument/result. */
 	private svc(service: number) {
-		const arg = this.registers[0]
-		if (service === 0) this.halted = true
-		else if (service === 1) this.console += String(arg)
-		else if (service === 11) this.console += String.fromCharCode(arg & 255)
-		else if (service === 4) {
-			this.console += readCString(arg >>> 0, this.memory.length, address => {
-				this.range(address, 1)
-				return this.memory[address - TEXT_BASE]
-			})
-		} else
+		if (!this.teachingConsole.dispatch(service))
 			throw new Error(`Unsupported teaching SVC #${service}; hardware exception delivery is not implemented`)
 	}
 	provideInput(text: string) {
 		if (!this.waiting || this.disposed) return false
-		const value = parseIntegerInput(text, 32)
-		if (value === null) return false
-		this.history.begin(this.saved(), 0xdf05)
-		for (const o of this.observers) o.onInstruction?.(this.pc, decode(0xdf05), this.instructionCount)
-		this.registers[0] = value
-		this.waiting = false
-		this.pc += 2
-		this.instructionCount++
-		this.history.close()
-		return true
+		return recordIntegerInput(text, 32, {
+			begin: () => { this.history.begin(this.saved(), 0xdf05) },
+			accept: value => {
+				for (const o of this.observers) o.onInstruction?.(this.pc, decode(0xdf05), this.instructionCount)
+				this.registers[0] = value
+				this.waiting = false
+				this.pc += 2
+				this.instructionCount++
+			},
+			close: () => { this.history.close() },
+		})
 	}
 	private formatHistory(entry: M0Record) {
 		try {
@@ -468,47 +477,12 @@ export class M0Runtime implements Machine {
 		}
 	}
 	private effects(id: number, applied: boolean): DescribedEffect[] {
-		const log = this.history.log,
-			index = log.indexOfId(id)
-		if (index < 0) return []
-		const pos = log.first + index,
-			slot = pos % log.entries.capacity,
-			c = log.entries.block(pos).buffers.columns,
-			neighbour = historyNeighbour(log, this.historyCursor, index),
-			next = neighbour?.columns,
-			nextSlot = neighbour?.slot ?? 0,
-			out: DescribedEffect[] = []
-		for (let n = 0; n < 21; n++) {
-			const before = c.registers[slot * 22 + n],
-				after = next ? next.registers[nextSlot * 22 + n] : this.registers[n]
-			if (before !== after) {
-				const value = before
-				out.push(describeValueEffect(applied, {
-					subject: REGISTER_IDS[n],
-					register: REGISTER_IDS[n],
-					value: value >>> 0
-				}, 32))
-			}
-		}
-		for (let p = log.effectStart(index); p < log.effectStart(index) + log.effectCount(index); p++) {
-			const e = log.effects.block(p).buffers.columns,
-				s = p % log.effects.capacity
-			out.push(describeValueEffect(applied, {
-				subject: `[0x${e.address[s].toString(16)}]`,
-				address: e.address[s],
-				value: e.value[s]
-			}, 32))
-		}
-		const beforeLength = c.outputLength[slot],
-			afterLength = next ? next.outputLength[nextSlot] : this.console.length
-		if (beforeLength !== afterLength)
-			out.push(describeValueEffect(applied, {
-				subject: 'console',
-				detail: textChange(this.history.timeline.ahead ? this.outputText.text : this.console, beforeLength, afterLength)
-			}, 32))
-		if (c.halted[slot] !== (next ? next.halted[nextSlot] : +this.cpuHalted))
-			out.push(describeValueEffect(applied, { subject: 'halted' }, 32))
-		return out
+		return snapshotEffects(this.history.log, this.historyCursor, id, applied, 32, effects => {
+			effects.registers('registers', 22, 0, 21, n => this.registers[n], (n, value) => ({ subject: REGISTER_IDS[n], register: REGISTER_IDS[n], value: value >>> 0 }))
+			effects.memory('address', 'value')
+			effects.text('outputLength', this.console.length, this.history.timeline.ahead ? this.outputText.text : this.console)
+			effects.halted(this.cpuHalted)
+		})
 	}
 	private runUntil(done: () => boolean) {
 		return this.execution.runUntil(done)
@@ -524,7 +498,7 @@ export class M0Runtime implements Machine {
 	}
 	async stepOver() {
 		if (this.halted || this.disposed) return
-		const i = this.instruction()
+		const i = this.execution.inspectInstruction(() => this.instruction())
 		if (i.name === 'bl' || i.name === 'blx') {
 			const next = this.pc + i.size
 			await this.execution.stepOver(next)
@@ -535,39 +509,26 @@ export class M0Runtime implements Machine {
 	}
 	pause() { this.execution.pause() }
 	stop() { this.execution.stop() }
-	stepBack() {
-		if (this.disposed || this.historyCursor <= 0) return false
-		this.pause()
-		const result = this.moveHistory()
-		if (result) {
-			this.execution.stopped = false
-			notifyHistorySeek(this.observers, this.instructionCount)
-		}
-		return result
+	stepBack(): boolean {
+		return this.historyCommands.stepBack()
 	}
 	rewindTo(id: number): boolean {
-		return rewindHistoryTo(this.history, () => this.historyCursor, id, () => this.moveHistory(), () => {
-			this.execution.stopped = false
-			this.pause()
-			notifyHistorySeek(this.observers, this.instructionCount)
-		})
+		return this.historyCommands.rewindTo(id)
 	}
-	private edit(change: () => void) {
-		if (this.disposed) return
-		editTransaction(() => {
+	private edit(change: () => void): boolean {
+		if (this.disposed) return false
+		return capturedHistoryEdit(() => {
 			change()
 			this.registers[this.registers[19] & 2 ? 18 : 17] = this.registers[13]
 		}, {
 			begin: () => this.history.begin(this.saved(), 0, true),
-			commit: () => { this.history.close() },
-			rollback: () => {
-				this.history.close()
-				this.moveHistory()
-				this.history.timeline.branch()
-			},
+			close: () => { this.history.close() },
+			undo: () => { this.moveHistory() },
+			branch: () => { this.history.timeline.branch() },
 		})
 	}
 	setProgramCounter(address: number) {
+		if (!this.execution.canEdit(address)) return
 		this.aligned(address, 2)
 		this.edit(() => {
 			this.pc = address
@@ -585,10 +546,9 @@ export class M0Runtime implements Machine {
 		return out
 	}
 	writeRegister(id: string, value: RegisterValue) {
+		if (!this.execution.canEdit(value)) return false
 		if (
-			this.disposed ||
 			typeof value !== 'number' ||
-			!Number.isInteger(value) ||
 			value < -2147483648 ||
 			value > 0xffffffff
 		)
@@ -603,41 +563,31 @@ export class M0Runtime implements Machine {
 			}
 			return true
 		}
-		this.edit(() => {
+		return this.edit(() => {
 			if (n === 16) this.flags = value
 			else if (n >= 17) this.writeSpecial(n === 17 ? 8 : n === 18 ? 9 : n === 19 ? 20 : 16, value)
 			else this.registers[n] = n === 13 ? value & ~3 : value
 		})
-		return true
 	}
 	inspectMemory(): MemoryInspector {
-		return {
-			wordBytes: 2,
-			littleEndian: true,
-			byte: (a) =>
-				Number.isInteger(a) && a >= TEXT_BASE && a < TEXT_BASE + this.memory.length
-					? this.memory[a - TEXT_BASE]
-					: undefined,
-			word: (a) => {
-				const at = (a - TEXT_BASE) & ~1
-				return a >= TEXT_BASE && at <= this.memory.length - 2 ? this.view.getUint16(at, true) : undefined
-			},
-		}
+		return new RamInspector(this.memory, { wordBytes: 2, littleEndian: true, base: TEXT_BASE })
 	}
+
 	writeByte(address: number, value: number) {
-		if (this.disposed || !Number.isInteger(value)) return false
+		if (!this.execution.canEdit(value) || !Number.isSafeInteger(address) || address < 0) return false
 		try {
 			this.range(address, 1)
 		} catch {
 			return false
 		}
-		this.edit(() => this.put(address, value))
-		return true
+		return this.edit(() => this.put(address, value))
 	}
 	insertByte(address: number, limit: number, value: number): boolean {
+		if (!this.execution.canEdit(value)) return false
 		return this.memoryEdits.insert(address, limit, value)
 	}
 	deleteByte(address: number, limit: number): boolean {
+		if (!this.execution.canEdit(address)) return false
 		return this.memoryEdits.delete(address, limit)
 	}
 	configure(o: { speed?: number | null; pacedAddresses?: ReadonlySet<number> | null }) {
@@ -668,10 +618,9 @@ export class M0Runtime implements Machine {
 	}
 	dispose() {
 		this.disposed = true
-		this.execution.dispose()
-		this.execution.running = false
-		this.onProgress = null
-		this.observers.length = 0
-		this.history.log.clear()
+		this.execution.dispose(() => {
+			this.observers.length = 0
+			this.history.log.clear()
+		})
 	}
 }

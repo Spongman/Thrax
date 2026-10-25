@@ -1,3 +1,4 @@
+import { maskAssemblyComments } from '../../../../core/assembly/text'
 /**
  * Source text as the parser reads it: comments blanked, then one logical line
  * at a time from a stack of files and macro expansions.
@@ -19,41 +20,7 @@ export interface LogicalLine {
  * line breaks stay where they were.  Quoted text is left alone.
  */
 export function stripComments(code: string): string {
-	let out = ''
-	let index = 0
-	while (index < code.length) {
-		const character = code[index]
-		if (character === '"') {
-			// A string is copied through to its closing quote or the end of the line.
-			let end = index + 1
-			while (end < code.length && code[end] !== '"' && code[end] !== '\n') end += code[end] === '\\' ? 2 : 1
-			end = Math.min(code[end] === '"' ? end + 1 : end, code.length)
-			out += code.slice(index, end)
-			index = end
-		} else if (character === '\'') {
-			// A character constant, whose closing quote GNU lets go.
-			let end = index + 1
-			if (code[end] === '\\') end++
-			end++
-			if (code[end] === '\'') end++
-			end = Math.min(end, code.length)
-			out += code.slice(index, end)
-			index = end
-		} else if (code.startsWith('//', index)) {
-			while (index < code.length && code[index] !== '\n') {
-				out += ' '
-				index++
-			}
-		} else if (code.startsWith('/*', index)) {
-			const close = code.indexOf('*/', index + 2)
-			const stop = close < 0 ? code.length : close + 2
-			for (; index < stop; index++) out += code[index] === '\n' ? '\n' : ' '
-		} else {
-			out += character
-			index++
-		}
-	}
-	return out
+	return maskAssemblyComments(code, { line: ['//'], block: ['/*', '*/'], singleQuotes: 'character' })
 }
 
 const NO_FRAMES: readonly ExpansionFrame[] = Object.freeze([])

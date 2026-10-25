@@ -107,7 +107,8 @@ export function historyNeighbour(log: HistoryLog, cursor: number, index: number)
 	const ahead = index >= cursor, neighbour = ahead ? index - 1 : index + 1
 	if (ahead ? index === cursor : neighbour === cursor) return null
 	const position = log.first + neighbour
-	return { columns: log.entries.block(position).buffers.columns, slot: position % log.entries.capacity }
+	const block = log.entries.block(position)
+	return { columns: block.buffers.columns, arrays: block.arrays, slot: position % log.entries.capacity }
 }
 
 /** Shared row selection: only rows behind the cursor move it; later rows survive. */

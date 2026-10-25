@@ -39,7 +39,7 @@ describe('UASM data tips', () => {
 		const sources = { value: (name: string) => name === 'VEC_KBD' ? 16 : undefined, macro: (name: string) => libraryMacros().get(name) ?? [] }
 		expect(tip('\t. = VEC_KBD', 'VEC_KBD', sources)?.contents[0]).toBe('**VEC_KBD**\n\n`0x00000010 (16, unsigned 16)`')
 		const cmove = tip('\tCMOVE(3, R2)', 'CMOVE', sources)
-		expect(cmove?.contents).toEqual(['**CMOVE** — (UASM macro)', 'Load a sign-extended 16-bit constant into RC.', 'Syntax: `CMOVE(CC,RC)`', '`.macro CMOVE(CC,RC) ADDC(R31,CC,RC)`'])
+		expect(cmove?.contents).toEqual(['**[CMOVE](https://ocw.mit.edu/courses/6-004-computation-structures-spring-2009/c1b18db634e4052b737b87e2021e4b12_MIT6_004s09_lab_beta_doc.pdf#page=14 "Open CMOVE in the manual")** — (UASM macro)', 'Load a sign-extended 16-bit constant into RC.', 'Syntax: `CMOVE(CC,RC)`', '`.macro CMOVE(CC,RC) ADDC(R31,CC,RC)`'])
 		expect(tip('\tBR(loop)', 'BR', sources)?.contents).toContain('Syntax: `BR(LABEL,RC)` · `BR(LABEL)`')
 	})
 
@@ -55,7 +55,7 @@ describe('UASM data tips', () => {
 	it('is what the gutter asks the services for', () => {
 		const services = definition.createServices()
 		expect(services.describeToken?.('ADDC(R1, 5, R3)', 6, state)?.register).toBe('R1')
-		expect(services.describeToken?.('ADDC(R1, 5, R3)', 1, state)?.contents[0]).toBe('**ADDC** — (UASM macro)')
+		expect(services.describeToken?.('ADDC(R1, 5, R3)', 1, state)?.contents[0]).toBe('**[ADDC](https://computationstructures.org/notes/isas/notes.html#TARGET_14.8.4 "Open ADDC in the manual")** — (UASM macro)')
 	})
 })
 

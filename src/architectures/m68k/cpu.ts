@@ -1,4 +1,4 @@
-import { parseIntegerInput, readCString } from '../../core/console'
+import { TeachingConsole, recordIntegerInput } from '../../core/environments/teachingConsole'
 import { HistoryText } from '../../core/historyCursor'
 import type { CallFrame } from '../contracts'
 import type { ExecutionObserver } from '../../core/observer'
@@ -6,14 +6,18 @@ import { decodeInstruction, type Decoded, type Operand } from './decode'
 import { M68kHistory, type SavedState } from './history'
 import { C, condition, mask, MEMORY_BYTES, N, sign, V, X, Z } from './isa'
 import type { CpuModel } from './settings'
+import { executeFpu, resetFpu } from './fpu'
+import { FP_WORDS, type Coprocessor } from './fpuIsa'
 
-interface Location {
+export interface Location {
 	kind: 'data' | 'address' | 'memory' | 'immediate'
 	index: number
 }
 /** CPU state is framework independent; the runtime supplies scheduling and debugger services. */
 export class M68kCpu {
 	readonly registers = new Int32Array(16)
+	/** FP0-FP7 in 96-bit layout, FPCR, FPSR and FPIAR; used only with a coprocessor. */
+	readonly fp = new Int32Array(FP_WORDS)
 	readonly memory = new Uint8Array(MEMORY_BYTES)
 	readonly view = new DataView(this.memory.buffer)
 	readonly callStack: CallFrame[] = []
@@ -32,15 +36,18 @@ export class M68kCpu {
 		count: 0,
 		sr: 0,
 		registers: this.registers,
+		fp: this.fp,
 		halted: false,
 		pending: false,
 		outputLength: 0
 	}
 	constructor(
 		readonly model: CpuModel,
-		historyLimit: number
+		historyLimit: number,
+		readonly coprocessor: Coprocessor = 'none'
 	) {
-		this.history = new M68kHistory(historyLimit)
+		this.history = new M68kHistory(historyLimit, coprocessor !== 'none')
+		if (coprocessor !== 'none') resetFpu(this.fp)
 		this.registers[15] = MEMORY_BYTES - 16
 	}
 	range(address: number, size: number, instruction = false) {
@@ -56,7 +63,8 @@ export class M68kCpu {
 				return this.view.getUint16(address, false)
 			},
 			this.pc,
-			this.model
+			this.model,
+			this.coprocessor !== 'none'
 		)
 	}
 	saved() {
@@ -95,7 +103,7 @@ export class M68kCpu {
 		this.history.memory(address, this.memory[address])
 		this.memory[address] = value & 255
 	}
-	private readMemory(address: number, size: number): number {
+	readMemory(address: number, size: number): number {
 		this.range(address, size)
 		const value =
 			size === 4
@@ -106,12 +114,12 @@ export class M68kCpu {
 		for (const observer of this.observers) observer.onMemoryRead?.(address, size)
 		return value
 	}
-	private writeMemory(address: number, value: number, size: number) {
+	writeMemory(address: number, value: number, size: number) {
 		this.range(address, size)
 		for (let i = 0; i < size; i++) this.putByte(address + i, value >>> ((size - i - 1) * 8))
 		for (const observer of this.observers) observer.onMemoryWrite?.(address, size, value)
 	}
-	private resolve(ea: Operand, size: number, control = false): Location {
+	resolve(ea: Operand, size: number, control = false): Location {
 		const { mode, reg, extension } = ea
 		if (control && (![2, 5, 6, 7].includes(mode) || (mode === 7 && reg > 3)))
 			throw new Error('Illegal control addressing mode')
@@ -143,14 +151,14 @@ export class M68kCpu {
 		else throw new Error('Illegal effective address')
 		return { kind: 'memory', index: address }
 	}
-	private read(location: Location, size: number) {
+	read(location: Location, size: number) {
 		return location.kind === 'memory'
 			? this.readMemory(location.index, size)
 			: location.kind === 'immediate'
 				? location.index
 				: (this.registers[location.index] & mask(size)) >>> 0
 	}
-	private write(location: Location, size: number, value: number) {
+	write(location: Location, size: number, value: number) {
 		if (location.kind === 'immediate') throw new Error('Immediate is not writable')
 		if (location.kind === 'memory') this.writeMemory(location.index, value, size)
 		else if (location.kind === 'address') this.registers[location.index] = size === 2 ? sign(value, 2) : value
@@ -230,6 +238,10 @@ export class M68kCpu {
 			next = this.pc + d.length,
 			oldPc = this.pc
 		this.pc = next
+		if (d.fpu) {
+			executeFpu(this, d, oldPc)
+			return
+		}
 		if (name === 'illegal') throw new Error('ILLEGAL instruction')
 		if (name === 'nop') return
 		if (name === 'bkpt') {
@@ -239,12 +251,7 @@ export class M68kCpu {
 		if (name === 'trap') {
 			if (d.value !== 15) throw new Error('Only educational TRAP #15 is supported')
 			const service = this.registers[0]
-			if (service === 9) this.halted = true
-			else if (service === 3) this.output += String(this.registers[1])
-			else if (service === 6) this.output += String.fromCharCode(this.registers[1] & 255)
-			else if (service === 14) {
-				this.output += readCString(this.registers[9] >>> 0, this.memory.length + 1, address => this.readMemory(address, 1))
-			} else throw new Error(`Unsupported TRAP #15 service ${service}`)
+			if (!this.teachingConsole.dispatch(service)) throw new Error(`Unsupported TRAP #15 service ${service}`)
 			return
 		}
 		if (name === 'bra' || name === 'bsr' || (name.startsWith('b') && d.condition !== undefined)) {
@@ -509,16 +516,29 @@ export class M68kCpu {
 	}
 	provideInput(input: string) {
 		if (!this.pending) return false
-		const value = parseIntegerInput(input, 32)
-		if (value === null) return false
-		const d = this.decode()
-		this.history.begin(this.saved(), d)
-		for (const observer of this.observers) observer.onInstruction?.(this.pc, d, this.count)
-		this.registers[1] = value
-		this.pending = false
-		this.pc += d.length
-		this.count++
-		this.history.log.close()
-		return true
+		let instruction: Decoded
+		return recordIntegerInput(input, 32, {
+			begin: () => {
+				instruction = this.decode()
+				this.history.begin(this.saved(), instruction)
+			},
+			accept: value => {
+				for (const observer of this.observers) observer.onInstruction?.(this.pc, instruction, this.count)
+				this.registers[1] = value
+				this.pending = false
+				this.pc += instruction.length
+				this.count++
+			},
+			close: () => { this.history.log.close() },
+		})
 	}
+	/** Keep this host adapter after the native state fields to preserve their layout. */
+	private readonly teachingConsole = new TeachingConsole({ integer: 3, character: 6, string: 14, exit: [9] }, {
+		argument: string => this.registers[string ? 9 : 1],
+		write: text => { this.output += text },
+		read: address => this.readMemory(address, 1),
+		stringLimit: () => this.memory.length + 1,
+		halt: () => { this.halted = true },
+	})
+
 }

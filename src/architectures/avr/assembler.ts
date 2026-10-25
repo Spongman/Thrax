@@ -1,3 +1,4 @@
+import { integerSyntax, expressionParser } from '../../core/assembly/frontend'
 import { resolveRelativeSource } from '../../core/assembly/sourceLines'
 import { integerArithmetic } from '../../core/assembly/integerArithmetic'
 import { splitOperands, stripAssemblyComment } from '../../core/assembly/text'
@@ -9,47 +10,17 @@ import {
 	type HookContext
 } from '../../core/assembly/assembler'
 import {
-	parseExpression,
 	Op,
 	type Expr,
 	type Arithmetic,
-	type ExpressionSyntax
 } from '../../core/assembly/expressions'
 import { expandSources } from '../../core/assembly/sources'
-import {
-	makeToken,
-	TokenCursor,
-	TokenKind as T,
-	type Position,
-	type Token
-} from '../../core/assembly/tokens'
+import type { Position } from '../../core/assembly/tokens'
 import { AssemblyError } from '../../core/diagnostics'
 import type { AssemblySources, Diagnostic } from '../contracts'
 import { BRANCH, FIXED, IMM, RR, SINGLE } from './isa'
 
-const syntax: ExpressionSyntax = {
-	binary: new Map([
-		['|', { op: Op.Or, precedence: 1 }],
-		['^', { op: Op.Xor, precedence: 2 }],
-		['&', { op: Op.And, precedence: 3 }],
-		['<<', { op: Op.Shl, precedence: 4 }],
-		['>>', { op: Op.Shr, precedence: 4 }],
-		['+', { op: Op.Add, precedence: 5 }],
-		['-', { op: Op.Sub, precedence: 5 }],
-		['*', { op: Op.Mul, precedence: 6 }],
-		['/', { op: Op.Div, precedence: 6 }]
-	]),
-	unary: new Map([
-		['-', Op.Neg],
-		['+', Op.Plus],
-		['~', Op.Not],
-		['lo8', 100],
-		['hi8', 101],
-		['low', 100],
-		['high', 101]
-	]),
-	dot: '.'
-}
+const syntax = integerSyntax(Op.Shr, false, [['lo8', 100], ['hi8', 101], ['low', 100], ['high', 101]])
 const arithmetic: Arithmetic = {
 	unary: (op, value) => op === 100 ? value & 255 : op === 101 ? (value >> 8) & 255 : integerArithmetic.unary(op, value),
 	binary: (op, a, b, at) => integerArithmetic.binary(op === Op.Shr ? Op.Sar : op, a, b, at),
@@ -57,34 +28,12 @@ const arithmetic: Arithmetic = {
 const number = (value: number): Expr => ({ kind: 0, value })
 const own = (object: object, key: string) => Object.prototype.hasOwnProperty.call(object, key)
 const withoutComment = (text: string) => stripAssemblyComment(text, [';']).trim()
-function expression(text: string, at: Position): Expr {
-	const tokens: Token[] = []
-	const re = /\s+|0x[\da-f]+|0b[01]+|\d+|'(?:[^'\\]|\\.)'|[A-Za-z_.$][\w.$]*|<<|>>|./gi
-	for (const match of text.matchAll(re)) {
-		const value = match[0]
-		if (/^\s+$/.test(value)) continue
-		const numeric = /^(?:\d|')/.test(value)
-		const unary = syntax.unary.has(value.toLowerCase())
-		const token = makeToken(
-			numeric ? T.Number : unary || !/^[A-Za-z_.$]/.test(value) ? T.Operator : T.Identifier,
-			unary ? value.toLowerCase() : value,
-			at.file,
-			at.line,
-			at.column + match.index!
-		)
-		if (numeric)
-			token.value = value.startsWith("'")
-				? value[1] === '\\'
-					? ({ n: 10, r: 13, t: 9 }[value[2]] ?? value.charCodeAt(2))
-					: value.charCodeAt(1)
-				: Number(value)
-		tokens.push(token)
-	}
-	const cursor = new TokenCursor(tokens)
-	const result = parseExpression(cursor, syntax)
-	if (!result || !cursor.atEnd()) throw new AssemblyError(`Invalid expression '${text}'`, at)
-	return result
-}
+const expression = expressionParser({
+	syntax, tokens: /\s+|0x[\da-f]+|0b[01]+|\d+|'(?:[^'\\]|\\.)'|[A-Za-z_.$][\w.$]*|<<|>>|./gi,
+	isNumber: part => /^(?:\d|')/.test(part),
+	number: part => part.startsWith("'") ? part[1] === '\\' ? ({ n: 10, r: 13, t: 9 }[part[2]] ?? part.charCodeAt(2)) : part.charCodeAt(1) : Number(part),
+	operator: part => syntax.unary.has(part.toLowerCase()) ? part.toLowerCase() : undefined,
+})
 const range = (value: number, lo: number, hi: number, at: Position) => {
 	if (!Number.isInteger(value) || value < lo || value > hi)
 		throw new AssemblyError(`Value ${value} is outside ${lo}..${hi}`, at)

@@ -1,6 +1,15 @@
 import { RGB32_BE } from '../../core/bitmapFormats'
 import type { MachineProfile, RegisterDescriptor } from '../contracts'
 import { DATA_BASE, MEMORY_BYTES, REGISTER_NAMES, TEXT_BASE } from './isa'
+import { DEFAULT_NAN } from './extended'
+
+export const FP_NAMES = Array.from({ length: 8 }, (_, i) => `FP${i}`)
+export const FP_CONTROL_NAMES = ['FPCR', 'FPSR', 'FPIAR']
+/** Extended registers show their exact 80 significant bits: sign, exponent, then the 64-bit mantissa. */
+export const fpuRegisters = (bank: string): RegisterDescriptor[] => [
+	...FP_NAMES.map((name) => ({ id: name, name, bank, group: 'Extended precision (exact 80-bit sign:exponent:mantissa)', bits: 80, editable: true })),
+	...FP_CONTROL_NAMES.map((name) => ({ id: name, name, bank, group: 'Control', bits: 32, editable: true }))
+]
 
 export const REGISTERS: readonly RegisterDescriptor[] = [
 	...REGISTER_NAMES.map((name, i) => ({
@@ -47,4 +56,14 @@ export const m68kProfile: MachineProfile = {
 		{ id: 'data', label: 'data / bitmap', start: DATA_BASE, end: MEMORY_BYTES - 1 }
 	],
 	isMappedAddress: (value) => Number.isInteger(value) && value >= 0 && value < MEMORY_BYTES
+}
+export const m68kFpuProfile: MachineProfile = {
+	...m68kProfile,
+	resetRegisters: {
+		...m68kProfile.resetRegisters,
+		...Object.fromEntries(FP_NAMES.map((name) => [name, DEFAULT_NAN])),
+		FPCR: 0,
+		FPSR: 0,
+		FPIAR: 0
+	}
 }

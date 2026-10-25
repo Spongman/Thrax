@@ -9,7 +9,7 @@ const program = new ImageProgram('main.s', null, [], { instructionBytes: 4 })
 const settings = {}, options = { speed: null, historyLimit: 1000 }
 const monaco = {} as typeof Monaco, host = {} as EditorHost
 function fixture() {
-	const machine = { dispose: vi.fn() } as unknown as Machine
+	const machine = { dispose: vi.fn(), stop: vi.fn() } as unknown as Machine
 	const backend = {
 		assemble: vi.fn(() => program), createMachine: vi.fn(() => machine),
 		profile: vi.fn(), disassembly: { row: () => '', at: () => null },
@@ -19,6 +19,83 @@ function fixture() {
 }
 
 describe('shared architecture resource ownership', () => {
+	it('releases execution, callbacks and inspection together, without releasing a replacement', () => {
+		const f = fixture()
+		let inspection: () => unknown = () => null
+		const released = vi.fn()
+		const services = createArchitectureServices(lifetime => { inspection = lifetime.program; lifetime.onRelease(released); return f.backend })
+		services.assemble({ files: [], entries: [] }, settings)
+		services.createMachine(program, settings, options)
+		const next = { stop: vi.fn(), dispose: vi.fn() } as unknown as Machine
+		f.backend.createMachine.mockReturnValueOnce(next)
+		services.createMachine(program, settings, options)
+		services.releaseMachine(f.machine)
+		expect(released).not.toHaveBeenCalled()
+		expect(next.dispose).not.toHaveBeenCalled()
+		expect(inspection()).toBe(program)
+		next.onProgress = vi.fn()
+		services.releaseMachine()
+		expect(released).toHaveBeenCalledOnce()
+		expect(next.onProgress).toBeNull()
+		expect(next.stop).toHaveBeenCalledOnce()
+		expect(next.dispose).toHaveBeenCalledOnce()
+		expect(inspection()).toBeNull()
+		services.releaseMachine()
+		services.dispose()
+		expect(next.dispose).toHaveBeenCalledOnce()
+	})
+
+	it('checks recorded variants before constructing or replacing a machine', () => {
+		const f = fixture()
+		const services = createArchitectureServices(() => f.backend, { variant: settings => String(settings.variant) })
+		const sources = { files: [], entries: [] }
+		services.assemble(sources, { variant: 'nmos' })
+		services.createMachine(program, { variant: 'nmos' }, options)
+		expect(() => services.createMachine(program, { variant: 'cmos' }, options)).toThrow('assembled for nmos cannot run as cmos')
+		expect(f.backend.createMachine).toHaveBeenCalledOnce()
+		expect(f.machine.dispose).not.toHaveBeenCalled()
+		services.dispose()
+	})
+
+	it('rejects assembly errors before loading or disposing the current machine', () => {
+		const f = fixture()
+		f.services.createMachine(program, settings, options)
+		const invalid = new ImageProgram('bad.s', null, [{ severity: 'error', message: 'bad instruction' }], { instructionBytes: 4 })
+		expect(() => f.services.createMachine(invalid, settings, options)).toThrow('assembly errors')
+		expect(f.backend.createMachine).toHaveBeenCalledOnce()
+		expect(f.machine.dispose).not.toHaveBeenCalled()
+		f.services.dispose()
+	})
+
+	it('pins inspection to the loaded program across successful and failed validation attempts', () => {
+		const f = fixture()
+		let inspection: () => unknown = () => null
+		const services = createArchitectureServices(lifetime => {
+			inspection = lifetime.program
+			return f.backend
+		})
+		expect(inspection()).toBeNull()
+		services.assemble({ files: [], entries: [] }, settings)
+		expect(inspection()).toBe(program)
+		services.createMachine(program, settings, options)
+		const preview = new ImageProgram('preview.s', null, [], { instructionBytes: 4 })
+		f.backend.assemble.mockReturnValueOnce(preview)
+		services.assemble({ files: [], entries: [] }, settings)
+		expect(inspection()).toBe(program)
+		const invalid = new ImageProgram('bad.s', null, [{ severity: 'error', message: 'invalid' }], { instructionBytes: 4 })
+		f.backend.assemble.mockReturnValueOnce(invalid)
+		services.assemble({ files: [], entries: [] }, settings)
+		expect(inspection()).toBe(program)
+		f.backend.createMachine.mockImplementationOnce(() => { throw new Error('load failed') })
+		expect(() => services.createMachine(preview, settings, options)).toThrow('load failed')
+		expect(inspection()).toBe(program)
+		f.backend.createMachine.mockReturnValueOnce({ dispose: vi.fn(), stop: vi.fn() } as unknown as Machine)
+		services.createMachine(preview, settings, options)
+		expect(inspection()).toBe(preview)
+		services.dispose()
+		expect(inspection()).toBeNull()
+	})
+
 	it('keeps the current machine when constructing its replacement fails', () => {
 		const f = fixture()
 		f.services.createMachine(program, settings, options)
@@ -30,7 +107,7 @@ describe('shared architecture resource ownership', () => {
 	})
 
 	it('disposes a replaced machine and releases manually closed providers only once', async () => {
-		const f = fixture(), next = { dispose: vi.fn() } as unknown as Machine
+		const f = fixture(), next = { dispose: vi.fn(), stop: vi.fn() } as unknown as Machine
 		f.services.createMachine(program, settings, options)
 		f.backend.createMachine.mockReturnValueOnce(next)
 		f.services.createMachine(program, settings, options)

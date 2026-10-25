@@ -8,10 +8,18 @@
  */
 
 import { architectureManifests } from '../architectures/registry'
+import { cleanExampleSource, type ExampleSource } from '../core/exampleCatalog'
 
 export interface WorkspaceFile {
 	title: string
 	code: string
+	/** An unchanged bundled example can follow CPU choices after a workspace reload. */
+	example?: ExampleSource
+}
+
+function copyWorkspaceFile(file: WorkspaceFile): WorkspaceFile {
+	const example = cleanExampleSource(file.example, file.code)
+	return { title: file.title, code: file.code, ...(example ? { example } : {}) }
 }
 
 export interface WorkspaceSnapshot {
@@ -52,8 +60,8 @@ export function isSourceName(name: string): boolean {
 }
 
 /** The extension a new file takes under an architecture. */
-export function newFileExtension(definition?: { fileExtensions?: readonly string[] }): string {
-	return definition?.fileExtensions?.[0] ?? '.asm'
+export function newFileExtension(definition?: { fileExtensions?: readonly string[] }, variant?: { fileExtensions?: readonly string[] } | null): string {
+	return variant?.fileExtensions?.[0] ?? definition?.fileExtensions?.[0] ?? '.asm'
 }
 
 /** The last segment of a path or URL, or `fallback` when there is none. */
@@ -70,7 +78,7 @@ export function toWorkspaceDocument(snapshot: WorkspaceSnapshot): WorkspaceDocum
 		active: snapshot.active,
 		assembleAll: snapshot.assembleAll,
 		architecture: snapshot.architecture,
-		files: snapshot.files.map(({ title, code }) => ({ title, code })),
+		files: snapshot.files.map(copyWorkspaceFile),
 	}
 }
 
@@ -90,7 +98,7 @@ export function fromWorkspaceDocument(value: unknown): WorkspaceSnapshot | null 
 		? document.active
 		: undefined
 	const architecture = typeof document.architecture === 'string' && document.architecture ? document.architecture : DEFAULT_ARCHITECTURE
-	return { files: document.files.map(({ title, code }) => ({ title, code })), active, assembleAll: document.assembleAll === true, architecture }
+	return { files: document.files.map(copyWorkspaceFile), active, assembleAll: document.assembleAll === true, architecture }
 }
 
 /**

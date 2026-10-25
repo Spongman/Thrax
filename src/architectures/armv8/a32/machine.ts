@@ -17,7 +17,8 @@ import { deltaHistoryEdit } from '../../../core/editTransaction'
  * out as for the AArch64 state (see ../a64/layout.ts).
  */
 
-import { conditionPassed } from '../../arm/a32/alu'
+import { conditionPassed } from '../shared/a32/alu'
+import { FPSCR_WRITABLE } from '../shared/a32/vfp'
 import type { ProgramImage } from '../../contracts'
 import { DATA_BASE, MMIO_BASE, TEXT_BASE } from '../a64/layout'
 import { PolledTerminal } from '../../../core/devices/polledTerminal'
@@ -74,6 +75,8 @@ export interface A32MachineOptions {
 	memoryBytes: number
 	/** Entries of history to keep; 0 for none. */
 	historyLimit?: number
+	/** VFP on; on when absent. */
+	floatingPoint?: boolean
 }
 
 /** The end of the image's data, rounded up to 16: where the program break starts. */
@@ -103,7 +106,7 @@ export class A32Machine {
 	instructionCount = 0
 
 	constructor(options: A32MachineOptions) {
-		this.cpu = new A32Cpu({ base: TEXT_BASE, bytes: options.memoryBytes })
+		this.cpu = new A32Cpu({ base: TEXT_BASE, bytes: options.memoryBytes, floatingPoint: options.floatingPoint })
 		this.cpu.supervisor = this.linux
 		this.cpu.device = this.keyboard
 		const limit = options.historyLimit ?? 0
@@ -172,6 +175,17 @@ export class A32Machine {
 	/** The CPSR as a user may set it: the flags, Q and GE; the mode stays USR. */
 	editCpsr(value: number): boolean {
 		return this.edit(() => this.cpu.setCpsr((this.cpu.cpsr & 0x07F0FFFF) | (value & 0xF80F0000)))
+	}
+
+	/** A user's change to S0-S31, as raw bits. */
+	editSingle(index: number, bits: number): boolean {
+		if (!(index >= 0 && index < 32)) return false
+		return this.edit(() => this.cpu.writeSingle(index, bits >>> 0))
+	}
+
+	/** FPSCR as VMSR may set it. */
+	editFpscr(value: number): boolean {
+		return this.edit(() => this.cpu.setFpscr((this.cpu.fpscr & ~FPSCR_WRITABLE) | (value & FPSCR_WRITABLE)))
 	}
 
 	/** Moves the PC by hand; leaves halt, so the program can carry on from there. */

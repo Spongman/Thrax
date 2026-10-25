@@ -100,4 +100,11 @@ describe('UASM goto-definition', () => {
 		expect(found.file).toBe(betaLibrary.name)
 		expect(betaLibrary.code.split('\n')[found.line - 1]).toMatch(/^\.macro ADDC\(/)
 	})
+
+	it('keeps quoted comment markers and columns when skipping multiline comments', () => {
+		const file = { name: 'quoted.uasm', code: '.ascii "/*"\n/* hidden:\n*/  target: // trailing\n' }
+		expect(findUasmDefinition([file], 'target')).toEqual({ file: file.name, line: 3, column: 5, endColumn: 11 })
+		expect(findUasmDefinition([file], 'hidden')).toBeNull()
+		expect(findUasmDefinition([{ name: 'other.uasm', code: 'target:' }], 'target')).toMatchObject({ line: 1, column: 1 })
+	})
 })

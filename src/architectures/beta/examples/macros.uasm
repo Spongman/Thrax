@@ -1,0 +1,88 @@
+// Macros
+// Define once, use many times: macros expand in place, so a use costs no call and return.
+
+.include "beta.uasm"
+.options tty
+
+FIRST = 5                   // symbols name constants, like .eqv
+SECOND = 3
+
+.macro PRINT(TEXT) {
+	CMOVE(TEXT, R1)
+	PUSH(R1)
+	CALL(print_string, 1)
+}
+
+// Labels inside a { } body are local to each expansion, so "again" can be reused.
+.macro COUNT_TO(LIMIT) {
+	CMOVE(0, R1)
+again:
+	ADDC(R1, 1, R1)
+	PUSH(R1)
+	CALL(print_decimal, 1)
+	CMPEQ(R1, LIMIT, R2)
+	BF(R2, again)
+}
+
+.macro DONE() HALT()
+
+	CMOVE(stack, SP)
+	PRINT(banner)
+
+	CMOVE(FIRST, R9)
+	COUNT_TO(R9)
+	PRINT(newline)
+
+	CMOVE(SECOND, R9)
+	COUNT_TO(R9)
+	PRINT(newline)
+
+	DONE()
+
+banner: .text "counting: "
+newline: .text "\n"
+
+// print_string(s): write the zero-terminated string at address s.
+print_string:
+	PUSH(LP) PUSH(BP)
+	MOVE(SP, BP)
+	PUSH(R0) PUSH(R1) PUSH(R2) PUSH(R3)
+	LD(BP, -12, R1)         // R1 <- address of the next character
+ps_next:
+	ANDC(R1, -4, R3)        // loads are whole words, so fetch the word holding it
+	LD(R3, 0, R0)
+	ANDC(R1, 3, R2)         // and shift its byte down; words are little-endian
+	SHLC(R2, 3, R2)
+	SHR(R0, R2, R0)
+	ANDC(R0, 0xFF, R0)
+	BEQ(R0, ps_done)        // stop at the terminating zero
+	WRCHAR()
+	ADDC(R1, 1, R1)
+	BR(ps_next)
+ps_done:
+	POP(R3) POP(R2) POP(R1) POP(R0)
+	MOVE(BP, SP)
+	POP(BP) POP(LP)
+	RTN()
+
+// print_decimal(n): write n >= 0 in decimal, leading digits first.
+print_decimal:
+	PUSH(LP) PUSH(BP)
+	MOVE(SP, BP)
+	PUSH(R0) PUSH(R1)
+	LD(BP, -12, R1)         // R1 <- n
+	DIVC(R1, 10, R0)        // R0 <- n / 10, the leading digits
+	BEQ(R0, pd_digit)
+	PUSH(R0)
+	CALL(print_decimal, 1)
+pd_digit:
+	MULC(R0, 10, R0)        // R0 <- n % 10, the last digit
+	SUB(R1, R0, R0)
+	ADDC(R0, '0', R0)
+	WRCHAR()
+	POP(R1) POP(R0)
+	MOVE(BP, SP)
+	POP(BP) POP(LP)
+	RTN()
+
+stack: STORAGE(64)

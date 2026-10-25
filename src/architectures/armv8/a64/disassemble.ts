@@ -7,8 +7,10 @@ import { formatWord } from '../../../core/format'
 import {
 	ACCESS_SIGNED32, ACCESS_SIGNED64, ACCESS_STORE, decode, DP1_CLS, DP1_CLZ, DP1_RBIT, DP1_REV, DP1_REV16, DP1_REV32,
 	DP2_ASRV, DP2_LSLV, DP2_LSRV, DP2_RORV, DP2_SDIV, DP2_UDIV, DP3_MADD, DP3_MSUB, DP3_SMADDL, DP3_SMSUBL, DP3_SMULH, DP3_UMADDL, DP3_UMSUBL,
-	MODE_POST, MODE_PRE, MODE_REGISTER, MODE_UNSCALED, Op, type A64Instruction,
+	FPI_FCVTAS, FPI_FCVTAU, FPI_FMOV_FROM, FPI_FMOV_TO, FPI_SCVTF, FPI_UCVTF, MODE_POST, MODE_PRE, MODE_REGISTER, MODE_UNSCALED, Op, SYSREG_NAMES,
+	type A64Instruction,
 } from './decode'
+import { DOUBLE, formatFloat, SINGLE } from '../shared/fp'
 import { CONDITIONS, encodeMoveWide, EXTEND_UXTW, EXTEND_UXTX, EXTENDS, MASK32, MASK64, R_ZR, SHIFTS } from './isa'
 
 /** X or W register `n`; 31 is the stack pointer where `sp` says so, else the zero register. */
@@ -193,17 +195,58 @@ function address(d: A64Instruction): string {
 	}
 }
 
+/** SIMD&FP register `n` of `size` bytes: b, h, s, d or q. */
+export function fpRegisterName(n: number, size: number): string {
+	return `${({ 1: 'b', 2: 'h', 4: 's', 8: 'd', 16: 'q' } as Record<number, string>)[size]}${n}`
+}
+
 /** Whether a load or store names an X register: a doubleword, or a sign extension to 64 bits. */
 export const namesX = (d: A64Instruction) => d.size === 8 || d.access === ACCESS_SIGNED64
 
 function loadStore(d: A64Instruction): string {
+	if (d.fp) return `${d.access === ACCESS_STORE ? 'st' : 'ld'}${d.mode === MODE_UNSCALED ? 'u' : ''}r ${fpRegisterName(d.rd, d.size)}, ${address(d)}`
 	return `${loadStoreMnemonic(d)} ${registerName(d.rd, namesX(d))}, ${address(d)}`
 }
 
 function loadStorePair(d: A64Instruction): string {
 	const mnemonic = d.access === ACCESS_STORE ? 'stp' : d.access === ACCESS_SIGNED64 ? 'ldpsw' : 'ldp'
+	if (d.fp) return `${mnemonic} ${fpRegisterName(d.rd, d.size)}, ${fpRegisterName(d.ra, d.size)}, ${address(d)}`
 	const x = namesX(d)
 	return `${mnemonic} ${registerName(d.rd, x)}, ${registerName(d.ra, x)}, ${address(d)}`
+}
+
+const FP1_NAMES: readonly string[] = ['fmov', 'fabs', 'fneg', 'fsqrt', 'fcvt', 'fcvt', '', '', 'frintn', 'frintp', 'frintm', 'frintz', 'frinta', '', 'frintx', 'frinti']
+const FP2_NAMES: readonly string[] = ['fmul', 'fdiv', 'fadd', 'fsub', 'fmax', 'fmin', 'fmaxnm', 'fminnm', 'fnmul']
+const FP3_NAMES: readonly string[] = ['fmadd', 'fmsub', 'fnmadd', 'fnmsub']
+const ROUNDING_LETTERS = 'npmz'
+
+/** The scalar floating-point instructions. */
+function float(d: A64Instruction): string {
+	const { rd, rn, rm, size } = d
+	const f = (n: number, bytes = size) => fpRegisterName(n, bytes)
+	switch (d.op) {
+		case Op.FP_DP1: {
+			if (d.opc === 4) return `fcvt ${f(rd, 4)}, ${f(rn, 8)}`
+			if (d.opc === 5) return `fcvt ${f(rd, 8)}, ${f(rn, 4)}`
+			return `${FP1_NAMES[d.opc]} ${f(rd)}, ${f(rn)}`
+		}
+		case Op.FP_DP2: return `${FP2_NAMES[d.opc]} ${f(rd)}, ${f(rn)}, ${f(rm)}`
+		case Op.FP_DP3: return `${FP3_NAMES[d.opc]} ${f(rd)}, ${f(rn)}, ${f(rm)}, ${f(d.ra)}`
+		case Op.FP_CMP: return `fcmp${d.opc & 2 ? 'e' : ''} ${f(rn)}, ${d.opc & 1 ? '#0.0' : f(rm)}`
+		case Op.FP_CCMP: return `fccmp${d.opc ? 'e' : ''} ${f(rn)}, ${f(rm)}, #${d.imm}, ${CONDITIONS[d.cond]}`
+		case Op.FP_CSEL: return `fcsel ${f(rd)}, ${f(rn)}, ${f(rm)}, ${CONDITIONS[d.cond]}`
+		case Op.FP_IMM: return `fmov ${f(rd)}, #${formatFloat(d.imm, size === 8 ? DOUBLE : SINGLE)}`
+	}
+	// FP_INT and FP_FIXED.
+	const general = (n: number) => registerName(n, d.sf)
+	const fraction = d.op === Op.FP_FIXED ? `, #${d.amount}` : ''
+	switch (d.opc) {
+		case FPI_SCVTF: case FPI_UCVTF: return `${d.opc === FPI_SCVTF ? 's' : 'u'}cvtf ${f(rd)}, ${general(rn)}${fraction}`
+		case FPI_FMOV_TO: return `fmov ${general(rd)}, ${f(rn)}`
+		case FPI_FMOV_FROM: return `fmov ${f(rd)}, ${general(rn)}`
+		case FPI_FCVTAS: case FPI_FCVTAU: return `fcvta${d.opc === FPI_FCVTAU ? 'u' : 's'} ${general(rd)}, ${f(rn)}`
+	}
+	return `fcvt${ROUNDING_LETTERS[d.shift]}${d.opc & 1 ? 'u' : 's'} ${general(rd)}, ${f(rn)}${fraction}`
 }
 
 /** One instruction word at `address`, as assembly. */
@@ -247,10 +290,15 @@ export function disassemble(word: number, address: number): string {
 		case Op.DP1: return `${DP1_NAMES[d.opc]} ${registerName(d.rd, d.sf)}, ${registerName(d.rn, d.sf)}`
 		case Op.LOAD_STORE: return loadStore(d)
 		case Op.LOAD_LITERAL: {
+			if (d.fp) return `ldr ${fpRegisterName(d.rd, d.size)}, ${target(address, d.imm)}`
 			const mnemonic = d.access === ACCESS_SIGNED64 ? 'ldrsw' : 'ldr'
 			return `${mnemonic} ${registerName(d.rd, d.sf)}, ${target(address, d.imm)}`
 		}
 		case Op.LOAD_STORE_PAIR: return loadStorePair(d)
+		case Op.MRS: return `mrs ${registerName(d.rd, true)}, ${SYSREG_NAMES[Number(d.imm)]}`
+		case Op.MSR: return `msr ${SYSREG_NAMES[Number(d.imm)]}, ${registerName(d.rd, true)}`
+		case Op.FP_DP1: case Op.FP_DP2: case Op.FP_DP3: case Op.FP_CMP: case Op.FP_CCMP: case Op.FP_CSEL: case Op.FP_IMM: case Op.FP_INT: case Op.FP_FIXED:
+			return float(d)
 	}
 	return `.inst ${formatWord(word >>> 0)}`
 }

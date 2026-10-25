@@ -1,5 +1,5 @@
+import { RamInspector } from '../../core/ramInspector'
 import { notifyHistorySeek } from '../../core/observer'
-import { rewindHistoryTo } from '../../core/historyCursor'
 /**
  * A Z80Machine behind the neutral machine contract: the run loop, breakpoints,
  * pacing, observers and user edits the debugger drives.
@@ -21,19 +21,10 @@ const READ_INPUT: PendingInput = Object.freeze({ type: 'string', prompt: 'The pr
 /** A program polling the keyboard, or taking its interrupts, can be typed to while it runs. */
 const KEYBOARD_INPUT: PendingInput = Object.freeze({ type: 'string', prompt: 'Type to send the program characters' })
 
-/** Debugger reads of the 64 KiB memory; nothing here reaches a device or records. */
-export class Z80Memory implements MemoryInspector {
-	readonly wordBytes = 1
-	readonly littleEndian = true
-
-	constructor(private readonly bytes: Uint8Array) {}
-
-	byte(address: number): number | undefined {
-		return address >= 0 && address < this.bytes.length ? this.bytes[address] : undefined
-	}
-
-	word(address: number): number | undefined {
-		return this.byte(address)
+/** The Z80 debugger reads RAM directly, without accessing devices. */
+export class Z80Memory extends RamInspector {
+	constructor(bytes: Uint8Array) {
+		super(bytes, { wordBytes: 1, littleEndian: true })
 	}
 }
 
@@ -61,6 +52,11 @@ export class Z80Runtime implements Machine {
 		step: () => (() => { const status = this.advance(); return status === STEP_WAIT ? ExecutionStep.WAIT : status === STEP_INTERRUPT ? ExecutionStep.HIDDEN : ExecutionStep.ADVANCED })(),
 		breakpointEnabled: () => !this.machine.cpu.halted,
 	})
+	private readonly historyCommands = this.execution.historyCommands({
+		history: () => this.history, cursor: () => this.historyCursor,
+		undo: () => this.machine.history?.stepBack() ?? false,
+		after: () => this.resumed(),
+	})
 
 	private readonly memoryEdits = new MemoryEdits({
 		region: () => ({ start: 0, end: this.machine.cpu.memory.length - 1 }),
@@ -86,6 +82,7 @@ export class Z80Runtime implements Machine {
 	}
 
 	get pc() { return this.machine.cpu.pc }
+	get stopReason() { return this.execution.reason(this.machine.halted) }
 	get halted() { return this.machine.halted || this.execution.stopped }
 	get instructionCount() { return this.machine.instructionCount }
 	get historyCursor() { return this.machine.history?.timeline.index ?? 0 }
@@ -121,39 +118,44 @@ export class Z80Runtime implements Machine {
 
 	/** One step, told to the observers when they are listening; returns the STEP_* code. */
 	private advance(): number {
-		if (this.machine.history?.stepForward()) {
-			this.seekObservers()
-			return STEP_OK
-		}
-		const machine = this.machine
-		const cpu = machine.cpu
-		const observers = this.observers
-		if (observers.length === 0 || cpu.halted) return machine.step()
-		const address = cpu.pc
-		const packed = packInstruction(this.atPc, instructionLength(this.atPc))
-		const flags = classify(this.atPc)
-		const fallThrough = (address + instructionLength(this.atPc)) & 0xFFFF
-		const target = flags & Z80_CONDITIONAL ? branchTarget(this.atPc, fallThrough, cpu.memory, cpu.sp) : 0
-		const count = machine.instructionCount
-		cpu.observer = {
-			read: (at) => { for (const observer of observers) observer.onMemoryRead?.(at, 1) },
-			write: (at, value) => { for (const observer of observers) observer.onMemoryWrite?.(at, 1, value) },
-		}
-		let status: number
 		try {
-			// The instruction is announced first; an interrupt in its place is not.
-			if (!machine.nmiPending && !(cpu.interruptible && (machine.console.pending & machine.console.control))) {
-				for (const observer of observers) observer.onInstruction?.(address, packed, count)
+			if (this.machine.history?.stepForward()) {
+				this.seekObservers()
+				return STEP_OK
 			}
-			status = machine.step()
-		} finally {
-			cpu.observer = null
+			const machine = this.machine
+			const cpu = machine.cpu
+			const observers = this.observers
+			if (observers.length === 0 || cpu.halted) return machine.step()
+			const address = cpu.pc
+			const packed = packInstruction(this.atPc, instructionLength(this.atPc))
+			const flags = classify(this.atPc)
+			const fallThrough = (address + instructionLength(this.atPc)) & 0xFFFF
+			const target = flags & Z80_CONDITIONAL ? branchTarget(this.atPc, fallThrough, cpu.memory, cpu.sp) : 0
+			const count = machine.instructionCount
+			cpu.observer = {
+				read: (at) => { for (const observer of observers) observer.onMemoryRead?.(at, 1) },
+				write: (at, value) => { for (const observer of observers) observer.onMemoryWrite?.(at, 1, value) },
+			}
+			let status: number
+			try {
+				// The instruction is announced first; an interrupt in its place is not.
+				if (!machine.nmiPending && !(cpu.interruptible && (machine.console.pending & machine.console.control))) {
+					for (const observer of observers) observer.onInstruction?.(address, packed, count)
+				}
+				status = machine.step()
+			} finally {
+				cpu.observer = null
+			}
+			if (status === STEP_OK && (flags & Z80_CONDITIONAL)) {
+				const taken = cpu.pc !== fallThrough
+				for (const observer of observers) observer.onBranch?.(address, taken, target)
+			}
+			return status
+		} catch (error) {
+			this.execution.recordFault(error)
+			throw error
 		}
-		if (status === STEP_OK && (flags & Z80_CONDITIONAL)) {
-			const taken = cpu.pc !== fallThrough
-			for (const observer of observers) observer.onBranch?.(address, taken, target)
-		}
-		return status
 	}
 
 	private seekObservers() {
@@ -194,25 +196,19 @@ export class Z80Runtime implements Machine {
 	pause() { this.execution.pause() }
 	stop() { this.execution.stop() }
 	stepBack(): boolean {
-		const log = this.machine.history
-		if (!log || !log.stepBack()) return false
-		this.resumed()
-		return true
+		return this.historyCommands.stepBack()
 	}
 
 	rewindTo(id: number): boolean {
-		const log = this.machine.history
-		return !!log && rewindHistoryTo(this.history, () => this.historyCursor, id, () => log.stepBack(), () => this.resumed())
+		return this.historyCommands.rewindTo(id)
 	}
 
 	private resumed() {
-		this.execution.stopped = false
-		this.paused = true
-		this.execution.running = false
 		this.seekObservers()
 	}
 
 	setProgramCounter(address: number) {
+		if (!this.execution.canEdit(address)) return
 		this.writeRegister('PC', address)
 	}
 
@@ -240,6 +236,7 @@ export class Z80Runtime implements Machine {
 	}
 
 	writeRegister(id: string, value: number): boolean {
+		if (typeof value !== 'number' || !this.execution.canEdit(value)) return false
 		const field = REGISTER_FIELDS[id]
 		if (!field) return false
 		const { slot, shift, mask } = field
@@ -254,15 +251,18 @@ export class Z80Runtime implements Machine {
 	}
 
 	writeByte(address: number, value: number) {
+		if (!this.execution.canEdit(value) || !Number.isSafeInteger(address) || address < 0) return false
 		return this.machine.editBytes(address, [value])
 	}
 
 	/** Shifts `[address, limit]` up a byte; what is past the last non-zero byte stays. */
 	insertByte(address: number, limit: number, value: number): boolean {
+		if (!this.execution.canEdit(value)) return false
 		return this.memoryEdits.insert(address, limit, value)
 	}
 
 	deleteByte(address: number, limit: number): boolean {
+		if (!this.execution.canEdit(address)) return false
 		return this.memoryEdits.delete(address, limit)
 	}
 
@@ -271,7 +271,6 @@ export class Z80Runtime implements Machine {
 	}
 
 	dispose() {
-		this.onProgress = null
 		this.stop()
 		this.execution.dispose()
 	}

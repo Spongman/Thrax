@@ -24,6 +24,15 @@ export const HISTORY_SCHEMA = {
 		{ name: 'value', type: 'u8', elements: 1 }
 	]
 } as const
+/** F and D add the float file as low/high word pairs, and fcsr. */
+export const FLOAT_HISTORY_SCHEMA = {
+	entry: [
+		...HISTORY_SCHEMA.entry,
+		{ name: 'fregs', type: 'i32', elements: 64 },
+		{ name: 'fcsr', type: 'u8', elements: 1 }
+	],
+	effect: HISTORY_SCHEMA.effect
+} as const
 export interface RiscvRecord extends HistoryRecord {
 	word: number
 }
@@ -36,12 +45,16 @@ export interface SavedState {
 	frameAction?: number
 	frame?: CallFrame
 	pending: boolean
+	fregs?: Int32Array
+	fcsr?: number
 }
 export class RiscvHistory implements MachineHistory {
-	readonly log = new HistoryLog(new HistoryBufferLayout(HISTORY_SCHEMA))
-	readonly timeline = new HistoryCursor(this.log)
+	readonly log: HistoryLog
+	readonly timeline: HistoryCursor
 	private nextId = 0
-	constructor(limit: number) {
+	constructor(limit: number, readonly float = false) {
+		this.log = new HistoryLog(new HistoryBufferLayout(float ? FLOAT_HISTORY_SCHEMA : HISTORY_SCHEMA))
+		this.timeline = new HistoryCursor(this.log)
 		this.log.limit = limit
 	}
 	get retention() { return this.log.retention }
@@ -63,6 +76,10 @@ export class RiscvHistory implements MachineHistory {
 		c.outputLength[slot] = state.outputLength
 		c.pending[slot] = +state.pending
 		c.frameAction[slot] = 0
+		if (this.float) {
+			c.fregs.set(state.fregs!, slot * 64)
+			c.fcsr[slot] = state.fcsr!
+		}
 	}
 	frame(push: boolean, popped?: CallFrame) {
 		if (this.log.openEntry < 0) return
@@ -105,16 +122,18 @@ export class RiscvHistory implements MachineHistory {
 	}
 	undo(restore: (state: SavedState) => void, write: (address: number, value: number) => number, state: SavedState, frames: CallFrame[], forward = false): boolean {
 		const exchange = (index: number, replay: boolean) => {
-			const values = { controlPc: state.pc, registers: state.registers, halted: +state.halted, pending: +state.pending, outputLength: state.outputLength }
+			const values: Record<string, number | Int32Array> = { controlPc: state.pc, registers: state.registers, halted: +state.halted, pending: +state.pending, outputLength: state.outputLength }
+			if (this.float) Object.assign(values, { fregs: state.fregs!, fcsr: state.fcsr! })
 			exchangeHistoryBytes(this.log, index, replay, write)
 			exchangeHistoryValues(this.log, index, values)
 			exchangeHistoryFrame(this.log, index, frames)
 			const position = this.log.first + index, slot = position % this.log.entries.capacity
 			const c = this.log.entries.block(position).buffers.columns
 			restore({
-				pc: values.controlPc, registers: state.registers, halted: !!values.halted,
-				pending: !!values.pending, outputLength: values.outputLength,
+				pc: values.controlPc as number, registers: state.registers, halted: !!values.halted,
+				pending: !!values.pending, outputLength: values.outputLength as number,
 				count: c.count[slot] + (replay && !c.kind[slot] ? 1 : 0),
+				fregs: state.fregs, fcsr: values.fcsr as number | undefined,
 			})
 		}
 		return forward ? this.timeline.forward(exchange) : this.timeline.back(exchange)

@@ -1,33 +1,5 @@
-/** RV32C integer encodings, from the RISC-V C 2.0 specification. */
-export const COMPRESSED_MNEMONICS = [
-	'c.addi4spn',
-	'c.lw',
-	'c.sw',
-	'c.nop',
-	'c.addi',
-	'c.jal',
-	'c.li',
-	'c.lui',
-	'c.addi16sp',
-	'c.srli',
-	'c.srai',
-	'c.andi',
-	'c.sub',
-	'c.xor',
-	'c.or',
-	'c.and',
-	'c.j',
-	'c.beqz',
-	'c.bnez',
-	'c.slli',
-	'c.lwsp',
-	'c.jr',
-	'c.mv',
-	'c.ebreak',
-	'c.jalr',
-	'c.add',
-	'c.swsp'
-]
+/** RV32C integer and floating-point encodings, from the RISC-V C 2.0 specification. */
+export { COMPRESSED_MNEMONICS } from './catalog'
 
 type Field = readonly (readonly [valueBit: number, instructionBit: number])[]
 const CI: Field = [
@@ -102,6 +74,29 @@ const SWSP: Field = [
 	[6, 7],
 	[7, 8]
 ]
+const CLD: Field = [
+	[3, 10],
+	[4, 11],
+	[5, 12],
+	[6, 5],
+	[7, 6]
+]
+const LDSP: Field = [
+	[3, 5],
+	[4, 6],
+	[5, 12],
+	[6, 2],
+	[7, 3],
+	[8, 4]
+]
+const SDSP: Field = [
+	[3, 10],
+	[4, 11],
+	[5, 12],
+	[6, 7],
+	[7, 8],
+	[8, 9]
+]
 const gather = (word: number, field: Field) => {
 	let value = 0
 	for (const [v, w] of field) value |= ((word >>> w) & 1) << v
@@ -117,8 +112,8 @@ const iword = (op: number, rd: number, f: number, rs: number, imm: number) =>
 	op | (rd << 7) | (f << 12) | (rs << 15) | ((imm & 4095) << 20)
 const rword = (rd: number, rs1: number, rs2: number, f = 0, f7 = 0) =>
 	0x33 | (rd << 7) | (f << 12) | (rs1 << 15) | (rs2 << 20) | (f7 << 25)
-const store = (rs1: number, rs2: number, imm: number) =>
-	0x2023 | ((imm & 31) << 7) | (rs1 << 15) | (rs2 << 20) | (((imm >>> 5) & 127) << 25)
+const store = (rs1: number, rs2: number, imm: number, base = 0x2023) =>
+	base | ((imm & 31) << 7) | (rs1 << 15) | (rs2 << 20) | (((imm >>> 5) & 127) << 25)
 const jump = (rd: number, imm: number) =>
 	0x6f |
 	(rd << 7) |
@@ -140,8 +135,8 @@ export interface ExpandedCompressed {
 	mnemonic: string
 }
 
-/** Reserved/custom/unsupported floating-point encodings return null; HINTs execute harmlessly. */
-export function expandCompressed(word: number): ExpandedCompressed | null {
+/** Reserved/custom encodings, and float forms beyond flen, return null; HINTs execute harmlessly. */
+export function expandCompressed(word: number, flen = 0): ExpandedCompressed | null {
 	const quadrant = word & 3,
 		f = word >>> 13,
 		rd = (word >>> 7) & 31
@@ -157,6 +152,10 @@ export function expandCompressed(word: number): ExpandedCompressed | null {
 		}
 		if (f === 2) return result(iword(3, dp, 2, rp, gather(word, CL)), 'c.lw')
 		if (f === 6) return result(store(rp, dp, gather(word, CL)), 'c.sw')
+		if (f === 1 && flen === 64) return result(iword(7, dp, 3, rp, gather(word, CLD)), 'c.fld')
+		if (f === 3 && flen) return result(iword(7, dp, 2, rp, gather(word, CL)), 'c.flw')
+		if (f === 5 && flen === 64) return result(store(rp, dp, gather(word, CLD), 0x3027), 'c.fsd')
+		if (f === 7 && flen) return result(store(rp, dp, gather(word, CL), 0x2027), 'c.fsw')
 	}
 	if (quadrant === 1) {
 		if (f === 0) return result(iword(0x13, rd, 0, rd, imm), word === 1 ? 'c.nop' : 'c.addi')
@@ -194,6 +193,10 @@ export function expandCompressed(word: number): ExpandedCompressed | null {
 			return result(rword(rd, rd, rs2), 'c.add')
 		}
 		if (f === 6) return result(store(2, rs2, gather(word, SWSP)), 'c.swsp')
+		if (f === 1 && flen === 64) return result(iword(7, rd, 3, 2, gather(word, LDSP)), 'c.fldsp')
+		if (f === 3 && flen) return result(iword(7, rd, 2, 2, gather(word, LWSP)), 'c.flwsp')
+		if (f === 5 && flen === 64) return result(store(2, rs2, gather(word, SDSP), 0x3027), 'c.fsdsp')
+		if (f === 7 && flen) return result(store(2, rs2, gather(word, SWSP), 0x2027), 'c.fswsp')
 	}
 	return null
 }
@@ -204,7 +207,9 @@ export function encodeCompressed(
 	args: readonly string[],
 	address: number,
 	register: (text: string) => number,
-	evaluate: (text: string) => number
+	evaluate: (text: string) => number,
+	fregister: (text: string) => number = register,
+	flen = 0
 ): number {
 	const need = (count: number) => {
 		if (args.length !== count) throw new Error(`${name} expects ${count} operands`)
@@ -251,6 +256,29 @@ export function encodeCompressed(
 		const { base, offset } = memory(1, stack)
 		if (!stack) return (load ? 0x4000 : 0xc000) | ((base - 8) << 7) | ((r - 8) << 2) | scatter(offset, CL)
 		return (load ? 0x4002 : 0xc002) | (r << (load ? 7 : 2)) | scatter(offset, load ? LWSP : SWSP)
+	}
+	const float = /^c\.f([ls])([wd])(sp)?$/.exec(name)
+	if (float) {
+		need(2)
+		const [, kind, width, stack] = float,
+			double = width === 'd'
+		if (flen < (double ? 64 : 32)) throw new Error(`${name} requires the ${double ? 'D' : 'F'} extension`)
+		const data = fregister(args[0] ?? ''),
+			m = /^(.*?)\(([^()]+)\)$/.exec(args[1] ?? '')
+		if (!m) throw new Error('Expected offset(base)')
+		const base = register(m[2]),
+			offset = evaluate(m[1] || '0'),
+			size = double ? 8 : 4,
+			limit = stack ? (double ? 504 : 252) : double ? 248 : 124
+		if (stack ? base !== 2 : base < 8 || base > 15)
+			throw new Error(stack ? 'Stack load/store requires sp' : 'Base register must be x8..x15')
+		if (!stack && (data < 8 || data > 15)) throw new Error(`${name} requires registers f8..f15`)
+		if (!Number.isInteger(offset) || offset < 0 || offset > limit || offset % size)
+			throw new Error('Compressed float offset must be aligned and in range')
+		const load = kind === 'l',
+			funct = (double ? 0x2000 : 0x6000) | (load ? 0 : 0x8000)
+		if (!stack) return funct | ((base - 8) << 7) | ((data - 8) << 2) | scatter(offset, double ? CLD : CL)
+		return funct | 2 | (data << (load ? 7 : 2)) | scatter(offset, load ? (double ? LDSP : LWSP) : double ? SDSP : SWSP)
 	}
 	if (name === 'c.j' || name === 'c.jal' || name === 'c.beqz' || name === 'c.bnez') {
 		const conditional = name === 'c.beqz' || name === 'c.bnez'

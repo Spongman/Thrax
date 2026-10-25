@@ -30,6 +30,12 @@ export function formatRegister(value: number | bigint, bits: number): string {
 	return `0x${formatHex((value >>> 0) % 2 ** bits, Math.ceil(bits / 4))}`
 }
 
+/** A register of `bits` bits in octal digits, unprefixed and padded to its own width, as DEC writes them. */
+export function formatOctal(value: number | bigint, bits: number): string {
+	const unsigned = typeof value === 'bigint' ? BigInt.asUintN(bits, value) : BigInt((value >>> 0) % 2 ** Math.min(bits, 32))
+	return unsigned.toString(8).padStart(Math.ceil(bits / 3), '0')
+}
+
 /**
  * The inverse of `formatWord`: parses a hex or decimal integer literal, or
  * returns null when `text` is not one.

@@ -11,7 +11,8 @@ import { registerTokenHover } from '../../../services/assemblyLanguage'
 import type * as Monaco from 'monaco-editor'
 import { formatAddress } from '../../../core/format'
 import type { DebugInspection, RegisterValue, TokenDescription } from '../../contracts'
-import { registerByName } from '../a64/assembler/operands'
+import { fpRegisterByName, registerByName } from '../a64/assembler/operands'
+import { bitsToNumber, DOUBLE, SINGLE } from '../shared/fp'
 import { parseA64Number } from '../a64/assembler/tokenizer'
 import { A64_LANGUAGE_ID } from './grammar'
 
@@ -40,10 +41,27 @@ function memoryLine(state: DebugInspection, address: number): string[] {
 		: memoryTip(address, value, value => formatValue64(BigInt(value)))
 }
 
+/** Bn, Hn, Sn, Dn or Qn: the float an S or D holds, and the bits. */
+function fpRegisterValue(name: string, state: DebugInspection): { id: string, title: string, text: string } | null {
+	const register = fpRegisterByName(name)
+	if (!register) return null
+	const id = `V${register.n}`
+	const low = BigInt(Number(state.registers[id] ?? 0) >>> 0) | (BigInt(Number(state.registers[`${id}:hi`] ?? 0) >>> 0) << 32n)
+	const title = `${name.toUpperCase()} (${id})`
+	const hex = (value: bigint, bytes: number) => `0x${value.toString(16).toUpperCase().padStart(bytes * 2, '0')}`
+	switch (register.size) {
+		case 4: return { id, title, text: `${bitsToNumber(low & 0xFFFF_FFFFn, SINGLE)} (${hex(low & 0xFFFF_FFFFn, 4)})` }
+		case 8: return { id, title, text: `${bitsToNumber(low, DOUBLE)} (${hex(low, 8)})` }
+		// The panel holds the low doubleword; a Q's upper half is in the history alone.
+		case 16: return { id, title, text: `low doubleword ${hex(low, 8)}` }
+		default: return { id, title, text: hex(low & ((1n << BigInt(register.size * 8)) - 1n), register.size) }
+	}
+}
+
 /** A register's value and descriptor id, by any name it goes by. */
 function registerValue(name: string, state: DebugInspection): { id: string, title: string, text: string } | null {
 	const register = registerByName(name)
-	if (!register) return null
+	if (!register) return fpRegisterValue(name, state)
 	if (register.zr) return { id: '', title: `${name.toLowerCase()} (always 0)`, text: register.wide ? formatValue64(0n) : formatValue32(0) }
 	const id = register.sp ? 'SP' : `X${register.n}`
 	const value = asBig(state.registers[id])

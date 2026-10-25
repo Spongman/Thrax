@@ -12,9 +12,9 @@ import { Op, parseExpression, type Expr } from '../../../core/assembly/expressio
 import { expandSources } from '../../../core/assembly/sources'
 import { TokenCursor, TokenKind, type Position } from '../../../core/assembly/tokens'
 import { AssemblyError } from '../../../core/diagnostics'
-import { DIALECT_GNU } from '../../arm/assembler/dialect'
-import { armArithmetic, checkDataValue, gnuExpressionSyntax } from '../../arm/assembler/syntax'
-import { tokenizeArm } from '../../arm/assembler/tokenizer'
+import { DIALECT_GNU } from '../shared/assembler/dialect'
+import { armArithmetic, checkDataValue, gnuExpressionSyntax } from '../shared/assembler/syntax'
+import { tokenizeArm } from '../shared/assembler/tokenizer'
 import type { AssemblySources, Diagnostic } from '../../contracts'
 import { ALU, CONDITIONS, DATA_BASE, reg, SPECIAL, TEXT_BASE } from './isa'
 import { M0Program } from './program'
@@ -469,5 +469,7 @@ export function assembleM0(sources: AssemblySources, memoryBytes: number): M0Pro
 	})
 	if (result.image)
 		result.image.entryAddress = result.symbols.lookup('_start') ?? result.symbols.lookup('main') ?? TEXT_BASE
-	return new M0Program(main.name, result.image, result.diagnostics)
+	const values = new Map<string, number>()
+	for (const [name, value] of result.symbols.entries()) if (value !== undefined) values.set(name, value)
+	return new M0Program(main.name, result.image, result.diagnostics, values)
 }

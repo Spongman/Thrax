@@ -9,9 +9,9 @@ import { MNEMONICS as Z80 } from '../z80/asm/encoder'
 import { z80InstructionHelp } from '../z80/instructionHelp'
 import { NMOS_MODEL, W65C02_MODEL } from '../mos6502/isa'
 import { mos6502InstructionHelp } from '../mos6502/instructionHelp'
-import { ARCH_V2A, ARCH_V8 } from '../arm/a32/isa'
-import { MNEMONICS as ARM, MNEMONICS_V8 } from '../arm/assembler/instructions'
-import { armInstructionHelp } from '../arm/instructionHelp'
+import { ARCH_V2A, ARCH_V8 } from '../armv8/shared/a32/isa'
+import { MNEMONICS as ARM, MNEMONICS_V8 } from '../armv8/shared/assembler/instructions'
+import { armInstructionHelp } from '../armv8/shared/instructionHelp'
 import { A64_MNEMONICS } from '../armv8/a64/assembler/encoder'
 import { a64InstructionHelp } from '../armv8/instructionHelp'
 import { MNEMONICS as M0 } from '../armv8/m0/isa'
@@ -48,7 +48,9 @@ describe('instruction help across CPUs', () => {
 		for (const name of names) {
 			const tip = help(name)
 			expect(tip, name).not.toBeNull()
-			expect(tip!.contents[0], name).toMatch(new RegExp(`^\\*\\*${name.toUpperCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\*\\*`))
+			const quoted = name.toUpperCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+			// A mnemonic may link to its own place in the manual.
+			expect(tip!.contents[0], name).toMatch(new RegExp(`^\\*\\*(?:${quoted}|\\[${quoted}\\]\\(https://\\S+ "Open ${quoted} in the manual"\\))\\*\\*`))
 			expect(tip!.contents[1], name).not.toMatch(/integer assembly|teaching profile|W65C02S instruction/)
 			expect(tip!.contents[1], name).toBeTruthy()
 			expect(tip!.contents[2], name).toMatch(/^Syntax: `/)

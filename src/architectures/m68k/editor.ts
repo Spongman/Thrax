@@ -1,41 +1,35 @@
-import { stripAssemblyComment } from '../../core/assembly/text'
+import { FPU_MNEMONICS, M68K_INSTRUCTIONS } from './catalog'
+import { describe80 } from './extended'
+import { effectiveCoprocessor, type M68kSettings } from './settings'
+import { FP_CONTROL_NAMES, FP_NAMES } from './profile'
+import { inspectAssemblyToken, type TokenInspection } from '../../services/assemblyInspection'
 import type * as Monaco from 'monaco-editor'
 import type { DebugInspection, EditorHost, TokenDescription } from '../contracts'
 import { disposableGroup } from '../../core/disposableScope'
 import { registerAssemblyLanguage, registerTokenHover } from '../../services/assemblyLanguage'
-import { MNEMONICS, REGISTER_NAMES } from './isa'
+import { REGISTER_NAMES } from './isa'
 import { manifest } from './manifest'
 import { m68kInstructionHelp } from './instructionHelp'
+import { assemblyDefinitions, registerGotoDefinition } from '../../services/gotoDefinition'
 
-export function describeToken(text: string, column: number, state: DebugInspection): TokenDescription | null {
-	const comment = text.indexOf(';')
-	if (comment >= 0 && column >= comment) return null
-	if (/^\s*\*/.test(text)) return null
-	for (const match of text.matchAll(/[\w.$]+/g)) {
-		if (column < match.index! || column >= match.index! + match[0].length) continue
-		const name = match[0].toUpperCase(),
-			register = name === 'SP' ? 'A7' : name
-		if (register in state.registers) {
-			const value = state.registers[register]
-			return {
-				start: match.index!,
-				length: match[0].length,
-				register,
-				contents: [`**${name}** = ${value} ($${(Number(value) >>> 0).toString(16)})`]
-			}
-		}
-		const address = state.labels.get(match[0])
-		if (address !== undefined)
-			return {
-				start: match.index!,
-				length: match[0].length,
-				address,
-				contents: [`**${match[0]}** = $${address.toString(16)}`]
-			}
-		const contents = m68kInstructionHelp(match[0])
-		return contents ? { start: match.index!, length: match[0].length, ...contents } : null
-	}
-	return null
+export const m68kDefinitions = assemblyDefinitions({
+	comments: [';'], ignoreLine: line => /^\s*\*/.test(line),
+	patterns: name => [new RegExp(`^(\\s*)(${name})\\s+(?:equ|=)\\s+`, 'i')],
+})
+
+const inspection: TokenInspection = {
+	tokens: /[\w.$]+/g, comments: [';'], ignoreLine: text => /^\s*\*/.test(text),
+	register: token => token.toUpperCase() === 'SP' ? 'A7' : token.toUpperCase(),
+	registerText: (token, id, value) =>
+		typeof value === 'bigint' && FP_NAMES.includes(id)
+			? `**${token.toUpperCase()}** = ${describe80(value)} (${value.toString(16).padStart(20, '0')})`
+			: `**${token.toUpperCase()}** = ${value} (${(Number(value) >>> 0).toString(16)})`,
+	labelText: (token, address) => `**${token}** = $${address.toString(16)}`,
+	help: m68kInstructionHelp,
+}
+
+export function describeToken(text: string, offset: number, state: DebugInspection): TokenDescription | null {
+	return inspectAssemblyToken(text, offset, state, inspection)
 }
 
 export function installEditor(monaco: typeof Monaco, host: EditorHost) {
@@ -49,16 +43,22 @@ export function installEditor(monaco: typeof Monaco, host: EditorHost) {
 						[/;.*/, 'comment'],
 						[/^\s*\*.*/, 'comment'],
 						[/"([^"\\]|\\.)*"|'([^'\\]|\\.)'/, 'string'],
-						[/\b(?:d[0-7]|a[0-7]|sp|sr|ccr|pc)\b/, 'variable'],
+						[/\b(?:d[0-7]|a[0-7]|fp[0-7]|fpcr|fpsr|fpiar|sp|sr|ccr|pc)\b/, 'variable'],
 						[/\$[\da-f]+|\b(?:0x[\da-f]+|\d+)\b/, 'number'],
 						[/[\w.$]+:/, 'type.identifier'],
 						[/[\w.]+/, 'keyword']
 					]
 				}
 			},
-			completions: [...MNEMONICS, ...REGISTER_NAMES, 'sp', 'ccr', '.text', '.data', 'dc.b', 'dc.w', 'dc.l', '.asciz']
-				.map((label) => ({ label, insertText: label, kind: monaco.languages.CompletionItemKind.Keyword })),
+			completions: () => {
+				const settings = host.settings?.() as Partial<M68kSettings> | undefined,
+					fpu = !!settings && effectiveCoprocessor(settings) !== 'none'
+				return [...M68K_INSTRUCTIONS.names(settings?.cpuModel), ...REGISTER_NAMES, 'sp', 'ccr', '.text', '.data', 'dc.b', 'dc.w', 'dc.l', '.asciz',
+					...(fpu ? [...FPU_MNEMONICS, ...FP_NAMES, ...FP_CONTROL_NAMES, 'dc.s', 'dc.d', 'dc.x'] : [])]
+					.map((label) => ({ label, insertText: label, kind: monaco.languages.CompletionItemKind.Keyword }))
+			},
 		}))
 		scope.add(registerTokenHover(monaco, 'thrax-m68k', (line, offset) => describeToken(line, offset, host.inspection())))
+		scope.add(registerGotoDefinition(monaco, host, 'thrax-m68k', m68kDefinitions))
 	})
 }

@@ -94,9 +94,7 @@ export const SPECIAL: Readonly<Record<string, number>> = {
 	primask: 16,
 	control: 20,
 }
-export const LANGUAGE = 'thrax-thumb-m0'
-export const TEXT_BASE = 0x00400000
-export const DATA_BASE = 0x00420000
+export { LANGUAGE, TEXT_BASE, DATA_BASE } from './layout'
 export function reg(text: string): number {
 	const alias = ({ sp: 13, lr: 14, pc: 15, ip: 12 } as Record<string, number>)[text.toLowerCase()]
 	if (alias !== undefined) return alias

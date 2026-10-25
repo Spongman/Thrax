@@ -3,8 +3,11 @@ import type { M68kCpu } from './cpu'
 import { decodeInstruction, type Decoded, type Operand } from './decode'
 import type { M68kRecord } from './history'
 import { REGISTER_NAMES } from './isa'
+import { BRANCH, CONSTANT, CONTROL_IN, CONTROL_OUT, DECREMENT, DYADIC, GENERAL, MOVE_OUT, MOVEM_IN, MOVEM_OUT, SET, TEST, TRAP } from './fpuIsa'
+import { FP_CONTROL_NAMES, FP_NAMES } from './profile'
 
 export const DEPENDENCY_NAMES = [...REGISTER_NAMES, 'CCR/SR']
+const FPU_DEPENDENCY_NAMES = [...DEPENDENCY_NAMES, ...FP_NAMES, ...FP_CONTROL_NAMES]
 const CCR = 16, SP = 15
 const cache = new Map<number, InstructionInfo>()
 const indexed = (ea?: Operand) => ea && (ea.mode === 6 || (ea.mode === 7 && ea.reg === 3)) ? ea.extension[0] >>> 12 : 0
@@ -12,7 +15,8 @@ const indexed = (ea?: Operand) => ea && (ea.mode === 6 || (ea.mode === 7 && ea.r
 export function describeM68kInstruction(d: Decoded): InstructionInfo {
 	// Dependency identity excludes addresses and immediate data. No string or
 	// metadata allocation on cache hits, including separately decoded repetitions.
-	const key = d.words[0] + (d.mask ?? 0) * 65536 + (indexed(d.source) * 16 + indexed(d.destination)) * 0x1_0000_0000
+	const second = d.fpu ? (d.fpu.kind === BRANCH ? 0 : d.words[1]) : d.mask ?? 0
+	const key = d.words[0] + second * 65536 + (indexed(d.source) * 16 + indexed(d.destination)) * 0x1_0000_0000
 	const cached = cache.get(key)
 	if (cached) return cached
 	const reads = new Set<number>(), writes = new Set<number>(), loaded = new Set<number>()
@@ -38,6 +42,51 @@ export function describeM68kInstruction(d: Decoded): InstructionInfo {
 		if (fromMemory) load(r); else write(r)
 	}
 	const stack = () => { read(SP); write(SP) }
+	if (d.fpu) {
+		// FP0-FP7 follow CCR/SR, then FPCR, FPSR and FPIAR.
+		const f = d.fpu, FP = 17, FPCR_ID = 25, FPSR_ID = 26, FPIAR_ID = 27,
+			from = (f.command >> 10) & 7, to = (f.command >> 7) & 7
+		const fromMemory = !!d.source && memory(d.source)
+		const list = () => { const bits = f.list < 0 ? 255 : f.list; return [0, 1, 2, 3, 4, 5, 6, 7].filter(i => bits & (0x80 >> i)) }
+		let branch = false, jump = false
+		if (f.kind === GENERAL || f.kind === CONSTANT) {
+			read(FPCR_ID); write(FPSR_ID, FPIAR_ID)
+			if (f.kind === GENERAL) {
+				source(d.source)
+				if (!d.source) read(FP + from)
+				const opmode = f.command & 0x7f
+				if (DYADIC[opmode]) read(FP + to)
+				if (opmode === TEST || name === 'fcmp') { /* no register result */ }
+				else if (opmode >> 3 === 6) { write(FP + to, FP + (opmode & 7)); if (fromMemory) { loaded.add(FP + to); loaded.add(FP + (opmode & 7)) } }
+				else { write(FP + to); if (fromMemory) loaded.add(FP + to) }
+			} else write(FP + to)
+		} else if (f.kind === MOVE_OUT) {
+			read(FP + to, FPCR_ID); write(FPSR_ID, FPIAR_ID); destination(d.destination)
+			if (f.format === 7) read(((f.command >> 4) & 7))
+		} else if (f.kind === CONTROL_IN || f.kind === CONTROL_OUT) {
+			const ids = [FPCR_ID, FPSR_ID, FPIAR_ID].filter((_, i) => from & (4 >> i))
+			if (f.kind === CONTROL_IN) { source(d.source); for (const id of ids) { write(id); if (fromMemory) loaded.add(id) } }
+			else { read(...ids); destination(d.destination) }
+		} else if (f.kind === MOVEM_IN || f.kind === MOVEM_OUT) {
+			effective(d.source ?? d.destination)
+			if (f.list < 0) read(d.reg!)
+			for (const r of list()) if (f.kind === MOVEM_IN) load(FP + r); else read(FP + r)
+		} else {
+			read(FPSR_ID); write(FPSR_ID)
+			if (f.kind === SET) destination(d.destination)
+			if (f.kind === DECREMENT) { read(d.reg!); write(d.reg!) }
+			branch = f.kind === DECREMENT || (f.kind === BRANCH && f.condition !== 0 && f.condition !== 15 && name !== 'fnop')
+			jump = f.kind === BRANCH && f.condition === 15
+		}
+		const isLoad = fromMemory || f.kind === MOVEM_IN
+		const info: InstructionInfo = {
+			mnemonic: name, category: branch ? 2 : jump ? 1 : isLoad || memory(d.destination) ? 3 : f.kind === TRAP ? 5 : 0,
+			encoding: 1, reads: [...reads], writes: [...writes], loadWrites: [...loaded], isLoad, isBranch: branch, isJump: jump,
+		}
+		if (cache.size >= 4096) cache.clear()
+		cache.set(key, info)
+		return info
+	}
 	let isLoad = !addressOnly && (memory(d.source) || (memory(d.destination) && !['move', 'movea', 'clr', 'scc', 'movesr', 'fromccr', 'movem'].includes(name)))
 	if (d.condition !== undefined && d.condition >= 2) read(CCR)
 	if (name === 'movem') {
@@ -93,12 +142,12 @@ export function describeM68kInstruction(d: Decoded): InstructionInfo {
 
 export function instructionSetFor(cpu: M68kCpu): InstructionSet {
 	return {
-		encodings: ['Integer'], registerNames: DEPENDENCY_NAMES,
+		encodings: ['Integer', 'FPU'], registerNames: cpu.coprocessor === 'none' ? DEPENDENCY_NAMES : FPU_DEPENDENCY_NAMES,
 		describe: instruction => describeM68kInstruction(instruction as Decoded),
 		decodeExecuted(entry) {
 			if (entry.kind === 'edit') return null
 			const record = entry as M68kRecord
-			try { return decodeInstruction(address => record.words[(address - record.address) / 2] ?? 0, record.address, cpu.model) }
+			try { return decodeInstruction(address => record.words[(address - record.address) / 2] ?? 0, record.address, cpu.model, cpu.coprocessor !== 'none') }
 			catch { return null }
 		},
 	}

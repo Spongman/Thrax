@@ -11,7 +11,8 @@ import type { DescribedEffect, HistoryFormatter, RegisterValue } from '../../con
 import { disassemble } from './disassemble'
 import {
 	EFFECT_BREAK, EFFECT_DISPLAY, EFFECT_EXIT, EFFECT_FLAGS, EFFECT_FRAME_DEPTH, EFFECT_HALTED, EFFECT_INPUT, EFFECT_KEY, EFFECT_MEMORY,
-	EFFECT_OUTPUT, EFFECT_PC, EFFECT_REGISTER, EFFECT_SP, EFFECT_WAITING, ENTRY_EDIT, type A64History,
+	EFFECT_FPCR, EFFECT_FPSR, EFFECT_OUTPUT, EFFECT_PC, EFFECT_REGISTER, EFFECT_SP, EFFECT_VECTOR_HIGH, EFFECT_VECTOR_LOW, EFFECT_WAITING, ENTRY_EDIT,
+	type A64History,
 } from './history'
 import type { A64Executed } from './instructions'
 import type { A64Linux } from './machine'
@@ -66,6 +67,11 @@ export function a64HistoryFormatter(log: A64History | null, linux: A64Linux, key
 					case EFFECT_SP: at({ subject: 'SP', register: 'SP', value: log.effectValue(position) }); break
 					case EFFECT_PC: at({ subject: 'PC', register: 'PC', value: BigInt(b) }); break
 					case EFFECT_FLAGS: at({ subject: 'NZCV', register: 'NZCV', value: nzcvRegister(b) }); break
+					// The D view, and the upper half of the Q.
+					case EFFECT_VECTOR_LOW: at({ subject: `D${a}`, register: `V${a}`, value: log.effectValue(position) }); break
+					case EFFECT_VECTOR_HIGH: at({ subject: `V${a}[127:64]`, register: `V${a}`, value: log.effectValue(position) }); break
+					case EFFECT_FPCR: at({ subject: 'FPCR', register: 'FPCR', value: b }); break
+					case EFFECT_FPSR: at({ subject: 'FPSR', register: 'FPSR', value: b }); break
 					case EFFECT_MEMORY: {
 						const size = log.effectSize(position)
 						at({ subject: `[${formatWord(a)}]`, address: a, value: memoryValue(log.effectValue(position), size) })

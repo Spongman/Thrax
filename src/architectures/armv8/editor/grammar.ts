@@ -14,6 +14,8 @@ export const A64_REGISTER_NAMES: readonly string[] = Object.freeze([
 	...Array.from({ length: 31 }, (_unused, index) => `x${index}`),
 	...Array.from({ length: 31 }, (_unused, index) => `w${index}`),
 	'sp', 'wsp', 'xzr', 'wzr', 'lr', 'fp',
+	...['b', 'h', 's', 'd', 'q'].flatMap((prefix) => Array.from({ length: 32 }, (_unused, index) => `${prefix}${index}`)),
+	'fpcr', 'fpsr', 'nzcv',
 ])
 
 /** Shift, extend and condition names, which read as operators. */
@@ -52,6 +54,7 @@ export const a64Monarch: Monaco.languages.IMonarchLanguage = {
 			[/\d+[fb]\b/, 'type'],
 			[/0[xX][0-9a-fA-F]+/, 'number.hex'],
 			[/0[bB][01]+/, 'number.binary'],
+			[/\d+(?:\.\d*(?:[eE][+-]?\d+)?|[eE][+-]?\d+)/, 'number.float'],
 			[/\d+/, 'number'],
 			[/"/, 'string', '@string'],
 			[/'(?:[^'\\]|\\.)'?/, 'string'],

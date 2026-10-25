@@ -1,3 +1,4 @@
+import { integerSyntax, expressionParser, quotedBytes, dataStatements, reservationBytes } from '../../core/assembly/frontend'
 import { visitSourceLines, type SourceLine } from '../../core/assembly/sourceLines'
 import { integerArithmetic } from '../../core/assembly/integerArithmetic'
 import { splitOperands, stripAssemblyComment } from '../../core/assembly/text'
@@ -8,54 +9,22 @@ import {
 	type HookContext,
 	type Statement
 } from '../../core/assembly/assembler'
-import { Op, parseExpression, type Arithmetic, type Expr } from '../../core/assembly/expressions'
-import { makeToken, TokenCursor, TokenKind, type Position } from '../../core/assembly/tokens'
+import { Op, type Arithmetic, type Expr } from '../../core/assembly/expressions'
+import type { Position } from '../../core/assembly/tokens'
 import { AssemblyError } from '../../core/diagnostics'
 import type { AssemblySources } from '../contracts'
-import { DATA_BASE, MEMORY_BYTES, register, TEXT_BASE } from './isa'
+import { DATA_BASE, FLOAT_CSRS, fregister, MEMORY_BYTES, register, TEXT_BASE } from './isa'
+import { ROUNDING_MODES } from './float'
 import { RiscvAssembly } from './program'
 import { encodeCompressed } from './compressed'
 
 const arithmetic: Arithmetic = integerArithmetic
-const syntax = {
-	binary: new Map([
-		['|', { op: Op.Or, precedence: 1 }],
-		['^', { op: Op.Xor, precedence: 2 }],
-		['&', { op: Op.And, precedence: 3 }],
-		['<<', { op: Op.Shl, precedence: 4 }],
-		['>>', { op: Op.Sar, precedence: 4 }],
-		['+', { op: Op.Add, precedence: 5 }],
-		['-', { op: Op.Sub, precedence: 5 }],
-		['*', { op: Op.Mul, precedence: 6 }],
-		['/', { op: Op.Div, precedence: 6 }],
-		['%', { op: Op.Mod, precedence: 6 }]
-	]),
-	unary: new Map([
-		['-', Op.Neg],
-		['+', Op.Plus],
-		['~', Op.Not]
-	]),
-	dot: '.'
-}
-function expression(text: string, at: Position): Expr {
-	const parts = text.match(/'(?:\\.|[^'\\])'|0[xX][\da-fA-F]+|0[bB][01]+|\d+|[A-Za-z_.$][\w.$]*|<<|>>|[^\s]/g) ?? []
-	const tokens = parts.map((p) => {
-		const numeric = /^\d|^'/.test(p)
-		const token = makeToken(
-			numeric ? TokenKind.Number : /^[\w.$]/.test(p) ? TokenKind.Identifier : TokenKind.Operator,
-			p,
-			at.file,
-			at.line,
-			1
-		)
-		token.value = p.startsWith("'") ? JSON.parse(`"${p.slice(1, -1)}"`).charCodeAt(0) : Number(p)
-		return token
-	})
-	const cursor = new TokenCursor(tokens),
-		expr = parseExpression(cursor, syntax)
-	if (!expr || !cursor.atEnd()) throw new AssemblyError(`Invalid expression '${text}'`, at)
-	return expr
-}
+const syntax = integerSyntax(Op.Sar, true)
+const expression = expressionParser({
+	syntax, tokens: /'(?:\\.|[^'\\])'|0[xX][\da-fA-F]+|0[bB][01]+|\d+|[A-Za-z_.$][\w.$]*|<<|>>|[^\s]/g,
+	isNumber: part => /^\d|^'/.test(part),
+	number: part => part.startsWith("'") ? JSON.parse(`"${part.slice(1, -1)}"`).charCodeAt(0) : Number(part),
+})
 function checked(v: number, bits: number): number {
 	if (!Number.isInteger(v) || v < -(2 ** (bits - 1)) || v >= 2 ** (bits - 1))
 		throw new Error(`Immediate ${v} is outside signed ${bits}-bit range`)
@@ -88,7 +57,117 @@ const R: Record<string, [number, number]> = {
 	remu: [7, 1]
 }
 const I: Record<string, number> = { addi: 0, slli: 1, slti: 2, sltiu: 3, xori: 4, srli: 5, srai: 5, ori: 6, andi: 7 }
-export function encodeInstruction(name: string, args: string[], c: HookContext, at: Position): Uint8Array {
+
+/** Float operations: base word, operand kinds for rd, rs1, rs2, rs3 ('f' float, 'x' integer), flen, default rounding mode. */
+type FloatEncoding = readonly [word: number, operands: string, flen: number, rm?: number]
+const FLOAT: Record<string, FloatEncoding> = {
+	'fmv.x.w': [0xe0000053, 'xf', 32],
+	'fmv.w.x': [0xf0000053, 'fx', 32],
+	'fcvt.s.d': [0x40100053, 'ff', 64, 7],
+	'fcvt.d.s': [0x42000053, 'ff', 64, 0]
+}
+for (const [suffix, fmt, flen] of [['s', 0, 32], ['d', 1, 64]] as const) {
+	const op = (f5: number, f3 = 0, rs2 = 0) => 0x53 | (f3 << 12) | (rs2 << 20) | (fmt << 25) | (f5 << 27)
+	const add = (name: string, word: number, operands: string, rm?: number) => {
+		FLOAT[`${name}.${suffix}`] = [word, operands, flen, rm]
+	}
+	;['fadd', 'fsub', 'fmul', 'fdiv'].forEach((name, i) => add(name, op(i), 'fff', 7))
+	;['fmadd', 'fmsub', 'fnmsub', 'fnmadd'].forEach((name, i) => add(name, 0x43 | (i << 2) | (fmt << 25), 'ffff', 7))
+	add('fsqrt', op(0x0b), 'ff', 7)
+	;['fsgnj', 'fsgnjn', 'fsgnjx'].forEach((name, i) => add(name, op(4, i), 'fff'))
+	add('fmin', op(5, 0), 'fff')
+	add('fmax', op(5, 1), 'fff')
+	;['fle', 'flt', 'feq'].forEach((name, i) => add(name, op(0x14, i), 'xff'))
+	add('fcvt.w', op(0x18, 0, 0), 'xf', 7)
+	add('fcvt.wu', op(0x18, 0, 1), 'xf', 7)
+	// Integer to double is exact, so it encodes RNE by default.
+	FLOAT[`fcvt.${suffix}.w`] = [op(0x1a, 0, 0), 'fx', flen, fmt ? 0 : 7]
+	FLOAT[`fcvt.${suffix}.wu`] = [op(0x1a, 0, 1), 'fx', flen, fmt ? 0 : 7]
+	add('fclass', op(0x1c, 1), 'xf')
+}
+const FLOAT_ALIASES: Record<string, string> = { 'fmv.x.s': 'fmv.x.w', 'fmv.s.x': 'fmv.w.x' }
+/** Register and immediate CSR forms, by funct3. */
+const CSR_OPS: Record<string, number> = { csrrw: 1, csrrs: 2, csrrc: 3, csrrwi: 5, csrrsi: 6, csrrci: 7 }
+const CSR_READS: Record<string, string> = { frcsr: 'fcsr', frrm: 'frm', frflags: 'fflags' }
+const CSR_WRITES: Record<string, string> = { fscsr: 'fcsr', fsrm: 'frm', fsflags: 'fflags', fsrmi: 'frm', fsflagsi: 'fflags' }
+
+/** Minimum flen for a float or CSR mnemonic, 0 for an integer one. */
+export function floatRequirement(name: string): number {
+	if (!/^(?:f|csr)/.test(name)) return 0
+	if (FLOAT[name]) return FLOAT[name][2]
+	if (/^f(?:mv|neg|abs)\.[sd]$/.test(name)) return name.endsWith('d') ? 64 : 32
+	if (name === 'fld' || name === 'fsd') return 64
+	if (FLOAT_ALIASES[name] || name === 'flw' || name === 'fsw' || CSR_READS[name] || CSR_WRITES[name]) return 32
+	if (CSR_OPS[name] !== undefined || /^csr(?:r|[wsc]i?)$/.test(name)) return 32
+	return 0
+}
+
+/** Expand the CSR shorthands to csrrw, csrrs, csrrc and their immediate forms. */
+function csrForm(name: string, args: string[]): [string, string[]] | null {
+	if (CSR_OPS[name] !== undefined) return [name, args]
+	if (CSR_READS[name]) return ['csrrs', [args[0], CSR_READS[name], 'zero', ...args.slice(1)]]
+	if (CSR_WRITES[name]) {
+		const op = name.endsWith('i') ? 'csrrwi' : 'csrrw'
+		return [op, args.length === 1 ? ['zero', CSR_WRITES[name], args[0]] : [args[0], CSR_WRITES[name], ...args.slice(1)]]
+	}
+	if (name === 'csrr') return ['csrrs', [args[0], args[1], 'zero', ...args.slice(2)]]
+	const short = /^csr([wsc])(i?)$/.exec(name)
+	if (short) return [`csrr${short[1]}${short[2]}`, ['zero', ...args]]
+	return null
+}
+
+function encodeFloat(name: string, args: string[], c: HookContext, at: Position): number {
+	const need = (count: number) => {
+		if (args.length !== count) throw new Error(`${name} expects ${count} operands`)
+	}
+	const v = (text: string) => c.value(expression(text, at), true)!
+	const alias = /^f(mv|neg|abs)\.([sd])$/.exec(name)
+	if (alias) {
+		need(2)
+		args = [args[0], args[1], args[1]]
+		name = `fsgnj${({ mv: '', neg: 'n', abs: 'x' } as Record<string, string>)[alias[1]]}.${alias[2]}`
+	}
+	name = FLOAT_ALIASES[name] ?? name
+	if (['flw', 'fld', 'fsw', 'fsd'].includes(name)) {
+		need(2)
+		const match = /^(.*?)\(([^()]+)\)$/.exec(args[1])
+		if (!match) throw new Error('Expected offset(base)')
+		const imm = checked(v(match[1] || '0'), 12) & 4095,
+			base = register(match[2]),
+			data = fregister(args[0]),
+			width = name.endsWith('w') ? 2 : 3
+		if (name.startsWith('fl')) return 7 | (data << 7) | (width << 12) | (base << 15) | (imm << 20)
+		return 0x27 | ((imm & 31) << 7) | (width << 12) | (base << 15) | (data << 20) | ((imm >>> 5) << 25)
+	}
+	const csr = csrForm(name, args)
+	if (csr) {
+		const [op, operands] = csr
+		if (operands.length !== 3) throw new Error(`${name} has the wrong number of operands`)
+		const number = FLOAT_CSRS[operands[1].toLowerCase()] ?? v(operands[1])
+		if (!Number.isInteger(number) || number < 0 || number > 4095) throw new Error('CSR number must be 0..4095')
+		const f3 = CSR_OPS[op],
+			source = f3 > 4 ? v(operands[2]) : register(operands[2])
+		if (f3 > 4 && (!Number.isInteger(source) || source < 0 || source > 31)) throw new Error('CSR immediate must be 0..31')
+		return 0x73 | (register(operands[0]) << 7) | (f3 << 12) | (source << 15) | (number << 20)
+	}
+	const [word, operands, , rm] = FLOAT[name]
+	let mode = rm
+	if (rm !== undefined && args.length === operands.length + 1) {
+		mode = ROUNDING_MODES.indexOf(args[args.length - 1].toLowerCase())
+		if (mode < 0 || (mode > 4 && mode !== 7)) throw new Error('Rounding mode must be rne, rtz, rdn, rup, rmm or dyn')
+		args = args.slice(0, -1)
+	}
+	need(operands.length)
+	let result = word | ((mode ?? 0) << 12)
+	operands.split('').forEach((kind, i) => {
+		result |= (kind === 'f' ? fregister(args[i]) : register(args[i])) << [7, 15, 20, 27][i]
+	})
+	return result >>> 0
+}
+
+export function encodeInstruction(name: string, args: string[], c: HookContext, at: Position, flen = 0): Uint8Array {
+	const required = floatRequirement(name)
+	if (required > flen) throw new Error(`${name} requires the ${required === 64 ? 'D' : 'F'} extension`)
 	const r = (i: number) => register(args[i] ?? ''),
 		v = (i: number) => c.value(expression(args[i] ?? '', at), true)!
 	const need = (count: number) => {
@@ -96,6 +175,7 @@ export function encodeInstruction(name: string, args: string[], c: HookContext, 
 	}
 	const iword = (op: number, rd: number, f: number, rs: number, imm: number) =>
 		op | (rd << 7) | (f << 12) | (rs << 15) | ((checked(imm, 12) & 4095) << 20)
+	if (required) return words(encodeFloat(name, args, c, at))
 	if (name === 'nop') {
 		need(0)
 		return words(0x13)
@@ -201,7 +281,7 @@ export function encodeInstruction(name: string, args: string[], c: HookContext, 
 	throw new Error(`Unsupported RV32IM instruction '${name}'`)
 }
 
-export function assembleRiscv(sources: AssemblySources, compressed = false): RiscvAssembly {
+export function assembleRiscv(sources: AssemblySources, compressed = false, flen = 0): RiscvAssembly {
 	const statements: Statement[] = [],
 		diagnostics: RiscvAssembly['diagnostics'] = []
 	let reservedBytes = 0
@@ -263,28 +343,39 @@ export function assembleRiscv(sources: AssemblySources, compressed = false): Ris
 				return
 			}
 			if (['.ascii', '.asciz', '.string'].includes(op)) {
-				const string = args.map((a) => JSON.parse(a)).join('')
-				if (typeof string !== 'string') throw new Error('Expected quoted string')
-				const bytes = new TextEncoder().encode(string + (op === '.ascii' ? '' : '\0'))
+				const bytes = quotedBytes(args, op !== '.ascii')
 				reserve(bytes.length)
 				statements.push({ kind: K.Bytes, bytes, at })
 				return
 			}
 			if (op === '.space' || op === '.zero') {
-				const count = Number(args[0])
-				if (!Number.isInteger(count) || count < 0 || count > MEMORY_BYTES) throw new Error('Invalid space size')
-				reserve(count)
-				statements.push({ kind: K.Bytes, bytes: new Uint8Array(count), at })
+				const bytes = reservationBytes(Number(args[0]), 1, MEMORY_BYTES, 'Invalid space size')
+				reserve(bytes.length)
+				statements.push({ kind: K.Bytes, bytes, at })
+				return
+			}
+			if (op === '.float' || op === '.double') {
+				const width = op === '.float' ? 4 : 8,
+					bytes = new Uint8Array(args.length * width),
+					view = new DataView(bytes.buffer)
+				args.forEach((arg, i) => {
+					const text = arg.toLowerCase().replace(/^([+-]?)inf(?:inity)?$/, '$1Infinity'),
+						value = text === 'nan' ? NaN : text ? Number(text) : NaN
+					if (Number.isNaN(value) && text !== 'nan') throw new Error(`Invalid floating-point value '${arg}'`)
+					if (width === 4) view.setFloat32(i * 4, value, true)
+					else view.setFloat64(i * 8, value, true)
+				})
+				reserve(bytes.length)
+				statements.push({ kind: K.Bytes, bytes, at })
 				return
 			}
 			const size = ({ '.byte': 1, '.half': 2, '.2byte': 2, '.word': 4, '.4byte': 4 } as Record<string, number>)[op]
 			if (size) {
-				reserve(size * args.length)
-				for (const arg of args) statements.push({ kind: K.Emit, size, value: expression(arg, at), at })
+				for (const statement of dataStatements(args, size, at, expression, reserve, false)) statements.push(statement)
 				return
 			}
 			const short = op.startsWith('c.')
-			if (short && !allowCompressed) throw new Error('Compressed instructions require RV32IMC and .option rvc')
+			if (short && !allowCompressed) throw new Error('Compressed instructions require the C extension (RV32IMC) and .option rvc')
 			const instructionSize = short ? 2 : op === 'li' || op === 'la' ? 8 : 4
 			reserve(instructionSize)
 			statements.push({
@@ -297,10 +388,10 @@ export function assembleRiscv(sources: AssemblySources, compressed = false): Ris
 						if (c.dot % (compressed ? 2 : 4))
 							throw new Error(`Instructions must be aligned to ${compressed ? 'two' : 'four'} bytes`)
 						if (short) {
-							const half = encodeCompressed(op, args, c.dot, register, (text) => c.value(expression(text, at), true)!)
+							const half = encodeCompressed(op, args, c.dot, register, (text) => c.value(expression(text, at), true)!, fregister, flen)
 							return Uint8Array.of(half & 255, half >>> 8)
 						}
-						return encodeInstruction(op, args, c, at)
+						return encodeInstruction(op, args, c, at, flen)
 					} catch (error) {
 						throw new AssemblyError((error as Error).message, at)
 					}
@@ -315,7 +406,7 @@ export function assembleRiscv(sources: AssemblySources, compressed = false): Ris
 	} catch (error) {
 		diagnostics.push(error instanceof AssemblyError ? error.diagnostic : { severity: 'error', message: (error as Error).message })
 	}
-	if (diagnostics.length) return new RiscvAssembly(sources.entries[0] ?? '', null, diagnostics, compressed)
+	if (diagnostics.length) return new RiscvAssembly(sources.entries[0] ?? '', null, diagnostics, compressed, flen)
 	const result = assembleStatements(statements, {
 		arithmetic,
 		checkValue: (v, size, at) => {
@@ -333,5 +424,5 @@ export function assembleRiscv(sources: AssemblySources, compressed = false): Ris
 	})
 	if (result.image)
 		result.image.entryAddress = result.symbols.lookup('_start') ?? result.symbols.lookup('main') ?? TEXT_BASE
-	return new RiscvAssembly(sources.entries[0] ?? '', result.image, result.diagnostics, compressed)
+	return new RiscvAssembly(sources.entries[0] ?? '', result.image, result.diagnostics, compressed, flen)
 }

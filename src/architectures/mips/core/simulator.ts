@@ -1,5 +1,4 @@
-import { editTransaction } from '../../../core/editTransaction'
-import { rewindHistoryTo } from '../../../core/historyCursor'
+import { capturedHistoryEdit } from '../../../core/editTransaction'
 /**
  * MIPS Runtime Simulator with Breakpoint & Step-Through Support
  */
@@ -246,6 +245,7 @@ export class MipsSimulator {
 	get running() { return this.execution.running }
 	set running(value: boolean) { this.execution.running = value }
 	private cpuHalted = false
+	get stopReason() { return this.execution.reason(this.cpuHalted) }
 	get halted() { return this.cpuHalted || this.execution.stopped }
 	set halted(value: boolean) { this.cpuHalted = value }
 	paused: boolean
@@ -370,6 +370,17 @@ export class MipsSimulator {
 			this.pendingSleepMs = 0
 			return delay
 		},
+	})
+	private readonly historyCommands = this.execution.historyCommands({
+		history: () => this.executionHistory, cursor: () => this.getHistoryCursor(),
+		undo: () => {
+			const history = this.executionHistory
+			if (history.timeline.index <= 0) return false
+			// Settle a suspended input instruction before exchanging its effects.
+			this.closeEntry()
+			return history.timeline.back(this.exchangeHistoryEntry)
+		},
+		after: () => { this.pendingInput = null },
 	})
 
 	private readonly memoryEdits = new MemoryEdits({
@@ -562,7 +573,9 @@ export class MipsSimulator {
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error)
 			this.writeConsole(`\nError: ${message}\n`)
-			this.halted = true
+			if (!this.cpuHalted) this.halt()
+			this.closeEntry()
+			this.execution.recordFault(error)
 		}
 	}
 
@@ -627,7 +640,11 @@ export class MipsSimulator {
 		} catch (error) {
 			// A dispatched exception has already pointed nextPc at the handler;
 			// anything else ends the run.
-			if (!(error instanceof ExceptionAbort)) throw error
+			if (!(error instanceof ExceptionAbort)) {
+				this.halt()
+				this.execution.recordFault(error)
+				throw error
+			}
 		}
 		// A syscall waiting on input suspends this instruction part-way; only
 		// `provideInput` may finish it, delay transition included.
@@ -654,16 +671,8 @@ export class MipsSimulator {
 		this.instructionCount++
 	}
 
-	stepBack() {
-		const history = this.executionHistory
-		if (history.timeline.index <= 0) return false
-		// Settle a suspended input instruction before exchanging its effects.
-		this.closeEntry()
-		this.execution.stopped = false
-		if (!history.timeline.back(this.exchangeHistoryEntry)) return false
-		this.pendingInput = null
-		this.pause()
-		return true
+	stepBack(): boolean {
+		return this.historyCommands.stepBack()
 	}
 
 	/** Replay recorded effects without repeating input, devices or guest execution. */
@@ -681,6 +690,7 @@ export class MipsSimulator {
 		if (!forward) this.exchangeControl(index)
 		this.exchangeSubsystems(index)
 		this.instructionCount = history.instructionCountAt(index) + (forward && !history.isEdit(index) ? 1 : 0)
+		if (forward && this.cpuHalted && this.execution.faultForEntry(history.at(index)!.id)) this.instructionCount = history.instructionCountAt(index)
 		this.seekObservers()
 	}
 
@@ -886,7 +896,7 @@ export class MipsSimulator {
 				this.heapPointer = swapB(this.heapPointer)
 				return
 			case KIND_HALTED: {
-				const held = this.halted
+				const held = this.cpuHalted
 				this.halted = b !== 0
 				effects.setB(index, held ? 1 : 0)
 				return
@@ -936,7 +946,7 @@ export class MipsSimulator {
 
 	/** Rewind retains all later entries, including repeated navigation to this row. */
 	rewindTo(id: number): boolean {
-		return rewindHistoryTo(this.executionHistory, () => this.getHistoryCursor(), id, () => this.stepBack(), () => {})
+		return this.historyCommands.rewindTo(id)
 	}
 
 	getHistoryCursor(): number {
@@ -950,14 +960,11 @@ export class MipsSimulator {
 	 * about to leave the path it took before.
 	 */
 	private edit(change: () => void) {
-		editTransaction(change, {
+		capturedHistoryEdit(change, {
 			begin: () => this.openEntry(this.pc, null, true),
-			commit: () => this.closeEntry(),
-			rollback: () => {
-				this.closeEntry()
-				this.stepBack()
-				this.executionHistory.timeline.branch()
-			},
+			close: () => this.closeEntry(),
+			undo: () => this.stepBack(),
+			branch: () => this.executionHistory.timeline.branch(),
 		})
 	}
 
@@ -966,6 +973,7 @@ export class MipsSimulator {
 	 * hardwired and stays read-only.
 	 */
 	setRegister(name: string, value: number): boolean {
+		if (typeof value !== 'number' || !this.execution.canEdit(value)) return false
 		if (name === '$zero' || !(name in this.registers)) return false
 		this.edit(() => {
 			if (name === '$hi') this.setHiLo(value, this.lo)
@@ -973,6 +981,8 @@ export class MipsSimulator {
 			else if (name === '$pc') {
 				// The entry already holds where execution stood, so moving the pc
 				// needs nothing recorded beyond it.
+				this.execution.stopped = false
+				this.halted = false
 				this.pc = value >>> 0
 				this.registers.$pc = this.pc
 			} else this.writeRegNamed(name, value | 0)
@@ -982,12 +992,14 @@ export class MipsSimulator {
 
 	/** One raw `$f0`-`$f31` word; a double is the two halves of an even pair. */
 	setFpRegister(index: number, value: number): boolean {
+		if (typeof value !== 'number' || !this.execution.canEdit(value)) return false
 		if (index < 0 || index >= this.fpRegisters.length) return false
 		this.edit(() => this.writeFpWord(index, value))
 		return true
 	}
 
 	setCp0Register(index: number, value: number): boolean {
+		if (typeof value !== 'number' || !this.execution.canEdit(value)) return false
 		if (index < 0 || index >= this.cp0Registers.length) return false
 		this.edit(() => this.writeCp0(index, value))
 		return true
@@ -998,6 +1010,8 @@ export class MipsSimulator {
 	 * edit to `.text` is the point of the self-modifying-code exercises.
 	 */
 	setMemoryWord(address: number, value: number): boolean {
+		if (!Number.isSafeInteger(address) || address < 0 || address > 0xffffffff) return false
+		if (typeof value !== 'number' || !this.execution.canEdit(value)) return false
 		if (address % 4 !== 0) return false
 		this.edit(() => this.writeMemoryRaw(address >>> 0, value, 4))
 		return true
@@ -1005,6 +1019,8 @@ export class MipsSimulator {
 
 	/** One byte, past the same protections, which is what the hex editor writes. */
 	setMemoryByte(address: number, value: number): boolean {
+		if (!Number.isSafeInteger(address) || address < 0 || address > 0xffffffff) return false
+		if (typeof value !== 'number' || !this.execution.canEdit(value)) return false
 		this.edit(() => this.writeByte(address >>> 0, value & 0xff))
 		return true
 	}
@@ -1039,11 +1055,13 @@ export class MipsSimulator {
 	 * and the section the window is showing is what the user can see it fall off.
 	 */
 	insertMemoryByte(address: number, limit: number, value: number): boolean {
+		if (typeof value !== 'number' || !this.execution.canEdit(value)) return false
 		return this.memoryEdits.insert(address, limit, value)
 	}
 
 	/** Removes the byte at `address`, moving the region down and zeroing `limit`. */
 	deleteMemoryByte(address: number, limit: number): boolean {
+		if (!this.execution.canEdit(address)) return false
 		return this.memoryEdits.delete(address, limit)
 	}
 
@@ -1170,6 +1188,7 @@ export class MipsSimulator {
 
 	/** Moves execution to `address` without running anything. */
 	setProgramCounter(address: number) {
+		if (!this.execution.canEdit(address)) return
 		this.execution.stopped = false
 		// Moving the pc by hand leaves the path the log recorded, so what it
 		// holds ahead of the present describes a future that will not happen.
@@ -1383,7 +1402,7 @@ export class MipsSimulator {
 	/** Where the next syscall 9 allocation starts. */
 	/** Ends the run; a step back has to be able to bring it out of that. */
 	halt() {
-		this.record(KIND_HALTED, 0, this.halted ? 1 : 0)
+		this.record(KIND_HALTED, 0, this.cpuHalted ? 1 : 0)
 		this.halted = true
 	}
 

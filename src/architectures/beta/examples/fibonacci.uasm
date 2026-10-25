@@ -1,0 +1,47 @@
+// Fibonacci
+// Compute F(10) = 55 with a loop.
+
+.include "beta.uasm"
+.options tty
+
+	CMOVE(stack, SP)
+	CMOVE(0, R1)            // fib(0) = 0
+	CMOVE(1, R2)            // fib(1) = 1
+	CMOVE(2, R3)            // i = 2
+
+loop:
+	CMPLEC(R3, 10, R5)      // if i > 10, exit
+	BF(R5, done)
+	ADD(R1, R2, R4)         // temp = fib(n - 2) + fib(n - 1)
+	MOVE(R2, R1)            // fib(n - 2) = fib(n - 1)
+	MOVE(R4, R2)            // fib(n - 1) = temp
+	ADDC(R3, 1, R3)         // i++
+	BR(loop)
+
+done:
+	// Print result
+	PUSH(R2)
+	CALL(print_decimal, 1)
+	HALT()
+
+// print_decimal(n): write n >= 0 in decimal, leading digits first.
+print_decimal:
+	PUSH(LP) PUSH(BP)
+	MOVE(SP, BP)
+	PUSH(R0) PUSH(R1)
+	LD(BP, -12, R1)         // R1 <- n
+	DIVC(R1, 10, R0)        // R0 <- n / 10, the leading digits
+	BEQ(R0, pd_digit)
+	PUSH(R0)
+	CALL(print_decimal, 1)
+pd_digit:
+	MULC(R0, 10, R0)        // R0 <- n % 10, the last digit
+	SUB(R1, R0, R0)
+	ADDC(R0, '0', R0)
+	WRCHAR()
+	POP(R1) POP(R0)
+	MOVE(BP, SP)
+	POP(BP) POP(LP)
+	RTN()
+
+stack: STORAGE(64)

@@ -3,6 +3,8 @@ import { decode } from '../../architectures/mips/core/decoder'
 import { PipelineModel, type PipelineSettings } from '../pipeline'
 import { registerEffects } from '../../architectures/mips/instructions'
 import { build, toolMachine, withExit, words } from '../../architectures/mips/core/__tests__/helpers'
+import { mipsInstructionSet } from '../../architectures/mips/instructions'
+import { hazardsOf } from '../../components/pipelineStages'
 
 const SETTINGS: PipelineSettings = {
 	dataHazards: 'forwarding',
@@ -101,6 +103,16 @@ describe('register effects', () => {
 })
 
 describe('ideal pipeline', () => {
+	it('clears the previous model when the next CPU has no timing or instruction metadata', () => {
+		const model = new PipelineModel(SETTINGS)
+		model.onConfigure({ delayedBranching: false, instructions: mipsInstructionSet })
+		model.onInstruction(0, decode(0)!, 0)
+		expect(model.snapshot().instructions).toBe(1)
+		model.onConfigure({ delayedBranching: false })
+		model.onInstruction(4, {}, 1)
+		model.onBranch(4, true)
+		expect(model.snapshot()).toMatchObject({ available: false, model: null, rows: [], instructions: 0, cycles: 0 })
+	})
 	it('takes one cycle per instruction plus four to fill', async () => {
 		// Five independent writes, then the two-instruction exit.
 		const snapshot = await analyse('li $t0, 1\nli $t1, 2\nli $t2, 3\nli $t3, 4\nli $t4, 5')
@@ -159,6 +171,42 @@ describe('data hazards', () => {
 })
 
 describe('control hazards', () => {
+	it.each([['addiu $t0,$zero,1', 1], ['lw $t0,0($sp)', 2]] as const)('waits for %s before resolving a branch in ID', (source, stalls) => {
+		const model = new PipelineModel({ ...SETTINGS, resolveBranchIn: 'id' })
+		model.onConfigure({ delayedBranching: false, instructions: mipsInstructionSet })
+		model.onInstruction(0, decode(words(source)[0])!, 0)
+		model.onInstruction(4, decode(0x11000001)!, 1)
+		model.onBranch(4, true)
+		model.onInstruction(8, decode(0)!, 2)
+		const snapshot = model.snapshot(), branch = snapshot.rows[1], target = snapshot.rows[2]
+		expect(branch.stalls).toBe(stalls)
+		expect(branch.cycles[2]).toBe(4 + stalls)
+		expect(target.cycles[0]).toBe(branch.cycles[2])
+	})
+
+	it('waits for a register-jump target in decode', () => {
+		const model = new PipelineModel(SETTINGS)
+		model.onConfigure({ delayedBranching: false, instructions: mipsInstructionSet })
+		model.onInstruction(0, decode(words('addiu $t0,$zero,16')[0])!, 0)
+		model.onInstruction(4, decode(words('jr $t0')[0])!, 1)
+		expect(model.snapshot().rows[1].stalls).toBe(1)
+	})
+
+	it.each([['id', 0, 3], ['ex', 1, 4], ['mem', 2, 5]] as const)('charges the target after the executed delay slot when resolving in %s', (resolveBranchIn, flushed, targetFetch) => {
+		const model = new PipelineModel({ ...SETTINGS, resolveBranchIn })
+		model.onConfigure({ delayedBranching: true, instructions: mipsInstructionSet })
+		model.onInstruction(0, decode(0x10000001)!, 0)
+		model.onBranch(0, true)
+		model.onInstruction(4, decode(0)!, 1)
+		model.onInstruction(8, decode(0)!, 2)
+		const { rows } = model.snapshot()
+		expect(rows[1].cycles[0]).toBe(2)
+		expect(rows[1].flushed).toBe(0)
+		expect(rows[2].cycles[0]).toBe(targetFetch)
+		expect(rows[2].flushed).toBe(flushed)
+		if (flushed) expect(hazardsOf(rows, 2).find(hazard => hazard.kind === 'control')?.producer?.index).toBe(rows[0].index)
+	})
+
 	it('charges nothing for a branch that falls through', async () => {
 		const snapshot = await analyse('li $t0, 1\nbeq $t0, $zero, skip\nli $t1, 2\nskip:')
 		expect(snapshot.controlFlushes).toBe(0)

@@ -27,6 +27,16 @@ function encodings(code: string) {
 	)
 }
 describe('RV32IM assembly', () => {
+	it('rejects misaligned debugger PC edits without changing state or history', () => {
+		const machine = runtime('nop\nebreak')
+		try {
+			const pc = machine.pc
+			for (const address of [pc + 1, pc + 2, MEMORY_BYTES]) expect(machine.writeRegister('PC', address)).toBe(false)
+			expect(machine.pc).toBe(pc)
+			expect(machine.history.length).toBe(0)
+		} finally { machine.dispose() }
+	})
+
 	it('matches independent instruction encodings', () => {
 		expect(
 			encodings(

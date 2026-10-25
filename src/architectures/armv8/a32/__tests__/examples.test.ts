@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { DATA_BASE, TEXT_BASE } from '../../a64/layout'
 import { STEP_HALT, STEP_WAIT } from '../cpu'
-import { A32_EXAMPLES } from '../examples'
+import { A32_EXAMPLES, A32_FIXED_EXAMPLES } from '../examples'
+import { MANDELBROT_PALETTE, mipsMandelbrotCounts, modelMandelbrotCounts } from '../../__tests__/mandelbrotReference'
 import { A32Machine } from '../machine'
 import { assembleA32 } from '../state'
 
@@ -24,8 +25,13 @@ const A32_OUTPUT: Record<string, string> = {
 
 const fileName = (key: string) => `${key}${key.endsWith('Armasm') ? '.armasm' : '.s'}`
 
-function load(key: string): A32Machine {
-	const result = assembleA32({ name: fileName(key), code: A32_EXAMPLES[key].code })
+/** Output of the examples only the floating-point set has. */
+const FP_OUTPUT: Record<string, string> = {
+	floatingpoint: 'sqrt(2) = 1.414\npi * 2.5^2 = 19.635\n1 / 3 = 0.333\nround(2.5) = 2, round(3.5) = 4\n',
+}
+
+function load(key: string, examples = A32_FIXED_EXAMPLES): A32Machine {
+	const result = assembleA32({ name: fileName(key), code: examples[key].code })
 	expect(result.diagnostics).toEqual([])
 	const machine = new A32Machine({ memoryBytes: 4 << 20 })
 	machine.load(result.image!)
@@ -35,14 +41,37 @@ function load(key: string): A32Machine {
 const pixel = (machine: A32Machine, index: number) => new DataView(machine.cpu.memory.buffer).getUint32(DATA_BASE - TEXT_BASE + index * 4, true)
 
 describe('AArch32 examples', () => {
-	it('all assemble without warnings', () => {
+	it('all assemble without warnings, fixed-point ones with floating point off', () => {
 		for (const [key, example] of Object.entries(A32_EXAMPLES)) {
 			expect(assembleA32({ name: fileName(key), code: example.code }).diagnostics, key).toEqual([])
+		}
+		for (const [key, example] of Object.entries(A32_FIXED_EXAMPLES)) {
+			expect(assembleA32({ name: fileName(key), code: example.code }, [], 4 << 20, false).diagnostics, key).toEqual([])
 		}
 	})
 
 	it('runs every example but the interactive ones', () => {
-		expect(Object.keys(A32_EXAMPLES).sort()).toEqual([...Object.keys(A32_OUTPUT), 'input', 'mmio'].sort())
+		expect(Object.keys(A32_FIXED_EXAMPLES).sort()).toEqual([...Object.keys(A32_OUTPUT), 'input', 'mmio'].sort())
+		expect(Object.keys(A32_EXAMPLES).sort()).toEqual([...Object.keys(A32_FIXED_EXAMPLES), ...Object.keys(FP_OUTPUT)].sort())
+	})
+
+	it.each(Object.keys(FP_OUTPUT))('runs %s to its exit with floating point', (key) => {
+		const machine = load(key, A32_EXAMPLES)
+		expect(machine.run(2_000_000)).toBe(STEP_HALT)
+		expect(machine.linux.exitCode).toBe(0)
+		expect(machine.linux.output).toBe(FP_OUTPUT[key])
+	})
+
+	it('draws the floating-point Mandelbrot set exactly as the MIPS example does', () => {
+		expect(A32_EXAMPLES.mandelbrot.code).not.toBe(A32_FIXED_EXAMPLES.mandelbrot.code)
+		const machine = load('mandelbrot', A32_EXAMPLES)
+		expect(machine.run(2_000_000)).toBe(STEP_HALT)
+		expect(machine.linux.exitCode).toBe(0)
+		const counts = mipsMandelbrotCounts()
+		// The recorded MIPS picture is what single-precision arithmetic gives.
+		expect(modelMandelbrotCounts()).toEqual(counts)
+		const drawn = counts.map((_, index) => MANDELBROT_PALETTE.indexOf(pixel(machine, index)))
+		expect(drawn).toEqual(counts)
 	})
 
 	it.each(Object.keys(A32_OUTPUT))('runs %s to its exit', (key) => {

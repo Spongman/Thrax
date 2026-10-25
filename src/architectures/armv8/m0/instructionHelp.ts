@@ -1,5 +1,5 @@
-import { formatInstructionHelp, type InstructionHelp, type InstructionTable } from '../../../core/instructionHelp'
-import { ARM_CONDITIONS, ARM_INSTRUCTION_DOCS } from '../../arm/instructionHelp'
+import { formatInstructionHelp, instructionLinks, type InstructionHelp, type InstructionTable } from '../../../core/instructionHelp'
+import { ARM_CONDITIONS, ARM_INSTRUCTION_DOCS } from '../shared/instructionHelp'
 import { ALU, CONDITIONS, MNEMONICS } from './isa'
 
 const OVERRIDES: InstructionTable = {
@@ -36,6 +36,21 @@ const OVERRIDES: InstructionTable = {
 }
 const ALIASES: Readonly<Record<string, string>> = { ldm: 'ldmia', stm: 'stmia' }
 
+/** Cortex-M0 Devices Generic User Guide (DUI 0497A) pages; a page ending in `/` is followed by the mnemonic. */
+export const m0InstructionLink = instructionLinks('https://developer.arm.com/documentation/dui0497/a/the-cortex-m0-instruction-set/', Object.fromEntries(Object.entries({
+	'memory-access-instructions/adr': 'adr', 'memory-access-instructions/ldr-and-str--immediate-offset': 'ldr str ldrb strb ldrh strh',
+	'memory-access-instructions/ldr-and-str--register-offset': 'ldrsb ldrsh', 'memory-access-instructions/ldm-and-stm': 'ldm stm ldmia stmia',
+	'memory-access-instructions/push-and-pop': 'push pop',
+	'general-data-processing-instructions/adc--add--rsb--sbc--and-sub': 'adcs add adds rsbs negs sbcs sub subs',
+	'general-data-processing-instructions/and--orr--eor--and-bic': 'ands orrs eors bics',
+	'general-data-processing-instructions/asr--lsl--lsr--and-ror': 'asrs lsls lsrs rors',
+	'general-data-processing-instructions/cmp-and-cmn': 'cmp cmn', 'general-data-processing-instructions/mov-and-mvn': 'mov movs mvns',
+	'general-data-processing-instructions/muls': 'muls', 'general-data-processing-instructions/rev--rev16--and-revsh': 'rev rev16 revsh',
+	'general-data-processing-instructions/sxt-and-uxt': 'sxtb sxth uxtb uxth', 'general-data-processing-instructions/tst': 'tst',
+	'branch-and-control-instructions/b--bl--bx--and-blx': 'b bl bx blx beq bne bcs bcc bmi bpl bvs bvc bhi bls bge blt bgt ble bhs blo',
+	'miscellaneous-instructions/cps': 'cpsid cpsie', 'miscellaneous-instructions/': 'bkpt dmb dsb isb mrs msr nop sev svc wfe wfi',
+}).flatMap(([page, names]) => names.split(' ').map(name => [name, page.endsWith('/') ? page + name : page]))))
+
 export function m0InstructionHelp(name: string): InstructionHelp | null {
 	const lower = name.toLowerCase()
 	if (!MNEMONICS.includes(lower)) return null
@@ -51,5 +66,6 @@ export function m0InstructionHelp(name: string): InstructionHelp | null {
 		summary: entry[1] + (logical ? ' Updates N and Z; C and V are preserved.' : ''),
 		forms: [`${lower} ${logical ? (lower === 'mvns' ? 'Rd, Rm' : 'Rdn, Rm') : entry[0]}`.trim()],
 		reference: 'https://developer.arm.com/documentation/dui0497/a/BABHCHGB',
+		link: m0InstructionLink(lower),
 	})
 }

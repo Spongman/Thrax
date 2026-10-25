@@ -31,14 +31,14 @@ export const BETA_SETTINGS = defineSettings<BetaSettings>({
 	defaults: DEFAULT_BETA_SETTINGS,
 	fields: [
 		{
-			key: 'memoryBytes', group: 'Simulator', rebuild: true,
+			key: 'memoryBytes', group: 'Memory', rebuild: true,
 			control: { kind: 'choice', options: BETA_MEMORY_SIZES },
 			isValid: (value) => BETA_MEMORY_SIZES.some((size) => size.value === value),
 			label: 'Memory size',
 			hint: 'One flat memory from address 0; a program has to fit in it',
 		},
 		{
-			key: 'tty', group: 'Simulator', control: { kind: 'check' }, isValid: isBoolean, rebuild: true,
+			key: 'tty', group: 'Execution', control: { kind: 'check' }, isValid: isBoolean, rebuild: true,
 			label: 'Console I/O unless the program says .options notty',
 			hint: 'Lets RDCHAR and WRCHAR run in a program that names neither tty nor notty',
 		},

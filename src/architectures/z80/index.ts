@@ -33,9 +33,9 @@ const definition: ArchitectureDefinition<ArchitectureServices<Z80Settings>> = {
 	examples: EXAMPLES,
 	settings: Z80_SETTINGS,
 	createServices(): ArchitectureServices<Z80Settings> {
-		return createArchitectureServices<Z80Settings>(({ check }) => {
-			/** The last program that assembled, whose symbols the data tips show. */
-			let latest: Z80Assembly | null = null
+		return createArchitectureServices<Z80Settings>(({ check, program: inspectionProgram }) => {
+			/** The loaded program, or a successful preview before the first load. */
+			const current = () => inspectionProgram() as Z80Assembly | null
 			return {
 				disassembly: z80Disassembly,
 				// One translation unit: the entry file, with the rest reached by INCLUDE.
@@ -43,7 +43,6 @@ const definition: ArchitectureDefinition<ArchitectureServices<Z80Settings>> = {
 					const main = files.find((file) => file.name === entries[0]) ?? files[0]
 					const result = assembleZ80(main, { files })
 					const program = new Z80Assembly(main.name, result.image, result.diagnostics, result.values)
-					if (result.image) latest = program
 					return program
 				},
 				createMachine(program, _settings, options) {
@@ -51,7 +50,7 @@ const definition: ArchitectureDefinition<ArchitectureServices<Z80Settings>> = {
 					return next
 				},
 				profile: () => z80Profile,
-				describeToken: (text, column, state) => describeZ80Token(text, column, state, { value: (name) => latest?.values.get(name) }),
+				describeToken: (text, column, state) => describeZ80Token(text, column, state, { value: (name) => current()?.values.get(name) }),
 				async installEditor(monaco, host) {
 					const { installEditor } = await import('./editor')
 					check()
@@ -60,7 +59,7 @@ const definition: ArchitectureDefinition<ArchitectureServices<Z80Settings>> = {
 						active: () => host.active(),
 						open: (file, line) => host.open(file, line),
 						inspection: () => host.inspection(),
-						values: () => latest?.values ?? null,
+						values: () => current()?.values ?? null,
 					})
 					return contribution
 				},

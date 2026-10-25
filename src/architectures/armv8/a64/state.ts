@@ -14,32 +14,31 @@ function a64Assembly(program: AssembledProgram): A64Assembly {
 	return program
 }
 
-/** A fresh state per activation, holding the last program for data tips. */
+/** A fresh backend per activation; inspection receives its program explicitly. */
 export function createA64State(): ExecutionState {
-	let latest: A64Assembly | null = null
 	return {
 		id: 'aarch64',
 		// One translation unit: the entry file, with the rest reached by `.include`.
 		assemble({ files, entries }, settings) {
 			const main = files.find((file) => file.name === entries[0]) ?? files[0]
-			const result = assembleA64(main, { files })
+			const result = assembleA64(main, { files, floatingPoint: settings.floatingPoint !== false })
 			const program = new A64Assembly(main.name, result.image, result.diagnostics, result.values)
 			// Caught here rather than when the machine loads it, so it is marked like any other error.
 			const top = memoryTop(settings.memoryBytes)
 			if (result.image && program.end() > top) {
 				result.diagnostics.push({ severity: 'error', file: main.name, message: `The program ends at 0x${program.end().toString(16)}, past the end of memory at 0x${top.toString(16)}` })
 			}
-			if (result.image) latest = program
 			return program
 		},
 		createMachine: (program, settings, options) => new A64Runtime(a64Assembly(program), {
 			memoryBytes: settings.memoryBytes,
 			historyLimit: options.historyLimit,
 			speed: options.speed,
+			floatingPoint: settings.floatingPoint !== false,
 		}),
 		profile: (settings) => a64Profile(settings.memoryBytes),
 		disassembly: a64Disassembly,
-		describeToken: (text, column, inspection) => describeA64Token(text, column, inspection, { value: (name) => latest?.values.get(name) }),
-		values: () => latest?.values ?? null,
+		describeToken: (text, column, inspection, program) => describeA64Token(text, column, inspection, { value: (name) => (program as A64Assembly | null)?.values.get(name) }),
+		values: program => (program as A64Assembly | null)?.values ?? null,
 	}
 }

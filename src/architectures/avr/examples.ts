@@ -1,158 +1,61 @@
-import { mandelbrot } from './mandelbrot'
+import type { Example } from '../contracts'
+import mandelbrotSource from './examples/mandelbrot.asm?raw'
+import ackermannSource from './examples/ackermann.asm?raw'
+import bitmapSource from './examples/bitmap.asm?raw'
+import sumSource from './examples/sum.asm?raw'
+import factorialSource from './examples/factorial.asm?raw'
+import fibonacciSource from './examples/fibonacci.asm?raw'
+import loopSource from './examples/loop.asm?raw'
+import bitwiseSource from './examples/bitwise.asm?raw'
+import callSource from './examples/call.asm?raw'
 
-export const examples = {
-	mandelbrot,
+/** Source programs are architecture-local text assets; this file holds metadata. */
+export const examples: Readonly<Record<string, Example>> = {
+	mandelbrot: {
+		name: 'Mandelbrot Set',
+		description: 'Four byte multiplies form each signed 8.8 product; a 32 by 32 RGB fractal fills SRAM.',
+		tools: ['bitmap'],
+		code: mandelbrotSource
+	},
 	ackermann: {
 		name: 'Ackermann',
 		description: 'Nested recursive calls compute A(3, 3) = 61 in r16 and SRAM at debugger 0x10100.',
-		code: `; m in r20, n in r21, result in r16. RCALL/RET use the SRAM stack.
-ldi r20, 3
-ldi r21, 3
-rcall ack
-sts 0x100, r16
-break
-ack:
-tst r20
-breq base
-tst r21
-breq zero
-push r20
-dec r21
-rcall ack
-pop r20
-mov r21, r16
-dec r20
-rjmp ack
-zero:
-dec r20
-ldi r21, 1
-rjmp ack
-base:
-mov r16, r21
-inc r16
-ret
-`,
+		code: ackermannSource
 	},
 	bitmap: {
 		tools: ['bitmap'],
 		name: 'Bitmap Display',
 		description: 'Draw the common 32 by 32 red/blue gradient in SRAM at debugger address 0x10100.',
-		code: `; Bitmap base: debugger 0x10100 = AVR SRAM address 0x100.
-ldi r26, 0
-ldi r27, 1
-clr r18
-row:
-clr r17
-pixel:
-mov r16, r17
-lsl r16
-lsl r16
-lsl r16
-st X+, r16
-clr r16
-st X+, r16
-mov r16, r18
-lsl r16
-lsl r16
-lsl r16
-st X+, r16
-clr r16
-st X+, r16
-inc r17
-cpi r17, 32
-brne pixel
-inc r18
-cpi r18, 32
-brne row
-break
-`
+		code: bitmapSource
 	},
 	sum: {
 		name: 'Sum of Numbers',
 		description: 'Add 5 and 3; the result 8 remains in r17.',
-		code: `; Code labels and .org are BYTE addresses in this dialect.
-ldi r16, 3
-ldi r17, 5
-add r17, r16
-break
-`
+		code: sumSource
 	},
 	factorial: {
 		name: 'Factorial',
 		description: 'Compute 5! using MUL; the result 120 remains in r16.',
-		code: `ldi r16, 1
-ldi r17, 5
-multiply:
-mul r16, r17
-mov r16, r0
-dec r17
-brne multiply
-break
-`
+		code: factorialSource
 	},
 	fibonacci: {
 		name: 'Fibonacci',
 		description: 'Compute Fibonacci(10); the result 55 remains in r16.',
-		code: `clr r16
-ldi r17, 1
-ldi r18, 10
-next:
-mov r19, r16
-add r19, r17
-mov r16, r17
-mov r17, r19
-dec r18
-brne next
-break
-`
+		code: fibonacciSource
 	},
 	loop: {
 		name: 'Loop Counter',
 		description: 'Store 1 through 5 in SRAM at hardware 0x100 (debugger 0x10100).',
-		code: `ldi r26, 0
-ldi r27, 1
-ldi r16, 1
-ldi r17, 5
-next:
-st X+, r16
-inc r16
-dec r17
-brne next
-break
-`
+		code: loopSource
 	},
 	bitwise: {
 		name: 'Bitwise Operations',
 		description: 'Combine 12 and 10; AND = 8 in r18, OR = 14 in r19, XOR = 6 in r20.',
-		code: `ldi r16, 12
-ldi r17, 10
-mov r18, r16
-and r18, r17
-mov r19, r16
-or r19, r17
-mov r20, r16
-eor r20, r17
-break
-`
+		code: bitwiseSource
 	},
 	call: {
 		name: 'Subroutine and SRAM',
 		description: 'Harvard data, pointer addressing, stack and a subroutine.',
-		code: `.dseg
-value: .byte 41
-.cseg
-ldi r26, lo8(value)
-ldi r27, hi8(value)
-ld r16, X
-rcall increment
-st X, r16
-break
-increment:
-push r17
-ldi r17, 1
-add r16, r17
-pop r17
-ret
-`
+		code: callSource
 	}
 }

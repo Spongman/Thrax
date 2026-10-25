@@ -45,7 +45,7 @@ export const DEFAULT_MIPS_SETTINGS: MipsSettings = {
 	memoryConfiguration: 'default',
 }
 
-const MEMORY_GROUP = 'Memory configuration'
+const MEMORY_GROUP = 'Memory'
 
 /**
  * Keys are the ones these options had before settings were per architecture,
@@ -75,28 +75,28 @@ export const MIPS_SETTINGS = defineSettings<MipsSettings>({
 			hint: 'Source file prepended to every assembly; empty means none',
 		},
 		{
-			key: 'delayedBranching', group: 'Simulator', control: { kind: 'check' }, isValid: isBoolean, rebuild: true, legacyKey: 'assemble.delayedBranching',
+			key: 'delayedBranching', group: 'Execution', control: { kind: 'check' }, isValid: isBoolean, rebuild: true, legacyKey: 'assemble.delayedBranching',
 			label: 'Delayed branching',
 			hint: 'Run the instruction after a branch or jump before control transfers, as real MIPS hardware does',
 		},
 		{
 			// Read once when the simulator is built, so a change needs a fresh one.
-			key: 'selfModifyingCode', group: 'Simulator', control: { kind: 'check' }, isValid: isBoolean, rebuild: true, legacyKey: 'simulate.selfModifyingCode',
+			key: 'selfModifyingCode', group: 'Execution', control: { kind: 'check' }, isValid: isBoolean, rebuild: true, legacyKey: 'simulate.selfModifyingCode',
 			label: 'Self-modifying code',
 			hint: 'Permit writes into the text segment and execution outside it',
 		},
 		{
-			key: 'bareMachine', group: 'Simulator', control: { kind: 'check' }, isValid: isBoolean, rebuild: true, legacyKey: 'assemble.bareMachine',
+			key: 'bareMachine', group: 'Execution', control: { kind: 'check' }, isValid: isBoolean, rebuild: true, legacyKey: 'assemble.bareMachine',
 			label: 'Bare machine',
 			hint: 'Allow only the instructions real hardware implements',
 		},
 		{
-			key: 'programArguments', group: 'Simulator', control: { kind: 'check' }, isValid: isBoolean, legacyKey: 'simulate.programArguments',
+			key: 'programArguments', group: 'Execution', control: { kind: 'check' }, isValid: isBoolean, legacyKey: 'simulate.programArguments',
 			label: 'Program arguments provided to the program',
 			hint: 'Place the arguments below on the stack, with their count in $a0',
 		},
 		{
-			key: 'programArgumentsText', group: 'Simulator', control: { kind: 'text' }, isValid: isString, enabledBy: 'programArguments', legacyKey: 'simulate.programArgumentsText',
+			key: 'programArgumentsText', group: 'Execution', control: { kind: 'text' }, isValid: isString, enabledBy: 'programArguments', legacyKey: 'simulate.programArgumentsText',
 			label: 'Arguments',
 			hint: 'Arguments passed to the program, separated by spaces',
 		},
@@ -110,7 +110,7 @@ export const MIPS_SETTINGS = defineSettings<MipsSettings>({
 					{ value: 'textBasedCompact', label: 'Compact, text at address 0' },
 				],
 			},
-			label: 'Layout',
+			label: 'Memory layout',
 			hint: 'Where the segments of the address space start',
 		},
 	],

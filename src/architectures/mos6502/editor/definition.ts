@@ -1,3 +1,4 @@
+import { stripAssemblyComment } from '../../../core/assembly/text'
 /**
  * Ctrl+click on a name goes to its definition: a label (`name:`), a symbol
  * (`name =`, `name .equ`) or a macro (`.macro name`). Workspace text is
@@ -5,7 +6,7 @@
  */
 
 import type * as Monaco from 'monaco-editor'
-import { registerGotoDefinition, type Definition, type GotoDefinitionSources } from '../../../services/gotoDefinition'
+import { registerGotoDefinition, findPatternDefinition, escapeSymbol, symbolAt, type Definition, type GotoDefinitionSources } from '../../../services/gotoDefinition'
 import type { SourceFile } from '../../contracts'
 import { MOS6502_LANGUAGE_ID } from './grammar'
 
@@ -13,39 +14,21 @@ const NAME = /[A-Za-z_.@][\w.@]*/g
 
 /** The name under `column` (1-based) on `text`, or null. */
 export function mos6502SymbolAt(text: string, column: number): string | null {
-	for (const match of text.matchAll(NAME)) {
-		const start = match.index + 1
-		if (column >= start && column < start + match[0].length) return match[0]
-	}
-	return null
+	return symbolAt(text, column, NAME)
 }
 
-const escape = (name: string) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 /** Where `name` is defined in `files`, searched in order. */
 export function findMos6502Definition(files: readonly SourceFile[], name: string): Definition | null {
 	if (name.startsWith('.')) return null
-	const escaped = escape(name)
+	const escaped = escapeSymbol(name)
 	const patterns = [
 		new RegExp(`^(\\s*)(${escaped})\\s*:(?!=)`),
 		new RegExp(`^(\\s*)(${escaped})\\s*(?:=|:=|\\.?equ\\b|\\.set\\b)`, 'i'),
 		new RegExp(`^(\\s*\\.macro\\s+)(${escaped})(?![\\w.@])`, 'i'),
 		new RegExp(`^(\\s*\\.(?:equ|set)\\s+)(${escaped})(?![\\w.@])`, 'i'),
 	]
-	for (const file of files) {
-		const lines = file.code.split('\n')
-		for (let line = 0; line < lines.length; line++) {
-			const comment = lines[line].indexOf(';')
-			const text = comment < 0 ? lines[line] : lines[line].slice(0, comment)
-			for (const pattern of patterns) {
-				const match = pattern.exec(text)
-				if (!match) continue
-				const column = match[1].length + 1
-				return { file: file.name, line: line + 1, column, endColumn: column + name.length }
-			}
-		}
-	}
-	return null
+	return findPatternDefinition(files, name, patterns, code => code.split('\n').map(line => stripAssemblyComment(line, [';'])))
 }
 
 export function registerMos6502Definitions(monaco: typeof Monaco, sources: GotoDefinitionSources, language = MOS6502_LANGUAGE_ID): Monaco.IDisposable {

@@ -1,0 +1,7 @@
+MapUserAddress:
+        // [Design Problem 1] solved for THRAX: add the current base.
+        PUSH(r1)
+        LD(CurProc, r1)         // current process table entry,
+        LD(r1, 31*4, r1)        //   whose base address follows R0-R30
+        ADD(r0, r1, r0)
+        POP(r1)

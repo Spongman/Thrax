@@ -1,5 +1,5 @@
+import { RamInspector } from '../../core/ramInspector'
 import { notifyHistorySeek } from '../../core/observer'
-import { rewindHistoryTo } from '../../core/historyCursor'
 /**
  * A Mos6502Machine behind the neutral machine contract: the run loop,
  * breakpoints, pacing, observers and user edits the debugger drives.
@@ -25,22 +25,6 @@ const READ_INPUT: PendingInput = Object.freeze({ type: 'string', prompt: 'The pr
 const KEYBOARD_INPUT: PendingInput = Object.freeze({ type: 'string', prompt: 'Type to queue keyboard input' })
 
 const FLAG_BITS: ReadonlyMap<string, number> = new Map(FLAGS.map(({ id, bit }) => [id, bit]))
-
-/** Debugger reads of the 64 KiB; never reaches the I/O page's device. */
-class Mos6502Memory implements MemoryInspector {
-	readonly wordBytes = 1
-	readonly littleEndian = true
-
-	constructor(private readonly bytes: Uint8Array) {}
-
-	byte(address: number): number | undefined {
-		return address >= 0 && address <= 0xFFFF ? this.bytes[address] : undefined
-	}
-
-	word(address: number): number | undefined {
-		return this.byte(address)
-	}
-}
 
 export interface Mos6502RuntimeOptions {
 	model?: CpuModel
@@ -71,6 +55,11 @@ export class Mos6502Runtime implements Machine {
 		depth: () => this.machine.callStack.depth,
 		step: () => this.advance() === STEP_WAIT ? ExecutionStep.WAIT : ExecutionStep.ADVANCED,
 	})
+	private readonly historyCommands = this.execution.historyCommands({
+		history: () => this.history, cursor: () => this.historyCursor,
+		undo: () => this.machine.history?.stepBack() ?? false,
+		after: () => this.resumed(),
+	})
 
 	private readonly memoryEdits = new MemoryEdits({
 		region: () => ({ start: 0, end: this.machine.cpu.memory.length - 1 }),
@@ -93,6 +82,7 @@ export class Mos6502Runtime implements Machine {
 	}
 
 	get pc() { return this.machine.cpu.pc }
+	get stopReason() { return this.execution.reason(this.machine.halted, this.fault, this.machine.cpu.faultAddress) }
 	get halted() { return this.machine.halted || this.execution.stopped || this.fault !== null }
 
 	/** A read of $F001 waiting, or a program that looks for keys, with none queued. */
@@ -194,27 +184,21 @@ export class Mos6502Runtime implements Machine {
 	pause() { this.execution.pause() }
 	stop() { this.execution.stop() }
 	stepBack(): boolean {
-		const log = this.machine.history
-		if (!log || !log.stepBack()) return false
-		this.resumed()
-		return true
+		return this.historyCommands.stepBack()
 	}
 
 	rewindTo(id: number): boolean {
-		const log = this.machine.history
-		return !!log && rewindHistoryTo(this.history, () => this.historyCursor, id, () => log.stepBack(), () => this.resumed())
+		return this.historyCommands.rewindTo(id)
 	}
 
 	/** Back from a rewind: whatever ended the run is undone with it. */
 	private resumed() {
 		this.fault = null
-		this.execution.stopped = false
-		this.paused = true
-		this.execution.running = false
 		this.seekObservers()
 	}
 
 	setProgramCounter(address: number) {
+		if (!this.execution.canEdit(address)) return
 		this.machine.editPc(address)
 		this.fault = null
 		this.execution.stopped = false
@@ -244,6 +228,7 @@ export class Mos6502Runtime implements Machine {
 	}
 
 	writeRegister(id: string, value: number): boolean {
+		if (typeof value !== 'number' || !this.execution.canEdit(value)) return false
 		if (id === 'PC') {
 			this.setProgramCounter(value)
 			return true
@@ -266,19 +251,22 @@ export class Mos6502Runtime implements Machine {
 	}
 
 	inspectMemory(): MemoryInspector {
-		return new Mos6502Memory(this.machine.cpu.memory)
+		return new RamInspector(this.machine.cpu.memory, { wordBytes: 1, littleEndian: true })
 	}
 
 	writeByte(address: number, value: number) {
+		if (!this.execution.canEdit(value) || !Number.isSafeInteger(address) || address < 0) return false
 		return this.machine.editBytes(address, [value])
 	}
 
 	/** Shifts `[address, limit]` up a byte; what is past the last non-zero byte stays. */
 	insertByte(address: number, limit: number, value: number): boolean {
+		if (!this.execution.canEdit(value)) return false
 		return this.memoryEdits.insert(address, limit, value)
 	}
 
 	deleteByte(address: number, limit: number): boolean {
+		if (!this.execution.canEdit(address)) return false
 		return this.memoryEdits.delete(address, limit)
 	}
 
@@ -287,7 +275,6 @@ export class Mos6502Runtime implements Machine {
 	}
 
 	dispose() {
-		this.onProgress = null
 		this.stop()
 		this.execution.dispose()
 	}

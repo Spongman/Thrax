@@ -10,9 +10,11 @@ import {
 	conditionCode, encodeLogicalImmediate, encodeMoveWide, EXTEND_SXTW, EXTEND_SXTX, EXTEND_UXTW, EXTEND_UXTX, MASK32, MASK64, R_LR, R_ZR,
 	SHIFT_LSL, SHIFT_ROR,
 } from '../isa'
-import { OperandKind, type ExtendOperand, type MemoryOperand, type Operand, type RegisterOperand, type ShiftOperand, type Value } from './operands'
+import { DOUBLE, encodeImm8, numberToBits, SINGLE } from '../../shared/fp'
+import { SYSREG_FPCR, SYSREG_FPSR, SYSREG_NZCV } from '../decode'
+import { OperandKind, type ExtendOperand, type FpRegisterOperand, type MemoryOperand, type Operand, type RegisterOperand, type ShiftOperand, type Value } from './operands'
 
-const { REGISTER, IMMEDIATE, MEMORY, SHIFT, EXTEND, LITERAL, EXPRESSION } = OperandKind
+const { REGISTER, IMMEDIATE, MEMORY, SHIFT, EXTEND, LITERAL, EXPRESSION, FP_REGISTER } = OperandKind
 
 /** What an encoder reads once layout is settled. */
 export interface EncodeContext {
@@ -34,6 +36,8 @@ export interface PoolSlot {
 export interface EncodeEnvironment {
 	/** A literal pool entry of `size` bytes holding `value`. */
 	pool(size: number, value: Value): PoolSlot
+	/** SIMD&FP instructions assemble; on unless false. */
+	floatingPoint?: boolean
 }
 
 export type Encoder = (context: EncodeContext) => number
@@ -610,32 +614,52 @@ function indexOption(memory: MemoryOperand, size: number): (context: EncodeConte
 
 const loadStoreForm = (access: Access): Form => (operands, at, environment) => {
 	count(operands, at, 2)
+	if (operands[0]?.kind === FP_REGISTER) return fpLoadStore(access, operands[0], operands[1], at)
 	const rt = reg(operands[0], at, access.wide === undefined ? {} : { wide: access.wide })
 	const size = access.size || (rt.wide ? 8 : 4)
 	const opc = accessOpc(access, rt)
 	const sizeBits = Math.log2(size) << 30
 	const address = operands[1]
-	if (address?.kind === LITERAL || address?.kind === EXPRESSION || address?.kind === IMMEDIATE) {
-		if (access.kind === 'store' || access.unscaled || (size < 4)) fail('Only ldr and ldrsw load from a label or a literal', address.at)
+	return addressing(address, size, sizeBits, opc, rt.n, access, at, () => {
+		if (access.kind === 'store' || access.unscaled || (size < 4)) fail('Only ldr and ldrsw load from a label or a literal', address!.at)
 		const literalOpc = access.kind === 'signed' ? 2 : rt.wide ? 1 : 0
-		if (address.kind === LITERAL) {
-			const exact = address.value.exact
+		if (address!.kind === LITERAL) {
+			const exact = address!.value.exact
 			if (exact !== null && access.kind !== 'signed') {
 				// GNU uses a MOV where one encodes the constant.
 				const width = rt.wide ? 64 : 32
 				const bits = BigInt.asUintN(width, exact)
-				if (encodeMoveWide(bits, width) || encodeLogicalImmediate(bits, width)) return moveImmediate(rt, address.value)
+				if (encodeMoveWide(bits, width) || encodeLogicalImmediate(bits, width)) return moveImmediate(rt, address!.value)
 			}
-			const slot = environment.pool(access.kind === 'signed' ? 4 : size, address.value)
+			const slot = environment.pool(access.kind === 'signed' ? 4 : size, address!.value)
 			return (context) => {
 				const offset = BigInt(context.slot(slot) - context.dot)
-				if (offset >= 1n << 20n || offset < -(1n << 20n)) fail('The literal pool is out of range; add .ltorg nearer', address.at)
+				if (offset >= 1n << 20n || offset < -(1n << 20n)) fail('The literal pool is out of range; add .ltorg nearer', address!.at)
 				return word((literalOpc << 30) | 0x18000000 | (Number(BigInt.asUintN(19, offset / 4n)) << 5) | rt.n)
 			}
 		}
-		const value = address.value
+		const value = (address as { value: Value }).value
 		return (context) => word((literalOpc << 30) | 0x18000000 | (relative(context, value, 19, 4, 'Literal') << 5) | rt.n)
-	}
+	})
+}
+
+/** LDR/STR/LDUR/STUR of B, H, S, D or Q: the integer forms with V (bit 26) set. */
+function fpLoadStore(access: Access, rt: FpRegisterOperand, address: Operand, at: Position): Encoder {
+	if (access.kind === 'signed' || access.size) fail(`${rt.name} is not loaded or stored by this instruction; use ldr, str, ldur or stur`, rt.at)
+	const size = rt.size
+	const opc = (access.kind === 'store' ? 0 : 1) | (size === 16 ? 2 : 0)
+	const sizeBits = (size === 16 ? 0 : Math.log2(size)) << 30
+	return addressing(address, size, sizeBits | 0x04000000, opc, rt.n, access, at, () => {
+		if (access.kind === 'store' || access.unscaled || size < 4 || address.kind === LITERAL) fail('Only ldr of S, D or Q loads from a label', address.at)
+		const value = (address as { value: Value }).value
+		const literalOpc = size === 4 ? 0 : size === 8 ? 1 : 2
+		return (context) => word((literalOpc << 30) | 0x1C000000 | (relative(context, value, 19, 4, 'Literal') << 5) | rt.n)
+	})
+}
+
+/** A one-register load or store's address forms; `literal` makes a label or `=` form. `base` holds the size and V bits. */
+function addressing(address: Operand | undefined, size: number, base: number, opc: number, rt: number, access: Access, at: Position, literal: () => Encoder): Encoder {
+	if (address?.kind === LITERAL || address?.kind === EXPRESSION || address?.kind === IMMEDIATE) return literal()
 	if (address?.kind !== MEMORY) return fail('Expected an address in brackets', address?.at ?? at)
 	const rn = address.base.n
 	if (address.index) {
@@ -644,10 +668,10 @@ const loadStoreForm = (access: Access): Form => (operands, at, environment) => {
 		const rm = address.index.n
 		return (context) => {
 			const { option, scaled } = options(context)
-			return word(sizeBits | 0x38200800 | (opc << 22) | (rm << 16) | (option << 13) | (scaled ? 1 << 12 : 0) | (rn << 5) | rt.n)
+			return word(base | 0x38200800 | (opc << 22) | (rm << 16) | (option << 13) | (scaled ? 1 << 12 : 0) | (rn << 5) | rt)
 		}
 	}
-	const unscaled = (offset: number, mode: number) => word(sizeBits | 0x38000000 | (opc << 22) | ((offset & 0x1FF) << 12) | (mode << 10) | (rn << 5) | rt.n)
+	const unscaled = (offset: number, mode: number) => word(base | 0x38000000 | (opc << 22) | ((offset & 0x1FF) << 12) | (mode << 10) | (rn << 5) | rt)
 	if (address.post || address.writeback) {
 		if (access.unscaled) fail('ldur and stur do not write back', address.at)
 		const value = address.post ?? address.offset
@@ -658,7 +682,7 @@ const loadStoreForm = (access: Access): Form => (operands, at, environment) => {
 	return (context) => {
 		const offset = value ? Number(context.value(value)) : 0
 		if (!access.unscaled && offset >= 0 && offset % size === 0 && offset / size <= 0xFFF) {
-			return word(sizeBits | 0x39000000 | (opc << 22) | ((offset / size) << 10) | (rn << 5) | rt.n)
+			return word(base | 0x39000000 | (opc << 22) | ((offset / size) << 10) | (rn << 5) | rt)
 		}
 		if (offset < -256 || offset > 255) {
 			fail(access.unscaled ? `Offset ${offset} is out of range -256 to 255` : `Offset ${offset} is neither a multiple of ${size} from 0 to ${size * 4095} nor in -256 to 255`, value!.at)
@@ -670,20 +694,221 @@ const loadStoreForm = (access: Access): Form => (operands, at, environment) => {
 /** LDP/STP/LDPSW: opc 32-bit 0, LDPSW 1, 64-bit 2. */
 const pairForm = (load: boolean, signed = false): Form => (operands, at) => {
 	count(operands, at, 3)
-	const rt = reg(operands[0], at, signed ? { wide: true } : {})
-	const rt2 = reg(operands[1], at, { wide: rt.wide })
+	let size: number, opc: number, vector = 0, first: number, second: number
+	if (operands[0]?.kind === FP_REGISTER && !signed) {
+		// S, D or Q pairs: opc 0, 1, 2 with V set.
+		const rt = fpReg(operands[0], at, [4, 8, 16])
+		const rt2 = fpReg(operands[1], at, [rt.size])
+		size = rt.size
+		opc = Math.log2(size) - 2
+		vector = 0x04000000
+		first = rt.n
+		second = rt2.n
+	} else {
+		const rt = reg(operands[0], at, signed ? { wide: true } : {})
+		const rt2 = reg(operands[1], at, { wide: rt.wide })
+		size = signed ? 4 : rt.wide ? 8 : 4
+		opc = signed ? 1 : rt.wide ? 2 : 0
+		first = rt.n
+		second = rt2.n
+	}
 	const address = operands[2]
 	if (address?.kind !== MEMORY || address.index) return fail('Expected [base], [base, #offset], [base, #offset]! or [base], #offset', address?.at ?? at)
-	const size = signed ? 4 : rt.wide ? 8 : 4
-	const opc = signed ? 1 : rt.wide ? 2 : 0
 	const index = address.post ? 1 : address.writeback ? 3 : 2
 	const value = address.post ?? address.offset
 	const rn = address.base.n
 	return (context) => {
 		const offset = value ? Number(context.value(value)) : 0
 		if (offset % size !== 0 || offset / size < -64 || offset / size > 63) fail(`Offset ${offset} must be a multiple of ${size} from ${-64 * size} to ${63 * size}`, value?.at ?? at)
-		return word((opc << 30) | 0x28000000 | (index << 23) | (load ? 1 << 22 : 0) | (((offset / size) & 0x7F) << 15) | (rt2.n << 10) | (rn << 5) | rt.n)
+		return word((opc << 30) | vector | 0x28000000 | (index << 23) | (load ? 1 << 22 : 0) | (((offset / size) & 0x7F) << 15) | (second << 10) | (rn << 5) | first)
 	}
+}
+
+/* ----------------------------------------------------------- floating point */
+
+const SIZE_NAMES: Readonly<Record<number, string>> = { 1: 'B', 2: 'H', 4: 'S', 8: 'D', 16: 'Q' }
+
+/** A SIMD&FP register of one of `sizes` bytes; scalar arithmetic takes S and D. */
+function fpReg(operand: Operand | undefined, at: Position, sizes: readonly number[] = [4, 8]): FpRegisterOperand {
+	if (operand?.kind !== FP_REGISTER) return fail(`Expected ${sizes.map((size) => `an ${SIZE_NAMES[size]}`).join(' or ')} register`, operand?.at ?? at)
+	if (!sizes.includes(operand.size)) fail(`Expected ${sizes.map((size) => `an ${SIZE_NAMES[size]}`).join(' or ')} register, not ${operand.name}`, operand.at)
+	return operand
+}
+
+/** Operands all the size of the first. */
+function fpRegs(operands: Operand[], at: Position, wanted: number): FpRegisterOperand[] {
+	count(operands, at, wanted)
+	const first = fpReg(operands[0], at)
+	return [first, ...operands.slice(1).map((operand) => fpReg(operand, at, [first.size]))]
+}
+
+/** The ftype field: 0 for single, 1 for double. */
+const ftype = (register: FpRegisterOperand) => (register.size === 8 ? 1 : 0) << 22
+
+/** A real immediate as `size` bytes of IEEE bits; an integer reads as its value. */
+function realBits(context: EncodeContext, value: Value, size: number): bigint {
+	const real = value.real ?? Number(context.value(value))
+	return numberToBits(real, size === 8 ? DOUBLE : SINGLE)
+}
+
+const fpOneSourceForm = (opcode: number): Form => (operands, at) => {
+	const [rd, rn] = fpRegs(operands, at, 2)
+	return () => word(0x1E204000 | ftype(rd) | (opcode << 15) | (rn.n << 5) | rd.n)
+}
+
+const fpTwoSourceForm = (opcode: number): Form => (operands, at) => {
+	const [rd, rn, rm] = fpRegs(operands, at, 3)
+	return () => word(0x1E200800 | ftype(rd) | (rm.n << 16) | (opcode << 12) | (rn.n << 5) | rd.n)
+}
+
+/** FMADD and friends: `o1o0` picks which. */
+const fpThreeSourceForm = (o1o0: number): Form => (operands, at) => {
+	const [rd, rn, rm, ra] = fpRegs(operands, at, 4)
+	return () => word(0x1F000000 | ftype(rd) | ((o1o0 >> 1) << 21) | (rm.n << 16) | ((o1o0 & 1) << 15) | (ra.n << 10) | (rn.n << 5) | rd.n)
+}
+
+/** FCVT between S and D. */
+const fcvtForm: Form = (operands, at) => {
+	count(operands, at, 2)
+	const rd = fpReg(operands[0], at)
+	const rn = fpReg(operands[1], at, [rd.size === 8 ? 4 : 8])
+	return () => word(0x1E204000 | ftype(rn) | ((rd.size === 8 ? 5 : 4) << 15) | (rn.n << 5) | rd.n)
+}
+
+/** FCMP/FCMPE with a register or #0.0. */
+const fpCompareForm = (signal: boolean): Form => (operands, at) => {
+	count(operands, at, 2)
+	const rn = fpReg(operands[0], at)
+	const kind = signal ? 0x10 : 0
+	if (operands[1]?.kind === FP_REGISTER) {
+		const rm = fpReg(operands[1], at, [rn.size])
+		return () => word(0x1E202000 | ftype(rn) | (rm.n << 16) | (rn.n << 5) | kind)
+	}
+	const zero = imm(operands[1], at)
+	return (context) => {
+		if (BigInt.asUintN(63, realBits(context, zero, 8)) !== 0n) fail('Only #0.0 compares without a register', zero.at)
+		return word(0x1E202008 | ftype(rn) | (rn.n << 5) | kind)
+	}
+}
+
+const fpConditionalCompareForm = (signal: boolean): Form => (operands, at) => {
+	count(operands, at, 4)
+	const rn = fpReg(operands[0], at)
+	const rm = fpReg(operands[1], at, [rn.size])
+	const nzcv = imm(operands[2], at)
+	const cond = condition(operands[3], at)
+	return (context) => word(0x1E200400 | ftype(rn) | (rm.n << 16) | (cond << 12) | (rn.n << 5) | (signal ? 0x10 : 0) | ranged(context, nzcv, 0, 15, 'Flags'))
+}
+
+const fcselForm: Form = (operands, at) => {
+	count(operands, at, 4)
+	const [rd, rn, rm] = fpRegs(operands.slice(0, 3), at, 3)
+	const cond = condition(operands[3], at)
+	return () => word(0x1E200C00 | ftype(rd) | (rm.n << 16) | (cond << 12) | (rn.n << 5) | rd.n)
+}
+
+/** FMOV between FP registers, to and from general ones, and of an immediate. */
+const fmovForm: Form = (operands, at) => {
+	count(operands, at, 2)
+	const [first, second] = operands
+	if (first?.kind === REGISTER) {
+		const rd = reg(first, at)
+		const rn = fpReg(second, at, [rd.wide ? 8 : 4])
+		return () => word(sf(rd.wide) | (rd.wide ? 0x1E660000 : 0x1E260000) | (rn.n << 5) | rd.n)
+	}
+	const rd = fpReg(first, at)
+	if (second?.kind === REGISTER) {
+		const rn = reg(second, at, { wide: rd.size === 8 })
+		return () => word(sf(rn.wide) | (rn.wide ? 0x1E670000 : 0x1E270000) | (rn.n << 5) | rd.n)
+	}
+	if (second?.kind === FP_REGISTER) {
+		const rn = fpReg(second, at, [rd.size])
+		return () => word(0x1E204000 | ftype(rd) | (rn.n << 5) | rd.n)
+	}
+	const value = imm(second, at)
+	return (context) => {
+		const bits = realBits(context, value, rd.size)
+		// +0.0 has no 8-bit form; GNU moves the zero register instead.
+		if (bits === 0n) return word(sf(rd.size === 8) | (rd.size === 8 ? 0x1E670000 : 0x1E270000) | (31 << 5) | rd.n)
+		const imm8 = encodeImm8(bits, rd.size === 8 ? DOUBLE : SINGLE)
+		if (imm8 < 0) fail(`${value.real ?? context.value(value)} is not ±(16 to 31)/16 × 2^(-3 to 4); load it from memory`, value.at)
+		return word(0x1E201000 | ftype(rd) | (imm8 << 13) | rd.n)
+	}
+}
+
+/** SCVTF and UCVTF, with optional fraction bits. */
+const intToFpForm = (unsigned: boolean): Form => (operands, at) => {
+	count(operands, at, 2, 3)
+	const rd = fpReg(operands[0], at)
+	const rn = reg(operands[1], at)
+	const opcode = unsigned ? 3 : 2
+	if (operands.length === 2) return () => word(sf(rn.wide) | 0x1E200000 | ftype(rd) | (opcode << 16) | (rn.n << 5) | rd.n)
+	const fbits = imm(operands[2], at)
+	return (context) => {
+		const bits = ranged(context, fbits, 1, rn.wide ? 64 : 32, 'Fraction bits')
+		return word(sf(rn.wide) | 0x1E000000 | ftype(rd) | (opcode << 16) | ((64 - bits) << 10) | (rn.n << 5) | rd.n)
+	}
+}
+
+/** FCVT[NPMZA][SU]: `rmode` 0-3, or -1 for A; FCVTZ takes fraction bits. */
+const fpToIntForm = (rmode: number, unsigned: boolean): Form => (operands, at) => {
+	count(operands, at, 2, rmode === 3 ? 3 : 2)
+	const rd = reg(operands[0], at)
+	const rn = fpReg(operands[1], at)
+	const field = rmode < 0 ? (4 | (unsigned ? 1 : 0)) << 16 : (rmode << 19) | ((unsigned ? 1 : 0) << 16)
+	if (operands.length === 2) return () => word(sf(rd.wide) | 0x1E200000 | ftype(rn) | field | (rn.n << 5) | rd.n)
+	const fbits = imm(operands[2], at)
+	return (context) => {
+		const bits = ranged(context, fbits, 1, rd.wide ? 64 : 32, 'Fraction bits')
+		return word(sf(rd.wide) | 0x1E000000 | ftype(rn) | field | ((64 - bits) << 10) | (rn.n << 5) | rd.n)
+	}
+}
+
+const SYSTEM_REGISTERS: Readonly<Record<string, number>> = { nzcv: SYSREG_NZCV, fpcr: SYSREG_FPCR, fpsr: SYSREG_FPSR }
+
+function systemRegister(operand: Operand | undefined, at: Position): number {
+	const name = operand?.kind === EXPRESSION ? operand.name?.toLowerCase() ?? '' : ''
+	const sysreg = SYSTEM_REGISTERS[name]
+	if (sysreg === undefined) fail('Expected a system register: nzcv, fpcr or fpsr', operand?.at ?? at)
+	return sysreg
+}
+
+const mrsForm: Form = (operands, at) => {
+	count(operands, at, 2)
+	const rt = reg(operands[0], at, { wide: true })
+	const sysreg = systemRegister(operands[1], at)
+	return () => word(0xD5300000 | (sysreg << 5) | rt.n)
+}
+
+const msrForm: Form = (operands, at) => {
+	count(operands, at, 2)
+	const sysreg = systemRegister(operands[0], at)
+	const rt = reg(operands[1], at, { wide: true })
+	return () => word(0xD5100000 | (sysreg << 5) | rt.n)
+}
+
+/** The scalar floating-point mnemonics, which the setting can switch off. */
+const FP_FORMS: Readonly<Record<string, Form>> = {
+	fmov: fmovForm,
+	fabs: fpOneSourceForm(1), fneg: fpOneSourceForm(2), fsqrt: fpOneSourceForm(3),
+	frintn: fpOneSourceForm(8), frintp: fpOneSourceForm(9), frintm: fpOneSourceForm(10), frintz: fpOneSourceForm(11),
+	frinta: fpOneSourceForm(12), frintx: fpOneSourceForm(14), frinti: fpOneSourceForm(15),
+	fcvt: fcvtForm,
+	fmul: fpTwoSourceForm(0), fdiv: fpTwoSourceForm(1), fadd: fpTwoSourceForm(2), fsub: fpTwoSourceForm(3),
+	fmax: fpTwoSourceForm(4), fmin: fpTwoSourceForm(5), fmaxnm: fpTwoSourceForm(6), fminnm: fpTwoSourceForm(7), fnmul: fpTwoSourceForm(8),
+	fmadd: fpThreeSourceForm(0), fmsub: fpThreeSourceForm(1), fnmadd: fpThreeSourceForm(2), fnmsub: fpThreeSourceForm(3),
+	fcmp: fpCompareForm(false), fcmpe: fpCompareForm(true), fccmp: fpConditionalCompareForm(false), fccmpe: fpConditionalCompareForm(true),
+	fcsel: fcselForm,
+	scvtf: intToFpForm(false), ucvtf: intToFpForm(true),
+	fcvtns: fpToIntForm(0, false), fcvtnu: fpToIntForm(0, true), fcvtps: fpToIntForm(1, false), fcvtpu: fpToIntForm(1, true),
+	fcvtms: fpToIntForm(2, false), fcvtmu: fpToIntForm(2, true), fcvtzs: fpToIntForm(3, false), fcvtzu: fpToIntForm(3, true),
+	fcvtas: fpToIntForm(-1, false), fcvtau: fpToIntForm(-1, true),
+}
+
+/** Whether a statement needs the FPU: an FP mnemonic, an FP register, or FPCR/FPSR. */
+function usesFloatingPoint(mnemonic: string, operands: Operand[]): boolean {
+	if (Object.prototype.hasOwnProperty.call(FP_FORMS, mnemonic)) return true
+	return operands.some((operand) => operand.kind === FP_REGISTER || (operand.kind === EXPRESSION && /^fp[cs]r$/i.test(operand.name ?? '')))
 }
 
 /* ------------------------------------------------------------------ table */
@@ -744,6 +969,8 @@ const FORMS: Readonly<Record<string, Form>> = {
 	ldursb: loadStoreForm({ size: 1, kind: 'signed', unscaled: true }), ldursh: loadStoreForm({ size: 2, kind: 'signed', unscaled: true }),
 	ldursw: loadStoreForm({ size: 4, kind: 'signed', wide: true, unscaled: true }),
 	ldp: pairForm(true), stp: pairForm(false), ldpsw: pairForm(true, true),
+	mrs: mrsForm, msr: msrForm,
+	...FP_FORMS,
 	...Object.fromEntries(CONDITIONAL_BRANCHES.flatMap(([name, code]) => [[`b.${name}`, conditionalBranchForm(code)], [`b${name}`, conditionalBranchForm(code)]])),
 }
 
@@ -754,7 +981,9 @@ export const isMnemonic = (name: string) => Object.prototype.hasOwnProperty.call
 
 /** How to encode `mnemonic` with `operands`; throws a positioned error for what is wrong now. */
 export function encoderFor(mnemonic: string, operands: Operand[], at: Position, environment: EncodeEnvironment): Encoder {
-	const form = FORMS[mnemonic.toLowerCase()]
+	const lower = mnemonic.toLowerCase()
+	const form = FORMS[lower]
 	if (!form) return fail(`Unknown instruction ${mnemonic}`, at)
+	if (environment.floatingPoint === false && usesFloatingPoint(lower, operands)) fail(`${mnemonic} needs floating point, which is off in the settings`, at)
 	return form(operands, at, environment)
 }

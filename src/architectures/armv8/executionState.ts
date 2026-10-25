@@ -14,7 +14,7 @@ export interface ExecutionState {
 	createMachine(program: AssembledProgram, settings: Armv8Settings, options: MachineOptions): Machine
 	profile(settings: Armv8Settings): MachineProfile
 	disassembly: Disassembly
-	describeToken(text: string, column: number, state: DebugInspection): TokenDescription | null
-	/** Symbol values of the last program that assembled, for data tips. */
-	values(): ReadonlyMap<string, number> | null
+	describeToken(text: string, column: number, state: DebugInspection, program: AssembledProgram | null): TokenDescription | null
+	/** Symbol values of the selected inspection program. */
+	values(program: AssembledProgram | null): ReadonlyMap<string, number> | null
 }

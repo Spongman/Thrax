@@ -1,0 +1,43 @@
+// Factorial
+// Compute 5! = 120 with a loop.
+
+.include "beta.uasm"
+.options tty
+
+	CMOVE(stack, SP)
+	CMOVE(5, R1)            // n = 5
+	CMOVE(1, R2)            // result = 1
+
+loop:
+	BEQ(R1, done)           // if n == 0, exit loop
+	MUL(R2, R1, R2)         // result = result * n
+	SUBC(R1, 1, R1)         // n--
+	BR(loop)
+
+done:
+	// Print result
+	PUSH(R2)
+	CALL(print_decimal, 1)
+	HALT()
+
+// print_decimal(n): write n >= 0 in decimal, leading digits first.
+print_decimal:
+	PUSH(LP) PUSH(BP)
+	MOVE(SP, BP)
+	PUSH(R0) PUSH(R1)
+	LD(BP, -12, R1)         // R1 <- n
+	DIVC(R1, 10, R0)        // R0 <- n / 10, the leading digits
+	BEQ(R0, pd_digit)
+	PUSH(R0)
+	CALL(print_decimal, 1)
+pd_digit:
+	MULC(R0, 10, R0)        // R0 <- n % 10, the last digit
+	SUB(R1, R0, R0)
+	ADDC(R0, '0', R0)
+	WRCHAR()
+	POP(R1) POP(R0)
+	MOVE(BP, SP)
+	POP(BP) POP(LP)
+	RTN()
+
+stack: STORAGE(64)

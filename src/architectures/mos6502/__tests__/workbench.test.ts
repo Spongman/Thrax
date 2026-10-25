@@ -53,7 +53,7 @@ beforeEach(async () => {
 describe('6502 in the workbench', () => {
 	it('is the active target, with its own examples and reset registers', () => {
 		expect(state().architecture).toBe('mos6502')
-		expect(state().target?.definition.name).toBe('MOS 6502')
+		expect(state().target?.definition.name).toBe('6502 family')
 		expect(state().target?.definition.language).toBe('ca65')
 		expect(Object.keys(examples()).sort()).toEqual([...Object.keys(OUTPUT), 'input', 'mmio', 'mandelbrot'].sort())
 		expect(state().registers.SP).toBe(0xFD)

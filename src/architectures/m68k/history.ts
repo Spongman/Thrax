@@ -4,7 +4,9 @@ import { HistoryLog } from '../../core/historyLog'
 import { HistoryCursor, exchangeHistoryValues, exchangeHistoryBytes, exchangeHistoryFrame } from '../../core/historyCursor'
 import type { CallFrame, HistoryRecord, MachineHistory } from '../contracts'
 import type { Decoded } from './decode'
+import { FP_WORDS } from './fpuIsa'
 
+const FPU_COLUMN = { name: 'fp', type: 'i32', elements: FP_WORDS } as const
 export const HISTORY_SCHEMA = {
 	entry: [
 		{ name: 'pc', type: 'u32', elements: 1 },
@@ -34,6 +36,7 @@ export interface SavedState {
 	pc: number
 	count: number
 	registers: Int32Array
+	fp?: Int32Array
 	sr: number
 	halted: boolean
 	pending: boolean
@@ -42,10 +45,13 @@ export interface SavedState {
 	frame?: CallFrame
 }
 export class M68kHistory implements MachineHistory {
-	readonly log = new HistoryLog(new HistoryBufferLayout(HISTORY_SCHEMA))
-	readonly timeline = new HistoryCursor(this.log)
+	readonly log: HistoryLog
+	readonly timeline: HistoryCursor
 	private nextId = 0
-	constructor(limit: number) {
+	/** With a coprocessor each entry also keeps the whole FPU state. */
+	constructor(limit: number, readonly fpu = false) {
+		this.log = new HistoryLog(new HistoryBufferLayout(fpu ? { ...HISTORY_SCHEMA, entry: [...HISTORY_SCHEMA.entry, FPU_COLUMN] } : HISTORY_SCHEMA))
+		this.timeline = new HistoryCursor(this.log)
 		this.log.limit = limit
 	}
 	get retention() { return this.log.retention }
@@ -62,6 +68,7 @@ export class M68kHistory implements MachineHistory {
 		c.count[slot] = state.count
 		c.sr[slot] = state.sr
 		c.registers.set(state.registers, slot * 16)
+		if (this.fpu) c.fp.set(state.fp!, slot * FP_WORDS)
 		c.words.fill(0, slot * 6, slot * 6 + 6)
 		if (instruction) c.words.set(instruction.words, slot * 6)
 		c.length[slot] = instruction?.length ?? 0
@@ -110,16 +117,17 @@ export class M68kHistory implements MachineHistory {
 	}
 	undo(restore: (state: SavedState) => void, write: (address: number, value: number) => number, state: SavedState, frames: CallFrame[], forward = false): boolean {
 		const exchange = (index: number, replay: boolean) => {
-			const values = { controlPc: state.pc, registers: state.registers, halted: +state.halted, pending: +state.pending, outputLength: state.outputLength, sr: state.sr }
+			const values: Record<string, number | Int32Array> = { controlPc: state.pc, registers: state.registers, halted: +state.halted, pending: +state.pending, outputLength: state.outputLength, sr: state.sr }
+			if (this.fpu) values.fp = state.fp!
 			exchangeHistoryBytes(this.log, index, replay, write)
 			exchangeHistoryValues(this.log, index, values)
 			exchangeHistoryFrame(this.log, index, frames)
 			const position = this.log.first + index, slot = position % this.log.entries.capacity
 			const c = this.log.entries.block(position).buffers.columns
 			restore({
-				pc: values.controlPc, registers: state.registers, halted: !!values.halted,
-				pending: !!values.pending, outputLength: values.outputLength,
-				sr: values.sr,
+				pc: values.controlPc as number, registers: state.registers, fp: state.fp, halted: !!values.halted,
+				pending: !!values.pending, outputLength: values.outputLength as number,
+				sr: values.sr as number,
 				count: c.count[slot] + (replay && !c.edit[slot] ? 1 : 0),
 			})
 		}

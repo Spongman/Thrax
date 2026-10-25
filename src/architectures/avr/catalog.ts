@@ -1,0 +1,105 @@
+import { instructionCatalog, instructionLinks, type InstructionHelp, type InstructionTable } from '../../core/instructionHelp'
+export const BRANCH: Readonly<Record<string, number>> = {
+	brcs: 0,
+	brlo: 0,
+	breq: 1,
+	brmi: 2,
+	brvs: 3,
+	brlt: 4,
+	brhs: 5,
+	brts: 6,
+	brie: 7,
+	brcc: 8,
+	brsh: 8,
+	brne: 9,
+	brpl: 10,
+	brvc: 11,
+	brge: 12,
+	brhc: 13,
+	brtc: 14,
+	brid: 15
+}
+
+
+const DOCS: InstructionTable = {
+	add: ['Rd, Rr', 'Add Rr to Rd, updating H, S, V, N, Z and C.'],
+	adc: ['Rd, Rr', 'Add Rr and carry to Rd, updating arithmetic flags.'],
+	sub: ['Rd, Rr', 'Subtract Rr from Rd, updating arithmetic flags.'],
+	sbc: ['Rd, Rr', 'Subtract Rr and carry (borrow) from Rd; Z is cumulative for multi-byte subtraction.'],
+	cp: ['Rd, Rr', 'Compare Rd with Rr by subtraction; update flags without storing the result.'],
+	cpc: ['Rd, Rr', 'Compare with carry (borrow), preserving cumulative Z for multi-byte comparisons.'],
+	and: ['Rd, Rr', 'Bitwise AND into Rd; update S, V, N and Z.'],
+	or: ['Rd, Rr', 'Bitwise OR into Rd; update S, V, N and Z.'],
+	eor: ['Rd, Rr', 'Bitwise exclusive OR into Rd; update S, V, N and Z.'],
+	mov: ['Rd, Rr', 'Copy Rr to Rd without changing flags.'],
+	mul: ['Rd, Rr', 'Multiply unsigned bytes; store the 16-bit product in r1:r0 and update Z and C.'],
+	cpse: ['Rd, Rr', 'Skip the entire next instruction if Rd equals Rr.'],
+	ldi: ['Rd, K', 'Load an 8-bit immediate into r16–r31.'],
+	subi: ['Rd, K', 'Subtract an 8-bit immediate from r16–r31, updating arithmetic flags.'],
+	sbci: ['Rd, K', 'Subtract an immediate and carry (borrow) from r16–r31, with cumulative Z.'],
+	cpi: ['Rd, K', 'Compare r16–r31 with an 8-bit immediate without changing the register.'],
+	andi: ['Rd, K', 'AND an 8-bit immediate into r16–r31; update logical flags.'],
+	ori: ['Rd, K', 'OR an 8-bit immediate into r16–r31; update logical flags.'],
+	com: ['Rd', 'Complement all bits in Rd; set carry and update S, V, N and Z.'],
+	neg: ['Rd', 'Negate Rd using two’s complement; update arithmetic flags.'],
+	swap: ['Rd', 'Exchange the high and low nibbles of Rd without changing flags.'],
+	inc: ['Rd', 'Increment Rd; update S, V, N and Z, preserving carry.'],
+	dec: ['Rd', 'Decrement Rd; update S, V, N and Z, preserving carry.'],
+	asr: ['Rd', 'Shift right, retaining the sign bit and moving bit 0 into carry.'],
+	lsr: ['Rd', 'Shift right, inserting zero and moving bit 0 into carry.'],
+	ror: ['Rd', 'Rotate right through carry.'],
+	push: ['Rr', 'Push a register byte to the descending data stack.'],
+	pop: ['Rd', 'Pop a byte from the data stack into Rd.'],
+	nop: ['', 'Do nothing.'],
+	break: ['', 'Stop execution at a software breakpoint.'],
+	ret: ['', 'Pop the return address and resume the calling routine.'],
+	ijmp: ['', 'Jump indirectly through the word address in Z (r31:r30).'],
+	icall: ['', 'Call through the word address in Z, pushing the return address.'],
+	lpm: ['', 'Load the flash byte addressed by Z into r0.'],
+	rjmp: ['target', 'Jump to a nearby target using a signed relative displacement.'],
+	rcall: ['target', 'Call a nearby target, pushing the return address.'],
+	jmp: ['target', 'Jump to an absolute program address.'],
+	call: ['target', 'Call an absolute program address, pushing the return address.'],
+	lds: ['Rd, address', 'Load a byte directly from the data address space.'],
+	sts: ['address, Rr', 'Store a register byte directly to the data address space.'],
+	ld: ['Rd, X | Y | Z', 'Load a data byte through X, Y or Z; pre-decrement and post-increment forms update the pointer.'],
+	st: ['X | Y | Z, Rr', 'Store a data byte through X, Y or Z; pre-decrement and post-increment forms update the pointer.'],
+	in: ['Rd, port', 'Read a byte from an I/O register (port 0–63).'],
+	out: ['port, Rr', 'Write a byte to an I/O register (port 0–63).'],
+	bset: ['s', 'Set SREG bit s (0–7).'],
+	bclr: ['s', 'Clear SREG bit s (0–7).'],
+	sbrc: ['Rr, b', 'Skip the entire next instruction if register bit b is clear.'],
+	sbrs: ['Rr, b', 'Skip the entire next instruction if register bit b is set.'],
+	bst: ['Rr, b', 'Copy register bit b to the SREG transfer bit T.'],
+	bld: ['Rd, b', 'Copy the SREG transfer bit T into register bit b.'],
+	clr: ['Rd', 'Clear Rd; alias of EOR Rd, Rd.'],
+	tst: ['Rd', 'Set logical flags from Rd without changing it; alias of AND Rd, Rd.'],
+	lsl: ['Rd', 'Shift left, moving bit 7 into carry; alias of ADD Rd, Rd.'],
+	rol: ['Rd', 'Rotate left through carry; alias of ADC Rd, Rd.'],
+	ser: ['Rd', 'Set every bit of r16–r31; alias of LDI Rd, 255.'],
+	sec: ['', 'Set the carry flag.'],
+	clc: ['', 'Clear the carry flag.'],
+	sei: ['', 'Set the global interrupt-enable flag I.'],
+	cli: ['', 'Clear the global interrupt-enable flag I.'],
+	brbs: ['s, target', 'Branch if SREG bit s is set.'],
+	brbc: ['s, target', 'Branch if SREG bit s is clear.'],
+}
+const FLAGS = ['C (carry)', 'Z (zero)', 'N (negative)', 'V (overflow)', 'S (signed comparison)', 'H (half carry)', 'T (transfer)', 'I (interrupt enable)']
+const branches: InstructionTable = Object.fromEntries(Object.entries(BRANCH).map(([name, code]) => [
+	name, ['target', `Branch if ${FLAGS[code & 7]} is ${code < 8 ? 'set' : 'clear'}.`],
+]))
+
+/** Revision A, whose versioned URL keeps these PDF page indexes stable. */
+const manual = 'https://ww1.microchip.com/downloads/en/DeviceDoc/AVR-Instruction-Set-Manual-DS40002198A.pdf'
+const pages: Record<string, number> = {
+	adc: 23, add: 24, and: 26, andi: 27, asr: 28, bclr: 29, bld: 30, brbc: 31, brbs: 32, brcc: 33, brcs: 34, break: 35, breq: 35, brge: 36, brhc: 37,
+	brhs: 38, brid: 39, brie: 40, brlo: 41, brlt: 42, brmi: 43, brne: 44, brpl: 45, brsh: 46, brtc: 47, brts: 48, brvc: 49, brvs: 50, bset: 51, bst: 52,
+	call: 53, clc: 55, cli: 57, clr: 59, com: 63, cp: 64, cpc: 65, cpi: 66, cpse: 67, dec: 68, eor: 73, icall: 78, ijmp: 79, in: 80, inc: 81, jmp: 82,
+	ld: 85, ldi: 90, lds: 91, lpm: 93, lsl: 94, lsr: 95, mov: 96, mul: 98, neg: 101, nop: 102, or: 103, ori: 104, out: 105, pop: 106, push: 107,
+	rcall: 108, ret: 109, rjmp: 111, rol: 112, ror: 113, sbc: 114, sbci: 115, sbrc: 121, sbrs: 122, sec: 123, sei: 124, ser: 126, st: 134, sts: 139,
+	sub: 141, subi: 142, swap: 143, tst: 144,
+}
+
+export const AVR_INSTRUCTIONS = instructionCatalog({ ...DOCS, ...branches }, 'https://www.microchip.com/DS40002198', instructionLinks(manual, pages))
+export const MNEMONICS = AVR_INSTRUCTIONS.names()
+export const avrInstructionHelp = AVR_INSTRUCTIONS.help

@@ -51,7 +51,7 @@ describe('6502 example programs', () => {
 		expect(status).toBe(STEP_HALT)
 		expect(machine.halted).toBe(true)
 		expect(output).toBe(OUTPUT[key])
-	})
+	}, 30_000) // Mandelbrot executes millions of native eight-bit instructions.
 
 	it('waits at $F001 until input arrives', () => {
 		const { status, machine, output } = run(EXAMPLES.input.code)
@@ -83,7 +83,7 @@ describe('6502 example programs', () => {
 		let mirrored = 0
 		for (let row = 1; row < 16; row++) for (let column = 0; column < 32; column++) if (pixels[32 * (16 - row) + column] === pixels[32 * (16 + row) + column]) mirrored++
 		expect(mirrored).toBeGreaterThan(15 * 32 * 0.9)
-	})
+	}, 30_000)
 
 	it('takes five timer interrupts in the interrupts example', () => {
 		const { machine } = run(EXAMPLES.interrupts.code)

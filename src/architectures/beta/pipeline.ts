@@ -25,6 +25,8 @@ export const STAGE_MEM = 3
 export const STAGE_WB = 4
 
 export const BETA_PIPELINE: PipelineModel = Object.freeze({
+	name: '6.004 pipelined Beta',
+	description: 'Five-stage teaching design with RF-stage branch resolution, ALU bypassing and two load-to-use stalls. Memory takes one MEM stage; this is separate from the functional BSim execution model.',
 	stages: Object.freeze([
 		{ label: 'IF', name: 'Instruction fetch', kind: 'if' },
 		{ label: 'RF', name: 'Register file, with bypass; decides branches and JMP', kind: 'id' },

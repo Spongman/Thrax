@@ -20,7 +20,7 @@ import { PolledTerminal } from '../../../core/devices/polledTerminal'
 
 import type { ProgramImage } from '../../contracts'
 import { A64CallStack } from './callStack'
-import { A64Cpu, STEP_FAULT, STEP_HALT, STEP_OK, STEP_WAIT, SVC_HALT, SVC_NEXT, SVC_REFUSED, SVC_WAIT, type A64Supervisor } from './cpu'
+import { A64Cpu, FPCR_WRITABLE, FPSR_WRITABLE, STEP_FAULT, STEP_HALT, STEP_OK, STEP_WAIT, SVC_HALT, SVC_NEXT, SVC_REFUSED, SVC_WAIT, type A64Supervisor } from './cpu'
 import { decode } from './decode'
 import { A64History, ENTRY_EDIT } from './history'
 import { MASK32, R_SP } from './isa'
@@ -73,6 +73,8 @@ export interface A64MachineOptions {
 	memoryBytes: number
 	/** Entries of history to keep; 0 for none. */
 	historyLimit?: number
+	/** SIMD&FP instructions run; on unless false. */
+	floatingPoint?: boolean
 }
 
 /** The end of the image's data, rounded up to 16: where the program break starts. */
@@ -97,6 +99,7 @@ export class A64Machine {
 
 	constructor(options: A64MachineOptions) {
 		this.cpu = new A64Cpu({ base: TEXT_BASE, bytes: options.memoryBytes })
+		this.cpu.floatingPoint = options.floatingPoint ?? true
 		this.cpu.supervisor = this.linux
 		this.cpu.device = this.keyboard
 		const limit = options.historyLimit ?? 0
@@ -173,6 +176,25 @@ export class A64Machine {
 
 	editFlags(nzcv: number): boolean {
 		return this.edit(() => this.cpu.setFlags(nzcv & 15))
+	}
+
+	/** Bits 0-31 (`high` false) or 32-63 of Vn by hand; the rest of the register stays. */
+	editVector(index: number, value: number, high: boolean): boolean {
+		if (!(index >= 0 && index < 32)) return false
+		return this.edit(() => {
+			const cpu = this.cpu
+			const low = cpu.v[2 * index]
+			const word = BigInt(value >>> 0)
+			cpu.setVector(index, high ? (low & MASK32) | (word << 32n) : (low & ~MASK32 & 0xFFFF_FFFF_FFFF_FFFFn) | word, cpu.v[2 * index + 1])
+		})
+	}
+
+	editFpcr(value: number): boolean {
+		return this.edit(() => this.cpu.setFpcr(value & FPCR_WRITABLE))
+	}
+
+	editFpsr(value: number): boolean {
+		return this.edit(() => this.cpu.setFpsr((value & FPSR_WRITABLE) >>> 0))
 	}
 
 	/** Moves the PC by hand; leaves halt, so the program can carry on from there. */

@@ -5,6 +5,8 @@
  */
 export const manifest = {
 	id: 'mips',
+	defaultVariant: 'MIPS32 (MARS)',
 	name: 'MIPS (MARS)',
+	maker: 'MIPS Technologies',
 	panels: ['xray', 'marsBot', 'scavengerHunt', 'digitalLab'],
 } as const

@@ -1,8 +1,12 @@
 /**
  * An AArch64 CPU at EL0, after the pseudocode of the reference manual
- * (DDI 0487, chapter C6), for the integer instructions decode.ts knows.
+ * (DDI 0487, chapter C6), for the integer and scalar floating-point
+ * instructions decode.ts knows.
  *
- * State: X0-X30 and SP as 64-bit values, the PC, and NZCV. Memory is one
+ * State: X0-X30 and SP as 64-bit values, the PC, NZCV, V0-V31 as 128-bit
+ * values (scalar S and D writes clear the bits above them), FPCR and FPSR.
+ * Floating point follows ../shared/fp.ts; with `floatingPoint` off, every
+ * SIMD&FP instruction and FPCR/FPSR access is undefined. Memory is one
  * little-endian region from `base`; there is no MMU, and unaligned data
  * accesses are allowed, as at EL0 with SCTLR_EL1.A clear. Addresses outside
  * the region go to an optional device, else fault.
@@ -15,8 +19,15 @@
 import {
 	ACCESS_SIGNED32, ACCESS_SIGNED64, ACCESS_STORE, decode, DP1_CLS, DP1_CLZ, DP1_RBIT, DP1_REV, DP1_REV16, DP1_REV32,
 	DP2_ASRV, DP2_LSLV, DP2_LSRV, DP2_RORV, DP2_SDIV, DP2_UDIV, DP3_MADD, DP3_MSUB, DP3_SMADDL, DP3_SMSUBL, DP3_SMULH, DP3_UMADDL, DP3_UMSUBL,
-	MODE_OFFSET, MODE_POST, MODE_PRE, MODE_REGISTER, Op, type A64Instruction,
+	FP1_FABS, FP1_FCVT_D, FP1_FCVT_S, FP1_FNEG, FP1_FRINTA, FP1_FRINTI, FP1_FRINTM, FP1_FRINTN, FP1_FRINTP, FP1_FRINTX, FP1_FRINTZ, FP1_FSQRT,
+	FP2_FADD, FP2_FDIV, FP2_FMAX, FP2_FMAXNM, FP2_FMIN, FP2_FMINNM, FP2_FMUL, FP2_FSUB, FPI_FCVTAS, FPI_FCVTS, FPI_FCVTU,
+	FPI_FMOV_FROM, FPI_FMOV_TO, FPI_SCVTF, FPI_UCVTF, FPI_FCVTAU, MODE_OFFSET, MODE_POST, MODE_PRE, MODE_REGISTER, Op, SYSREG_FPCR, SYSREG_FPSR, SYSREG_NZCV,
+	type A64Instruction,
 } from './decode'
+import {
+	DOUBLE, fixedToFp, fpAbs, fpAdd, fpCompare, fpConvert, FpEnv, fpDiv, fpMinMax, fpMul, fpMulAdd, fpNeg, fpRoundInt, fpSqrt, fpToFixed, ROUND_NEGINF,
+	ROUND_POSINF, ROUND_TIEAWAY, ROUND_TIEEVEN, ROUND_ZERO, SINGLE,
+} from '../shared/fp'
 import { conditionHolds, FLAG_C, MASK32, MASK64, R_LR, rotateRight, SHIFT_ASR, SHIFT_LSL, SHIFT_LSR } from './isa'
 
 /** What step() did. */
@@ -50,7 +61,16 @@ export interface A64EffectSink {
 	flags(old: number): void
 	/** `size` bytes from `address`, little-endian, about to be overwritten. */
 	memory(address: number, size: number, old: bigint): void
+	/** V0-V31, as low and high doublewords. */
+	vector(index: number, low: bigint, high: bigint): void
+	fpcr(old: number): void
+	fpsr(old: number): void
 }
+
+/** FPCR bits this core implements: AHP, DN, FZ and RMode; trap enables read as zero. */
+export const FPCR_WRITABLE = 0x07C00000
+/** FPSR: NZCV (AArch32's), QC and the cumulative flags. */
+export const FPSR_WRITABLE = 0xF800009F
 
 /** The system call layer `svc` enters; it changes state only through the CPU's recorded writes. */
 export interface A64Supervisor {
@@ -124,6 +144,12 @@ export class A64Cpu {
 	sp = 0n
 	pc = 0
 	nzcv = 0
+	/** V0-V31: Vn is v[2n] below v[2n + 1]. */
+	readonly v = new BigUint64Array(64)
+	fpcr = 0
+	fpsr = 0
+	/** SIMD&FP instructions run; off, they are undefined. */
+	floatingPoint = true
 	readonly base: number
 	readonly memory: Uint8Array
 	private readonly view: DataView
@@ -138,6 +164,7 @@ export class A64Cpu {
 	instruction = 0
 	/** The flags addWithCarry() last computed. */
 	private carryFlags = 0
+	private readonly env = new FpEnv()
 
 	constructor(options: A64CpuOptions) {
 		const { base, bytes } = options
@@ -153,6 +180,9 @@ export class A64Cpu {
 		this.sp = 0n
 		this.pc = this.base
 		this.nzcv = 0
+		this.v.fill(0n)
+		this.fpcr = 0
+		this.fpsr = 0
 		this.fault = FAULT_NONE
 		this.faultAddress = 0
 		this.faultDetail = ''
@@ -290,15 +320,38 @@ export class A64Cpu {
 			case Op.DP3: this.writeX(rd, this.threeSource(d, width), sf); break
 			case Op.DP2: this.writeX(rd, this.twoSource(d, width), sf); break
 			case Op.DP1: this.writeX(rd, this.oneSource(d, width), sf); break
-			case Op.LOAD_STORE: return this.loadStore(d, pc)
+			case Op.LOAD_STORE:
+				if (d.fp && !this.floatingPoint) return this.fail(FAULT_UNDEFINED, pc)
+				return this.loadStore(d, pc)
 			case Op.LOAD_LITERAL: {
+				if (d.fp && !this.floatingPoint) return this.fail(FAULT_UNDEFINED, pc)
 				const address = pc + Number(d.imm)
-				const value = this.load(address, d.size)
+				const value = this.loadVector(address, d.size)
 				if (value === null) return this.fail(FAULT_ADDRESS, address)
-				this.writeX(rd, d.access === ACCESS_SIGNED64 ? BigInt.asUintN(64, BigInt.asIntN(32, value)) : value, d.sf)
+				if (d.fp) this.writeV(rd, value[0], d.size, value[1])
+				else this.writeX(rd, d.access === ACCESS_SIGNED64 ? BigInt.asUintN(64, BigInt.asIntN(32, value[0])) : value[0], d.sf)
 				break
 			}
-			case Op.LOAD_STORE_PAIR: return this.loadStorePair(d, pc)
+			case Op.LOAD_STORE_PAIR:
+				if (d.fp && !this.floatingPoint) return this.fail(FAULT_UNDEFINED, pc)
+				return this.loadStorePair(d, pc)
+			case Op.MRS: case Op.MSR: {
+				const sysreg = Number(d.imm)
+				if (sysreg !== SYSREG_NZCV && !this.floatingPoint) return this.fail(FAULT_UNDEFINED, pc)
+				if (d.op === Op.MRS) {
+					this.writeX(rd, BigInt((sysreg === SYSREG_FPCR ? this.fpcr : sysreg === SYSREG_FPSR ? this.fpsr : this.nzcv << 28) >>> 0))
+					break
+				}
+				const value = Number(this.read(rd) & MASK32)
+				if (sysreg === SYSREG_FPCR) this.setFpcr(value & FPCR_WRITABLE)
+				else if (sysreg === SYSREG_FPSR) this.setFpsr((value & FPSR_WRITABLE) >>> 0)
+				else this.setFlags((value >>> 28) & 15)
+				break
+			}
+			case Op.FP_DP1: case Op.FP_DP2: case Op.FP_DP3: case Op.FP_CMP: case Op.FP_CCMP: case Op.FP_CSEL: case Op.FP_IMM: case Op.FP_INT: case Op.FP_FIXED:
+				if (!this.floatingPoint) return this.fail(FAULT_UNDEFINED, pc)
+				this.float(d)
+				break
 			default: return this.fail(FAULT_UNDEFINED, pc)
 		}
 		this.setPc(next)
@@ -342,6 +395,39 @@ export class A64Cpu {
 		this.nzcv = value
 	}
 
+	/** The low `size` bytes (8 at most) of Vn. */
+	readV(n: number, size: number): bigint {
+		const low = this.v[2 * n]
+		return size >= 8 ? low : low & ((1n << BigInt(size * 8)) - 1n)
+	}
+
+	/** A recorded write of the low `size` bytes of Vn, clearing the rest; `high` is bits 64-127 of a Q. */
+	writeV(n: number, value: bigint, size: number, high = 0n) {
+		const low = size >= 8 ? BigInt.asUintN(64, value) : value & ((1n << BigInt(size * 8)) - 1n)
+		this.setVector(n, low, size === 16 ? high : 0n)
+	}
+
+	/** Vn whole, recorded. */
+	setVector(n: number, low: bigint, high: bigint) {
+		const v = this.v
+		if (v[2 * n] === low && v[2 * n + 1] === high) return
+		this.sink?.vector(n, v[2 * n], v[2 * n + 1])
+		v[2 * n] = low
+		v[2 * n + 1] = high
+	}
+
+	setFpcr(value: number) {
+		if (value === this.fpcr) return
+		this.sink?.fpcr(this.fpcr)
+		this.fpcr = value
+	}
+
+	setFpsr(value: number) {
+		if (value === this.fpsr) return
+		this.sink?.fpsr(this.fpsr)
+		this.fpsr = value
+	}
+
 	setPc(value: number) {
 		if (value === this.pc) return
 		this.sink?.pc(this.pc)
@@ -367,6 +453,17 @@ export class A64Cpu {
 			case 4: return BigInt(view.getUint32(offset, true))
 			default: return view.getBigUint64(offset, true)
 		}
+	}
+
+	/** A load of up to 16 bytes as its low and high doublewords; null where nothing answers. */
+	loadVector(address: number, size: number): [bigint, bigint] | null {
+		if (size < 16) {
+			const value = this.load(address, size)
+			return value === null ? null : [value, 0n]
+		}
+		const low = this.load(address, 8)
+		const high = this.load(address + 8, 8)
+		return low === null || high === null ? null : [low, high]
 	}
 
 	/** Whether a store of `size` bytes at `address` would land somewhere. */
@@ -526,11 +623,13 @@ export class A64Cpu {
 		const writeback = d.mode === MODE_PRE || d.mode === MODE_POST
 		if (d.access === ACCESS_STORE) {
 			if (!this.writable(at, d.size)) return this.fail(FAULT_ADDRESS, at)
-			this.store(at, d.size, this.read(d.rd, true))
+			if (d.fp) this.storeVector(at, d.size, this.v[2 * d.rd], this.v[2 * d.rd + 1])
+			else this.store(at, d.size, this.read(d.rd, true))
 		} else {
-			const value = this.load(at, d.size)
+			const value = this.loadVector(at, d.size)
 			if (value === null) return this.fail(FAULT_ADDRESS, at)
-			this.writeX(d.rd, this.extendLoad(value, d), d.access === ACCESS_SIGNED64 || d.size === 8)
+			if (d.fp) this.writeV(d.rd, value[0], d.size, value[1])
+			else this.writeX(d.rd, this.extendLoad(value[0], d), d.access === ACCESS_SIGNED64 || d.size === 8)
 		}
 		if (writeback) this.writeSp(d.rn, BigInt.asUintN(64, base + d.imm), true)
 		this.setPc(pc + 4)
@@ -546,21 +645,125 @@ export class A64Cpu {
 		if (d.access === ACCESS_STORE) {
 			if (!this.writable(at, size)) return this.fail(FAULT_ADDRESS, at)
 			if (!this.writable(second, size)) return this.fail(FAULT_ADDRESS, second)
-			const first = this.read(d.rd, true)
-			const other = this.read(d.ra, true)
-			this.store(at, size, first)
-			this.store(second, size, other)
+			if (d.fp) {
+				const v = this.v
+				const [low, high, otherLow, otherHigh] = [v[2 * d.rd], v[2 * d.rd + 1], v[2 * d.ra], v[2 * d.ra + 1]]
+				this.storeVector(at, size, low, high)
+				this.storeVector(second, size, otherLow, otherHigh)
+			} else {
+				const first = this.read(d.rd, true)
+				const other = this.read(d.ra, true)
+				this.store(at, size, first)
+				this.store(second, size, other)
+			}
 		} else {
-			const first = this.load(at, size)
+			const first = this.loadVector(at, size)
 			if (first === null) return this.fail(FAULT_ADDRESS, at)
-			const other = this.load(second, size)
+			const other = this.loadVector(second, size)
 			if (other === null) return this.fail(FAULT_ADDRESS, second)
-			this.writeX(d.rd, this.extendLoad(first, d), wide)
-			this.writeX(d.ra, this.extendLoad(other, d), wide)
+			if (d.fp) {
+				this.writeV(d.rd, first[0], size, first[1])
+				this.writeV(d.ra, other[0], size, other[1])
+			} else {
+				this.writeX(d.rd, this.extendLoad(first[0], d), wide)
+				this.writeX(d.ra, this.extendLoad(other[0], d), wide)
+			}
 		}
 		if (d.mode !== MODE_OFFSET) this.writeSp(d.rn, BigInt.asUintN(64, base + d.imm), true)
 		this.setPc(pc + 4)
 		return STEP_OK
+	}
+
+	/** Stores the low `size` bytes of a V register given whole. */
+	private storeVector(address: number, size: number, low: bigint, high: bigint) {
+		if (size < 16) {
+			this.store(address, size, size === 8 ? low : low & ((1n << BigInt(size * 8)) - 1n))
+			return
+		}
+		this.store(address, 8, low)
+		this.store(address + 8, 8, high)
+	}
+
+	/** One scalar floating-point instruction; none can fault. */
+	private float(d: A64Instruction) {
+		const { rd, rn, rm, size } = d
+		const fmt = size === 8 ? DOUBLE : SINGLE
+		const env = this.env
+		env.fpcr = this.fpcr
+		env.flags = 0
+		const n = () => this.readV(rn, size)
+		const m = () => this.readV(rm, size)
+		switch (d.op) {
+			case Op.FP_DP1: {
+				const a = n()
+				switch (d.opc) {
+					case FP1_FABS: this.writeV(rd, fpAbs(a, fmt), size); break
+					case FP1_FNEG: this.writeV(rd, fpNeg(a, fmt), size); break
+					case FP1_FSQRT: this.writeV(rd, fpSqrt(a, fmt, env), size); break
+					case FP1_FCVT_S: this.writeV(rd, fpConvert(a, DOUBLE, SINGLE, env), 4); break
+					case FP1_FCVT_D: this.writeV(rd, fpConvert(a, SINGLE, DOUBLE, env), 8); break
+					case FP1_FRINTN: this.writeV(rd, fpRoundInt(a, ROUND_TIEEVEN, false, fmt, env), size); break
+					case FP1_FRINTP: this.writeV(rd, fpRoundInt(a, ROUND_POSINF, false, fmt, env), size); break
+					case FP1_FRINTM: this.writeV(rd, fpRoundInt(a, ROUND_NEGINF, false, fmt, env), size); break
+					case FP1_FRINTZ: this.writeV(rd, fpRoundInt(a, ROUND_ZERO, false, fmt, env), size); break
+					case FP1_FRINTA: this.writeV(rd, fpRoundInt(a, ROUND_TIEAWAY, false, fmt, env), size); break
+					case FP1_FRINTX: this.writeV(rd, fpRoundInt(a, env.mode, true, fmt, env), size); break
+					case FP1_FRINTI: this.writeV(rd, fpRoundInt(a, env.mode, false, fmt, env), size); break
+					default: this.writeV(rd, a, size)
+				}
+				break
+			}
+			case Op.FP_DP2: {
+				const a = n()
+				const b = m()
+				let result: bigint
+				switch (d.opc) {
+					case FP2_FMUL: result = fpMul(a, b, fmt, env); break
+					case FP2_FDIV: result = fpDiv(a, b, fmt, env); break
+					case FP2_FADD: result = fpAdd(a, b, fmt, env); break
+					case FP2_FSUB: result = fpAdd(a, b, fmt, env, true); break
+					case FP2_FMAX: result = fpMinMax(a, b, true, false, fmt, env); break
+					case FP2_FMIN: result = fpMinMax(a, b, false, false, fmt, env); break
+					case FP2_FMAXNM: result = fpMinMax(a, b, true, true, fmt, env); break
+					case FP2_FMINNM: result = fpMinMax(a, b, false, true, fmt, env); break
+					// FNMUL negates the rounded product, a NaN's sign included.
+					default: result = fpNeg(fpMul(a, b, fmt, env), fmt)
+				}
+				this.writeV(rd, result, size)
+				break
+			}
+			case Op.FP_DP3: {
+				// o1 negates the addend; o1 != o0 negates the first factor.
+				const addend = this.readV(d.ra, size)
+				const a = d.opc & 2 ? fpNeg(addend, fmt) : addend
+				const first = d.opc === 1 || d.opc === 2 ? fpNeg(n(), fmt) : n()
+				this.writeV(rd, fpMulAdd(a, first, m(), fmt, env), size)
+				break
+			}
+			case Op.FP_CMP: this.setFlags(fpCompare(n(), d.opc & 1 ? 0n : m(), (d.opc & 2) !== 0, fmt, env)); break
+			case Op.FP_CCMP:
+				this.setFlags(conditionHolds(d.cond, this.nzcv) ? fpCompare(n(), m(), d.opc === 1, fmt, env) : Number(d.imm))
+				break
+			case Op.FP_CSEL: this.writeV(rd, conditionHolds(d.cond, this.nzcv) ? n() : m(), size); break
+			case Op.FP_IMM: this.writeV(rd, d.imm, size); break
+			case Op.FP_INT: case Op.FP_FIXED: {
+				const width = d.sf ? 64 : 32
+				const fbits = d.op === Op.FP_FIXED ? d.amount : 0
+				switch (d.opc) {
+					case FPI_FCVTS: case FPI_FCVTU: case FPI_FCVTAS: case FPI_FCVTAU: {
+						const mode = d.opc >= FPI_FCVTAS ? ROUND_TIEAWAY : [ROUND_TIEEVEN, ROUND_POSINF, ROUND_NEGINF, ROUND_ZERO][d.shift]
+						this.writeX(rd, fpToFixed(n(), fbits, (d.opc & 1) === 1, mode, width, fmt, env), d.sf)
+						break
+					}
+					case FPI_SCVTF: this.writeV(rd, fixedToFp(BigInt.asIntN(width, this.read(rn, d.sf)), fbits, fmt, env), size); break
+					case FPI_UCVTF: this.writeV(rd, fixedToFp(this.read(rn, d.sf), fbits, fmt, env), size); break
+					case FPI_FMOV_TO: this.writeX(rd, n(), d.sf); break
+					case FPI_FMOV_FROM: this.writeV(rd, this.read(rn, d.sf), size); break
+				}
+				break
+			}
+		}
+		if (env.flags & ~this.fpsr) this.setFpsr((this.fpsr | env.flags) >>> 0)
 	}
 
 	private extendLoad(value: bigint, d: A64Instruction): bigint {

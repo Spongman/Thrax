@@ -1,5 +1,6 @@
 import { CONDITIONS, sign, type EffectiveAddress } from './isa'
 import type { CpuModel } from './settings'
+import { CONTROL_IN, CONTROL_OUT, decodeFpu, disassembleFpu, type FpuFields } from './fpuIsa'
 
 export interface Operand extends EffectiveAddress {
 	extensionPc: number
@@ -16,8 +17,10 @@ export interface Decoded {
 	value?: number
 	condition?: number
 	mask?: number
+	fpu?: FpuFields
 }
-export function decodeInstruction(readWord: (address: number) => number, address: number, model: CpuModel): Decoded {
+/** `fpu` decodes coprocessor ID 1 F-line words for an attached MC68881/MC68882. */
+export function decodeInstruction(readWord: (address: number) => number, address: number, model: CpuModel, fpu = false): Decoded {
 	let pc = address
 	const words: number[] = []
 	const word = () => {
@@ -45,8 +48,8 @@ export function decodeInstruction(readWord: (address: number) => number, address
 			add()
 			add()
 		} else if (mode === 7 && reg === 4) {
-			add()
-			if (size === 4) add()
+			// Bytes and words take one word; wider FPU immediates take size / 2.
+			for (let i = 0; i < Math.max(1, size / 2); i++) add()
 		} else if (mode === 7 && reg > 4) throw new Error('Illegal effective address')
 		if (
 			(mode === 6 || (mode === 7 && reg === 3)) &&
@@ -190,6 +193,9 @@ export function decodeInstruction(readWord: (address: number) => number, address
 			if (opmode < 4) src()
 			else dst()
 		}
+	} else if (top === 15) {
+		if (!fpu || ((first >> 9) & 7) !== 1) throw new Error(`F-line opcode $${first.toString(16)} needs an MC68881/MC68882 coprocessor`)
+		decodeFpu(first, d, word, ea)
 	} else if (top === 14 && sizeBits !== 3) {
 		const type = (first >> 3) & 3
 		d.name = `${['as', 'ls', 'rox', 'ro'][type]}${first & 0x100 ? 'l' : 'r'}`
@@ -218,12 +224,12 @@ export function decodeInstruction(readWord: (address: number) => number, address
 	if (d.destination) {
 		const destination = d.destination
 		if (destination.mode === 7 && destination.reg >= 2) throw new Error('Illegal destination effective address')
-		if (destination.mode === 1 && !['movea', 'addq', 'subq'].includes(d.name))
+		if (destination.mode === 1 && !['movea', 'addq', 'subq'].includes(d.name) && d.fpu?.kind !== CONTROL_OUT)
 			throw new Error('Illegal address-register destination')
 		if (destination.mode < 2 && ['add', 'sub', 'or', 'and'].includes(d.name))
 			throw new Error('Unsupported extended/decimal arithmetic encoding')
 	}
-	if (d.source?.mode === 1 && !['move', 'movea', 'adda', 'suba', 'cmpa'].includes(d.name))
+	if (d.source?.mode === 1 && !['move', 'movea', 'adda', 'suba', 'cmpa'].includes(d.name) && d.fpu?.kind !== CONTROL_IN)
 		throw new Error('Illegal address-register source')
 	if (!d.name) throw new Error(`Unsupported/illegal MC${model} opcode $${first.toString(16).padStart(4, '0')}`)
 	d.length = pc - address
@@ -251,6 +257,7 @@ export function operandText(ea: Operand): string {
 export function disassemble(d: Decoded): string {
 	const suffix = d.size === 1 ? '.b' : d.size === 2 ? '.w' : '.l',
 		r = (n: number) => `${n < 8 ? 'd' : 'a'}${n & 7}`
+	if (d.fpu) return disassembleFpu(d, operandText)
 	if (d.name.startsWith('b') && d.condition !== undefined)
 		return `${d.name} $${((d.address + 2 + d.value!) >>> 0).toString(16)}`
 	if (d.name === 'dbcc')

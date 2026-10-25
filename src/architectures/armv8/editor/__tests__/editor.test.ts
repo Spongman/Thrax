@@ -107,3 +107,21 @@ describe('A64 data tips', () => {
 		expect(describeA64Token('\tmov x0, #1 // x1', 15, inspection)).toBeNull()
 	})
 })
+
+describe('A64 floating point in the editor', () => {
+	it('colours FP registers, system registers and real numbers', () => {
+		const [line] = tokenize(['\tfmadd d0, d1, s2, q31 // x', ])
+		expect(line.filter(([, token]) => token === 'variable').map(([text]) => text)).toEqual(['d0', 'd1', 's2', 'q31'])
+		const [move] = tokenize(['\tfmov s0, #-2.5e3'])
+		expect(move).toContainEqual(['2.5e3', 'number.float'])
+		const [system] = tokenize(['\tmrs x0, fpcr'])
+		expect(system).toContainEqual(['fpcr', 'variable'])
+	})
+
+	it('shows S and D registers as floats from the V register', () => {
+		const inspection: DebugInspection = { registers: { V2: 0x3FC00000, 'V2:hi': 0, V3: 0, 'V3:hi': 0xC0040000 }, memory: EMPTY_MEMORY, labels: new Map() }
+		expect(describeA64Token('\tfadd s0, s2, s2', 10, inspection)).toMatchObject({ register: 'V2', contents: ['**S2 (V2)**\n\n`1.5 (0x3FC00000)`'] })
+		expect(describeA64Token('\tfadd d0, d3, d3', 10, inspection)).toMatchObject({ register: 'V3', contents: ['**D3 (V3)**\n\n`-2.5 (0xC004000000000000)`'] })
+		expect(describeA64Token('\tfsqrt d0, d3', 1, inspection)?.contents.join()).toMatch(/Square root/)
+	})
+})

@@ -1,11 +1,11 @@
 import { describeAvrInstruction, DEPENDENCY_NAMES } from './instructions'
-import { historyCount, historySlice, describeValueEffect } from '../../core/historyView'
-import { editTransaction } from '../../core/editTransaction'
+import { historyCount, historySlice, snapshotEffects } from '../../core/historyView'
+import { capturedHistoryEdit } from '../../core/editTransaction'
 import { notifyHistorySeek } from '../../core/observer'
 import { MemoryEdits } from '../../core/memoryEdits'
 import { HistoryBufferLayout, type HistoryBufferSchema } from '../../core/historyBuffers'
 import { HistoryLog } from '../../core/historyLog'
-import { rewindHistoryTo, HistoryCursor } from '../../core/historyCursor'
+import { HistoryCursor } from '../../core/historyCursor'
 import type { ExecutionObserver, MachineConfig } from '../../core/observer'
 import { ExecutionController } from '../../core/executionController'
 import type {
@@ -67,6 +67,7 @@ export class AvrRuntime implements Machine {
 	sp = 65535
 	sreg = 0
 	private cpuHalted = false
+	get stopReason() { return this.execution.reason(this.cpuHalted) }
 	get halted() { return this.cpuHalted || this.execution.stopped }
 	set halted(value: boolean) { this.cpuHalted = value }
 	paused = false
@@ -83,6 +84,11 @@ export class AvrRuntime implements Machine {
 		speed: () => this.speed,
 		pacedAddresses: () => this.paced,
 		depth: () => this.callStack.length,
+	})
+	private readonly historyCommands = this.execution.historyCommands({
+		history: () => this.history, cursor: () => this.historyCursor,
+		undo: () => !this.disposed && this.undo(),
+		after: () => notifyHistorySeek(this.observers, this.instructionCount),
 	})
 
 	private readonly memoryEdits = new MemoryEdits({
@@ -101,14 +107,11 @@ export class AvrRuntime implements Machine {
 	}
 
 	private edit(change: () => void): boolean {
-		return editTransaction(change, {
+		return capturedHistoryEdit(change, {
 			begin: () => this.begin(true),
-			commit: () => this.log.close(),
-			rollback: () => {
-				this.log.close()
-				this.undo()
-				this.timeline.branch()
-			},
+			close: () => this.log.close(),
+			undo: () => { this.undo() },
+			branch: () => { this.timeline.branch() },
 		})
 	}
 
@@ -191,61 +194,15 @@ export class AvrRuntime implements Machine {
 				return ''
 			}
 		},
-		effects: (entry, applied) => {
-			const index = this.log.indexOfId(entry.id)
-			if (index < 0) return []
-			const p = this.log.first + index,
-				slot = p % this.log.entries.capacity
-			const before = this.log.entries.block(p).arrays[STATE]
-			const ahead = index >= this.historyCursor
-			const neighbour = ahead ? index - 1 : index + 1
-			const atCursor = ahead ? index === this.historyCursor : neighbour === this.historyCursor
-			const next = atCursor ? null : this.log.entries.block(this.log.first + neighbour).arrays[STATE]
-			const nextSlot = ((this.log.first + neighbour) % this.log.entries.capacity) * 35
-			const effects = []
-			for (let register = 0; register < 35; register++) {
-				const old = before[slot * 35 + register]
-				const after = next
-					? next[nextSlot + register]
-					: register < 32
-						? this.registers[register]
-						: register === 32
-							? this.sp
-							: register === 33
-								? this.sreg
-								: Number(this.cpuHalted)
-				if (old === after) continue
-				const name =
-					register < 32
-						? `r${register}`
-						: register === 32
-							? 'SP'
-							: register === 33
-								? 'SREG'
-								: 'Halted'
-				const value = old
-				effects.push(describeValueEffect(applied, {
-					subject: name,
-					register: register < 34 ? name : undefined,
-					value
-				}, 16))
-			}
-			const start = this.log.effectStart(index)
-			for (let offset = 0; offset < this.log.effectCount(index); offset++) {
-				const position = start + offset,
-					a = this.log.effects.block(position).arrays,
-					s = position % this.log.effects.capacity
-				const address = a[ADDRESS][s],
-					value = a[applied ? NEW : OLD][s]
-				effects.push(describeValueEffect(applied, {
-					subject: `[0x${address.toString(16)}]`,
-					register: undefined,
-					address,
-					value
-				}, 16))
-			}
-			return effects
-		}
+		effects: (entry, applied) => snapshotEffects(this.log, this.historyCursor, entry.id, applied, 16, effects => {
+			effects.registers(STATE, 35, 0, 35,
+				r => r < 32 ? this.registers[r] : r === 32 ? this.sp : r === 33 ? this.sreg : +this.cpuHalted,
+				(r, value) => {
+					const name = r < 32 ? `r${r}` : r === 32 ? 'SP' : r === 33 ? 'SREG' : 'Halted'
+					return { subject: name, register: r < 34 ? name : undefined, value }
+				})
+			effects.memory(ADDRESS, applied ? NEW : OLD)
+		})
 	}
 	private word(address: number) {
 		if (!Number.isInteger(address) || address < 0 || address > 65534 || address % 2)
@@ -349,11 +306,13 @@ export class AvrRuntime implements Machine {
 			notifyHistorySeek(this.observers, this.instructionCount)
 			return
 		}
-		const i = this.instruction()
-		const address = this.pc,
-			word = this.word(address) | ((i.size === 4 ? this.word(address + 2) : 0) << 16)
-		this.begin(false, word >>> 0)
+		let captured = false
 		try {
+			const i = this.instruction()
+			const address = this.pc,
+				word = this.word(address) | ((i.size === 4 ? this.word(address + 2) : 0) << 16)
+			this.begin(false, word >>> 0)
+			captured = true
 			for (const observer of this.observers)
 				observer.onInstruction?.(address, i, this.instructionCount)
 			this.pc += i.size
@@ -361,10 +320,13 @@ export class AvrRuntime implements Machine {
 			this.instructionCount++
 			this.log.close()
 		} catch (error) {
-			this.log.close()
-			this.undo()
-			this.timeline.branch()
-			notifyHistorySeek(this.observers, this.instructionCount)
+			if (captured) {
+				this.log.close()
+				this.undo()
+				this.timeline.branch()
+				notifyHistorySeek(this.observers, this.instructionCount)
+			}
+			this.execution.recordFault(error)
 			throw error
 		}
 	}
@@ -596,22 +558,11 @@ export class AvrRuntime implements Machine {
 			this.log.entries.setPayload(p, inverse)
 		}
 	}
-	stepBack() {
-		if (this.disposed || this.historyCursor <= 0) return false
-		const result = this.undo()
-		if (result) {
-			this.execution.stopped = false
-			this.pause()
-			notifyHistorySeek(this.observers, this.instructionCount)
-		}
-		return result
+	stepBack(): boolean {
+		return this.historyCommands.stepBack()
 	}
 	rewindTo(id: number): boolean {
-		return rewindHistoryTo(this.history, () => this.historyCursor, id, () => this.undo(), () => {
-			this.execution.stopped = false
-			this.pause()
-			notifyHistorySeek(this.observers, this.instructionCount)
-		})
+		return this.historyCommands.rewindTo(id)
 	}
 	registerValues(): Registers {
 		return {
@@ -622,7 +573,8 @@ export class AvrRuntime implements Machine {
 		}
 	}
 	writeRegister(id: string, value: number | bigint) {
-		if (this.disposed || typeof value !== 'number' || !Number.isInteger(value)) return false
+		if (!this.execution.canEdit(value)) return false
+		if (typeof value !== 'number') return false
 		const match = /^r(\d+)$/.exec(id),
 			index = match ? Number(match[1]) : -1
 		if (
@@ -663,6 +615,7 @@ export class AvrRuntime implements Machine {
 								: this.data[at]
 			},
 			word(address) {
+				if (!Number.isSafeInteger(address) || address < 0 || address >= 131072) return undefined
 				const at = address & ~1,
 					lo = this.byte(at),
 					hi = this.byte(at + 1)
@@ -671,18 +624,22 @@ export class AvrRuntime implements Machine {
 		}
 	}
 	writeByte(address: number, value: number) {
-		return Number.isFinite(value) && this.editBytes(address, Uint8Array.of(value))
+		if (!this.execution.canEdit(value) || !Number.isSafeInteger(address) || address < 0) return false
+		return this.editBytes(address, Uint8Array.of(value))
 	}
 	insertByte(address: number, limit: number, value: number): boolean {
+		if (!this.execution.canEdit(value)) return false
 		return this.memoryEdits.insert(address, limit, value)
 	}
 	deleteByte(address: number, limit: number): boolean {
+		if (!this.execution.canEdit(address)) return false
 		return this.memoryEdits.delete(address, limit)
 	}
 	provideInput() {
 		return false
 	}
 	setProgramCounter(address: number) {
+		if (!this.execution.canEdit(address)) return
 		this.writeRegister('PC', address)
 	}
 	configure(options: { speed?: number | null; pacedAddresses?: ReadonlySet<number> | null }) {
@@ -711,7 +668,7 @@ export class AvrRuntime implements Machine {
 	}
 	async stepOver() {
 		if (this.disposed || this.halted) return
-		const i = this.instruction()
+		const i = this.execution.inspectInstruction(() => this.instruction())
 		if (i.name.includes('call')) {
 			const target = this.pc + i.size
 			await this.execution.stepOver(target)
@@ -743,10 +700,9 @@ export class AvrRuntime implements Machine {
 	}
 	dispose() {
 		this.disposed = true
-		this.execution.dispose()
-		this.execution.running = false
-		this.onProgress = null
-		this.observers.length = 0
-		this.log.clear()
+		this.execution.dispose(() => {
+			this.observers.length = 0
+			this.log.clear()
+		})
 	}
 }

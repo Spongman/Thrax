@@ -1,5 +1,5 @@
+import { RamInspector } from '../../../core/ramInspector'
 import { notifyHistorySeek } from '../../../core/observer'
-import { rewindHistoryTo } from '../../../core/historyCursor'
 /**
  * An A32Machine behind the neutral machine contract: the run loop,
  * breakpoints, pacing, observers and user edits the debugger drives.
@@ -8,41 +8,24 @@ import { rewindHistoryTo } from '../../../core/historyCursor'
 import { MemoryEdits } from '../../../core/memoryEdits'
 import type { ExecutionObserver, MachineConfig } from '../../../core/observer'
 import { ExecutionController, ExecutionStep } from '../../../core/executionController'
-import { conditionPassed, shiftByImmediate } from '../../arm/a32/alu'
+import { conditionPassed, shiftByImmediate } from '../shared/a32/alu'
 import {
-	ARCH_V8, FLAG_C, FORMAT_BLOCK, FORMAT_BRANCH, FORMAT_EXCHANGE, FORMAT_EXCLUSIVE, FORMAT_EXTRA_TRANSFER, FORMAT_TRANSFER, branchOffset, formatOf, popCount,
-} from '../../arm/a32/isa'
-import type { ArmAssembly } from '../../arm/program'
+	ARCH_V8, FLAG_C, FORMAT_BLOCK, FORMAT_BRANCH, FORMAT_EXCHANGE, FORMAT_EXCLUSIVE, FORMAT_EXTRA_TRANSFER, FORMAT_TRANSFER, FORMAT_VFP, branchOffset, formatOf,
+	popCount,
+} from '../shared/a32/isa'
+import { decodeVfp, VK_BLOCK, VK_TRANSFER } from '../shared/a32/vfp'
+import type { ArmAssembly } from '../shared/program'
 import type { CallFrame, HistoryFormatter, KeyboardDisplayDevice, Machine, MemoryInspector, PendingInput, Registers, RegisterValue } from '../../contracts'
 import { faultMessage, STEP_FAULT, STEP_OK, STEP_WAIT } from './cpu'
 import { a32HistoryFormatter, A32HistoryView } from './historyView'
-import { a32InstructionSet } from './instructions'
+import { a32InstructionSet, executedInstructions } from './instructions'
 import { A32Machine } from './machine'
 import { a32RegisterValues, FLAG_BITS } from './registers'
 
 const REGISTER_ID = /^R(\d+)$/
+const SINGLE_ID = /^S(\d+)$/
 
 const READ_INPUT: PendingInput = Object.freeze({ type: 'string', prompt: 'read() is waiting for input' })
-
-/** Debugger reads of memory; nothing here can fault, record or reach a device. */
-class A32Memory implements MemoryInspector {
-	readonly wordBytes = 4
-	readonly littleEndian = true
-
-	constructor(private readonly bytes: Uint8Array, private readonly base: number) {}
-
-	byte(address: number): number | undefined {
-		const offset = address - this.base
-		return offset >= 0 && offset < this.bytes.length ? this.bytes[offset] : undefined
-	}
-
-	word(address: number): number | undefined {
-		const at = (address - this.base) & ~3
-		const bytes = this.bytes
-		if (address < this.base || at > bytes.length - 4) return undefined
-		return (bytes[at] | (bytes[at + 1] << 8) | (bytes[at + 2] << 16) | (bytes[at + 3] << 24)) >>> 0
-	}
-}
 
 /** What an instruction about to run will touch, worked out before it runs. */
 class Access {
@@ -54,7 +37,6 @@ class Access {
 	bytes = 4
 	load = false
 	store = false
-	branch = false
 	target = 0
 }
 
@@ -62,6 +44,8 @@ export interface A32RuntimeOptions {
 	memoryBytes: number
 	historyLimit: number
 	speed: number | null
+	/** VFP on; on when absent. */
+	floatingPoint?: boolean
 }
 
 export class A32Runtime implements Machine {
@@ -85,6 +69,11 @@ export class A32Runtime implements Machine {
 		depth: () => this.machine.callStack.depth,
 		step: () => this.advance() === STEP_WAIT ? ExecutionStep.WAIT : ExecutionStep.ADVANCED,
 	})
+	private readonly historyCommands = this.execution.historyCommands({
+		history: () => this.history, cursor: () => this.historyCursor,
+		undo: () => this.machine.history?.stepBack() ?? false,
+		after: () => this.resumed(),
+	})
 
 	private readonly memoryEdits = new MemoryEdits({
 		region: () => ({ start: this.machine.cpu.base, end: this.machine.cpu.base + this.machine.cpu.memory.length - 1 }),
@@ -94,7 +83,7 @@ export class A32Runtime implements Machine {
 	})
 
 	constructor(readonly program: ArmAssembly, options: A32RuntimeOptions) {
-		this.machine = new A32Machine({ memoryBytes: options.memoryBytes, historyLimit: options.historyLimit })
+		this.machine = new A32Machine({ memoryBytes: options.memoryBytes, historyLimit: options.historyLimit, floatingPoint: options.floatingPoint })
 		this.machine.load(program.image())
 		this.speed = options.speed
 		this.history = new A32HistoryView(this.machine.history)
@@ -103,6 +92,7 @@ export class A32Runtime implements Machine {
 	}
 
 	get pc() { return this.machine.cpu.pc }
+	get stopReason() { return this.execution.reason(this.machine.halted, this.fault, this.machine.cpu.faultAddress) }
 	get halted() { return this.machine.halted || this.execution.stopped || this.fault !== null }
 	get pendingInput() { return !this.halted && this.machine.linux.waiting ? READ_INPUT : null }
 	get instructionCount() { return this.machine.instructionCount }
@@ -163,7 +153,8 @@ export class A32Runtime implements Machine {
 		access.address = -1
 		access.words = 1
 		access.bytes = 4
-		access.load = access.store = access.branch = false
+		access.load = access.store = false
+		access.target = (cpu.pc + 4) >>> 0
 		const indexed = (base: number, offset: number) => {
 			const moved = word & 0x00800000 ? base + offset : base - offset
 			return (word & 0x01000000 ? moved : base) >>> 0
@@ -206,12 +197,25 @@ export class A32Runtime implements Machine {
 				access.store = !access.load
 				break
 			}
+			case FORMAT_VFP: {
+				const v = decodeVfp(word)!
+				if (v.kind === VK_TRANSFER) {
+					const base = v.rn === 15 ? (cpu.pc + 8) & ~3 : read(v.rn)
+					access.address = (v.up ? base + v.imm : base - v.imm) >>> 0
+					access.words = v.double ? 2 : 1
+				} else if (v.kind === VK_BLOCK) {
+					const base = read(v.rn)
+					access.address = (v.up ? base : base - 4 * v.imm) >>> 0
+					access.words = v.imm
+				} else break
+				access.load = v.load
+				access.store = !v.load
+				break
+			}
 			case FORMAT_BRANCH:
-				access.branch = word >>> 28 !== 14
 				access.target = (cpu.pc + 8 + branchOffset(word)) >>> 0
 				break
 			case FORMAT_EXCHANGE:
-				access.branch = word >>> 28 !== 14
 				access.target = read(word & 15) >>> 0
 				break
 		}
@@ -219,8 +223,9 @@ export class A32Runtime implements Machine {
 
 	private notify(address: number, word: number, count: number, status: number) {
 		const { observers, access } = this
-		for (const observer of observers) observer.onInstruction?.(address, word >>> 0, count)
-		if (access.branch) for (const observer of observers) observer.onBranch?.(address, access.passes, access.target)
+		const instruction = executedInstructions.executed(word >>> 0, this.machine.cpu.passed)
+		for (const observer of observers) observer.onInstruction?.(address, instruction, count)
+		if (a32InstructionSet.describe(instruction).isBranch) for (const observer of observers) observer.onBranch?.(address, access.passes, access.passes ? this.pc : access.target)
 		if (status !== STEP_OK || !access.passes || access.address < 0) return
 		const memory = this.inspectMemory()
 		for (let index = 0; index < access.words; index++) {
@@ -271,27 +276,21 @@ export class A32Runtime implements Machine {
 	pause() { this.execution.pause() }
 	stop() { this.execution.stop() }
 	stepBack(): boolean {
-		const log = this.machine.history
-		if (!log || !log.stepBack()) return false
-		this.resumed()
-		return true
+		return this.historyCommands.stepBack()
 	}
 
 	rewindTo(id: number): boolean {
-		const log = this.machine.history
-		return !!log && rewindHistoryTo(this.history, () => this.historyCursor, id, () => log.stepBack(), () => this.resumed())
+		return this.historyCommands.rewindTo(id)
 	}
 
 	/** Back from a rewind: whatever ended the run is undone with it. */
 	private resumed() {
 		this.fault = null
-		this.execution.stopped = false
-		this.paused = true
-		this.execution.running = false
 		this.seekObservers()
 	}
 
 	setProgramCounter(address: number) {
+		if (!this.execution.canEdit(address)) return
 		this.machine.editPc(address)
 		this.fault = null
 		this.execution.stopped = false
@@ -318,6 +317,7 @@ export class A32Runtime implements Machine {
 	}
 
 	writeRegister(id: string, value: RegisterValue): boolean {
+		if (!this.execution.canEdit(value) || !Number.isInteger(Number(value))) return false
 		const machine = this.machine
 		const number = Number(value)
 		if (id === 'PC') {
@@ -325,6 +325,9 @@ export class A32Runtime implements Machine {
 			return true
 		}
 		if (id === 'CPSR') return machine.editCpsr(number)
+		if (id === 'FPSCR') return machine.editFpscr(number)
+		const single = SINGLE_ID.exec(id)
+		if (single) return machine.editSingle(Number(single[1]), number)
 		if (FLAG_BITS[id] !== undefined) return false
 		const match = REGISTER_ID.exec(id)
 		return match !== null && machine.editRegister(Number(match[1]), number)
@@ -332,19 +335,22 @@ export class A32Runtime implements Machine {
 
 	inspectMemory(): MemoryInspector {
 		const cpu = this.machine.cpu
-		return new A32Memory(cpu.memory, cpu.base)
+		return new RamInspector(cpu.memory, { wordBytes: 4, littleEndian: true, base: cpu.base })
 	}
 
 	writeByte(address: number, value: number) {
+		if (!this.execution.canEdit(value) || !Number.isSafeInteger(address) || address < 0) return false
 		return this.machine.editBytes(address, [value])
 	}
 
 	/** Shifts `[address, limit]` up a byte; what is past the last non-zero byte stays. */
 	insertByte(address: number, limit: number, value: number): boolean {
+		if (!this.execution.canEdit(value)) return false
 		return this.memoryEdits.insert(address, limit, value)
 	}
 
 	deleteByte(address: number, limit: number): boolean {
+		if (!this.execution.canEdit(address)) return false
 		return this.memoryEdits.delete(address, limit)
 	}
 
@@ -353,7 +359,6 @@ export class A32Runtime implements Machine {
 	}
 
 	dispose() {
-		this.onProgress = null
 		this.stop()
 		this.execution.dispose()
 	}

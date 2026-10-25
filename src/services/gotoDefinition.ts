@@ -10,6 +10,7 @@
 
 import type * as Monaco from 'monaco-editor'
 import type { WorkspaceFile } from './workspace'
+import { stripAssemblyComment } from '../core/assembly/text'
 
 export interface Definition {
 	file: string
@@ -23,8 +24,8 @@ export interface Definition {
 const NAME = /[A-Za-z_.$][\w.$]*/g
 
 /** The name under `column` (1-based) on `text`, or null when there is none. */
-export function symbolAt(text: string, column: number): string | null {
-	for (const match of text.matchAll(NAME)) {
+export function symbolAt(text: string, column: number, pattern = NAME): string | null {
+	for (const match of text.matchAll(pattern)) {
 		const start = match.index + 1
 		const end = start + match[0].length
 		// A click lands on a character, so the column just past the name is not it.
@@ -33,7 +34,28 @@ export function symbolAt(text: string, column: number): string | null {
 	return null
 }
 
-const escape = (name: string) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+/** Dialects supply definition patterns (prefix in group 1, name in group 2). */
+export function findPatternDefinition(
+	files: readonly ({ name: string, code: string } | WorkspaceFile)[], name: string,
+	patterns: readonly RegExp[],
+	lines: (code: string) => readonly string[] = code => code.split('\n'),
+	accept: (match: RegExpExecArray) => boolean = () => true,
+): Definition | null {
+	for (const file of files) {
+		const source = lines(file.code)
+		for (let index = 0; index < source.length; index++) {
+			for (const pattern of patterns) {
+				const match = pattern.exec(source[index])
+				if (!match || !accept(match)) continue
+				const column = match.index + match[1].length + 1
+				return { file: 'name' in file ? file.name : file.title, line: index + 1, column, endColumn: column + name.length }
+			}
+		}
+	}
+	return null
+}
+
+export const escapeSymbol = (name: string) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 /**
  * Where `name` is defined: a label (`name:`), or the name given to `.eqv`,
@@ -42,25 +64,15 @@ const escape = (name: string) => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
  */
 export function findDefinition(files: readonly WorkspaceFile[], name: string): Definition | null {
 	if (name.startsWith('$')) return null
-	const escaped = escape(name)
-	const label = new RegExp(`^\\s*(${escaped})\\s*:`)
-	const directive = new RegExp(`^\\s*(?:\\S.*?)?\\.(?:eqv|macro|extern)\\s+(${escaped})(?![\\w.$])`, 'i')
-	for (const file of files) {
-		const lines = file.code.split('\n')
-		for (let index = 0; index < lines.length; index++) {
-			const line = stripComment(lines[index])
-			const match = label.exec(line) ?? directive.exec(line)
-			if (!match) continue
-			const column = match.index + match[0].indexOf(match[1]) + 1
-			return { file: file.title, line: index + 1, column, endColumn: column + name.length }
-		}
-	}
-	return null
+	const escaped = escapeSymbol(name)
+	return findPatternDefinition(files, name, [
+		new RegExp(`^(\\s*)(${escaped})\\s*:`),
+		new RegExp(`^(\\s*(?:\\S.*?)?\\.(?:eqv|macro|extern)\\s+)(${escaped})(?![\\w.$])`, 'i'),
+	], code => code.split('\n').map(stripComment))
 }
 
 function stripComment(line: string): string {
-	const hash = line.indexOf('#')
-	return hash < 0 ? line : line.slice(0, hash)
+	return stripAssemblyComment(line, ['#'])
 }
 
 /** The URI a definition in another file is opened through. */
@@ -87,6 +99,26 @@ export interface DefinitionFinder {
 	find(files: readonly WorkspaceFile[], name: string): Definition | null
 	/** Read-only files a definition may land in that the workspace does not hold, such as a bundled library. */
 	libraries?: () => readonly WorkspaceFile[]
+}
+
+/** Common label/equate lookup; dialects choose comments and extra definition forms. */
+export function assemblyDefinitions(config: {
+	comments: readonly string[]
+	ignoreLine?: (line: string) => boolean
+	patterns?: (escapedName: string) => readonly RegExp[]
+}): DefinitionFinder {
+	const code = (line: string) => config.ignoreLine?.(line) ? '' : stripAssemblyComment(line, config.comments)
+	return {
+		nameAt: (line, column) => symbolAt(code(line), column),
+		find: (files, name) => {
+			const escaped = escapeSymbol(name)
+			return findPatternDefinition(files, name, [
+				new RegExp(`^(\\s*(?:[\\w.$]+:\\s*)*)(${escaped})\\s*:`),
+				new RegExp(`^(\\s*(?:[\\w.$]+:\\s*)*\\.(?:equ|set)\\s+)(${escaped})(?=\\s*[,=])`, 'i'),
+				...(config.patterns?.(escaped) ?? []),
+			], text => text.split('\n').map(code), match => match[2] === name)
+		},
+	}
 }
 
 /** Labels and `.eqv`, `.macro` and `.extern` names, as written above. */

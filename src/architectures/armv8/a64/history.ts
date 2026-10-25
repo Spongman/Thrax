@@ -53,6 +53,12 @@ export const EFFECT_FRAME_DEPTH = 12
 export const EFFECT_KEY = 13
 /** Display output length. */
 export const EFFECT_DISPLAY = 14
+/** Bits 0-63 of V register `a`. */
+export const EFFECT_VECTOR_LOW = 15
+/** Bits 64-127 of V register `a`. */
+export const EFFECT_VECTOR_HIGH = 16
+export const EFFECT_FPCR = 17
+export const EFFECT_FPSR = 18
 
 export const DEFAULT_HISTORY_LIMIT = 100_000
 
@@ -170,6 +176,19 @@ export class A64History extends ReversibleHistory implements A64EffectSink, A64C
 		this.push(EFFECT_FLAGS, 0, 0, old)
 	}
 
+	vector(index: number, oldLow: bigint, oldHigh: bigint) {
+		this.push(EFFECT_VECTOR_LOW, 0, index, low(oldLow), high(oldLow))
+		this.push(EFFECT_VECTOR_HIGH, 0, index, low(oldHigh), high(oldHigh))
+	}
+
+	fpcr(old: number) {
+		this.push(EFFECT_FPCR, 0, 0, old)
+	}
+
+	fpsr(old: number) {
+		this.push(EFFECT_FPSR, 0, 0, old)
+	}
+
 	memory(address: number, size: number, old: bigint) {
 		this.push(EFFECT_MEMORY, size, address, low(old), high(old))
 	}
@@ -253,6 +272,15 @@ export class A64History extends ReversibleHistory implements A64EffectSink, A64C
 					columns[EFFECT_HI][slot] = high(current)
 					cpu.sp = held; break
 				}
+				case EFFECT_VECTOR_LOW: case EFFECT_VECTOR_HIGH: {
+					const at = 2 * a + (columns[EFFECT_KIND][slot] === EFFECT_VECTOR_HIGH ? 1 : 0)
+					const current = cpu.v[at]
+					columns[EFFECT_B][slot] = low(current)
+					columns[EFFECT_HI][slot] = high(current)
+					cpu.v[at] = held; break
+				}
+				case EFFECT_FPCR: columns[EFFECT_B][slot] = cpu.fpcr; cpu.fpcr = b; break
+				case EFFECT_FPSR: columns[EFFECT_B][slot] = cpu.fpsr; cpu.fpsr = b; break
 				case EFFECT_PC: columns[EFFECT_B][slot] = cpu.pc; cpu.pc = b; break
 				case EFFECT_FLAGS: columns[EFFECT_B][slot] = cpu.nzcv; cpu.nzcv = b; break
 				case EFFECT_MEMORY: {

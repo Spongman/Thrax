@@ -18,7 +18,7 @@ describe('example programs', () => {
 
 describe('coprocessor example', () => {
 	it('prints the values its floating-point maths produces', async () => {
-		const simulator = build(EXAMPLES.coprocessor.code)
+		const simulator = build(EXAMPLES.coprocessors.code)
 		await simulator.runUntil(() => simulator.instructionCount >= 1_000_000)
 		expect(simulator.console).toBe('hypotenuse = 5\narea = 6\na < b\ncp0 status = 0x0000ff11\n')
 	})

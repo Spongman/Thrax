@@ -55,19 +55,19 @@ beforeAll(async () => {
 
 beforeEach(async () => {
 	await state().switchArchitecture('armv8')
-	state().setTargetSetting('executionState', 'aarch32')
+	await state().setTargetSetting('executionState', 'aarch32')
 	state().reset()
 })
 
 describe('the execution state chooses what the workbench shows', () => {
-	it('shows AArch64 registers, examples and language by default, and AArch32 when chosen', () => {
-		state().setTargetSetting('executionState', 'aarch64')
+	it('shows AArch64 registers, examples and language by default, and AArch32 when chosen', async () => {
+		await state().setTargetSetting('executionState', 'aarch64')
 		expect(state().targetVariant?.language).toBe('aarch64')
 		expect(state().targetVariant?.registers).toBe(A64_REGISTERS)
 		expect(state().targetVariant?.examples).toBe(EXAMPLES)
 		expect(state().registers.X0).toBe(0n)
 
-		state().setTargetSetting('executionState', 'aarch32')
+		await state().setTargetSetting('executionState', 'aarch32')
 		expect(state().targetVariant?.language).toBe('arm')
 		expect(state().targetVariant?.registers).toBe(A32_REGISTERS)
 		expect(state().targetVariant?.examples).toBe(A32_EXAMPLES)
@@ -213,7 +213,7 @@ describe('AArch32 in the workbench', () => {
 	})
 
 	it('hands back to AArch64, whose examples still run', async () => {
-		state().setTargetSetting('executionState', 'aarch64')
+		await state().setTargetSetting('executionState', 'aarch64')
 		state().setCode(EXAMPLES.sum.code)
 		await state().run()
 		expect(state().console).toBe('8\n')

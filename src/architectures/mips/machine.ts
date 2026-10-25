@@ -29,11 +29,13 @@ export class WordMemory implements MemoryInspector {
 	constructor(readonly words: ReadonlyMap<number, number>) {}
 
 	byte(address: number): number | undefined {
+		if (!Number.isSafeInteger(address) || address < 0 || address > 0xffffffff) return undefined
 		const word = this.words.get((address >>> 0) >>> 2)
 		return word === undefined ? undefined : (word >>> ((address & 3) * 8)) & 0xff
 	}
 
 	word(address: number): number | undefined {
+		if (!Number.isSafeInteger(address) || address < 0 || address > 0xffffffff) return undefined
 		return this.words.get((address >>> 0) >>> 2)
 	}
 }
@@ -51,6 +53,7 @@ export class MipsMachine implements Machine {
 	}
 
 	get pc() { return this.simulator.pc }
+	get stopReason() { return this.simulator.stopReason }
 	get halted() { return this.simulator.halted }
 	get paused() { return this.simulator.paused }
 	get pendingInput() { return this.simulator.pendingInput }
@@ -96,7 +99,7 @@ export class MipsMachine implements Machine {
 		if (fp) return this.simulator.setFpRegister(Number(fp[1]), value)
 		const cp0 = CP0_INDEX.get(id)
 		if (cp0 !== undefined) return this.simulator.setCp0Register(cp0, value)
-		return this.simulator.setRegister(id, value | 0)
+		return this.simulator.setRegister(id, value)
 	}
 
 	inspectMemory(): MemoryInspector {

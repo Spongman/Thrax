@@ -1,3 +1,4 @@
+import { Z80_MNEMONICS } from '../catalog'
 /**
  * Operands and instruction encodings in Zilog syntax. An instruction's size
  * follows from its operands' shapes alone, so layout never needs a value; the
@@ -312,10 +313,7 @@ const SIMPLE: Readonly<Record<string, readonly number[]>> = {
 	LDDR: [0xED, 0xB8], CPDR: [0xED, 0xB9], INDR: [0xED, 0xBA], OTDR: [0xED, 0xBB],
 }
 
-export const MNEMONICS: ReadonlySet<string> = new Set([
-	...Object.keys(SIMPLE), ...Object.keys(ALU), ...Object.keys(ROTATE), ...Object.keys(BIT_OPS),
-	'LD', 'PUSH', 'POP', 'EX', 'INC', 'DEC', 'JP', 'JR', 'DJNZ', 'CALL', 'RET', 'RST', 'IM', 'IN', 'OUT',
-])
+export const MNEMONICS: ReadonlySet<string> = new Set(Z80_MNEMONICS)
 
 /** An 8-bit operand as the r field reads it: a register, (HL) or (IX+d). */
 interface R8Operand {

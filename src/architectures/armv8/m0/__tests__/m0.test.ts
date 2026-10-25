@@ -199,11 +199,12 @@ describe('ARMv6-M Thumb', () => {
 	])('rejects unsupported/unpredictable source %s', (code) =>
 		expect(assemble(code).diagnostics.length).toBeGreaterThan(0),
 	)
-	it('switches the existing ARM definition without changing its persisted id', () => {
+	it('switches the existing ARM definition without changing its persisted id', async () => {
 		expect(definition.id).toBe('armv8')
 		expect(definition.variant!(settings).language).toBe('thrax-thumb-m0')
-		const services = definition.createServices(),
-			p = services.assemble({ files: [{ name: 'a.s', code: EXAMPLES.sum.code }], entries: ['a.s'] }, settings)
+		const services = definition.createServices()
+		await services.prepare?.(settings)
+		const p = services.assemble({ files: [{ name: 'a.s', code: EXAMPLES.sum.code }], entries: ['a.s'] }, settings)
 		const m = services.createMachine(p, settings, { speed: null, historyLimit: 100 })
 		finish(m as M0Runtime)
 		expect(m.console).toBe('8')

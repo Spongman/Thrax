@@ -18,7 +18,7 @@ const column = (name: string, type: 'u8' | 'u32' | 'f64') => Object.freeze({ nam
 
 /** Entry: the instruction's address and word, its kind and the count before it. Effect: a kind, a size and two values. */
 export const a32HistorySchema: HistoryBufferSchema = Object.freeze({
-	entry: Object.freeze([column('pc', 'u32'), column('word', 'u32'), column('kind', 'u8'), column('count', 'f64'), column('controlCount', 'f64')]),
+	entry: Object.freeze([column('pc', 'u32'), column('word', 'u32'), column('kind', 'u8'), column('count', 'f64'), column('controlCount', 'f64'), column('passed', 'u8')]),
 	effect: Object.freeze([column('kind', 'u8'), column('size', 'u8'), column('a', 'f64'), column('b', 'f64')]),
 })
 
@@ -47,6 +47,9 @@ export const EFFECT_FRAME_DEPTH = 12
 export const EFFECT_KEY = 13
 /** Display output length. */
 export const EFFECT_DISPLAY = 14
+/** `a` is the S register index, `b` its bits. */
+export const EFFECT_FP_REGISTER = 15
+export const EFFECT_FPSCR = 16
 
 export const ENTRY_INSTRUCTION = 0
 export const ENTRY_EDIT = 1
@@ -67,6 +70,7 @@ const WORD = layout.column('entry', 'word', 'u32')
 const KIND = layout.column('entry', 'kind', 'u8')
 const COUNT = layout.column('entry', 'count', 'f64')
 const CONTROL_COUNT = layout.column('entry', 'controlCount', 'f64')
+const PASSED = layout.column('entry', 'passed', 'u8')
 const EFFECT_KIND = layout.column('effect', 'kind', 'u8')
 const EFFECT_SIZE = layout.column('effect', 'size', 'u8')
 const EFFECT_A = layout.column('effect', 'a', 'f64')
@@ -137,6 +141,7 @@ export class A32History extends ReversibleHistory implements A32EffectSink, A32C
 		columns[KIND][slot] = this.kind
 		columns[COUNT][slot] = this.instructionCount
 		columns[CONTROL_COUNT][slot] = this.instructionCount
+		columns[PASSED][slot] = Number(cpu.passed)
 		log.close()
 		return true
 	}
@@ -161,6 +166,14 @@ export class A32History extends ReversibleHistory implements A32EffectSink, A32C
 		this.push(EFFECT_MONITOR, 0, 0, old)
 	}
 
+	fpRegister(index: number, old: number) {
+		this.push(EFFECT_FP_REGISTER, 0, index, old)
+	}
+
+	fpscr(old: number) {
+		this.push(EFFECT_FPSCR, 0, 0, old)
+	}
+
 	frameWord(index: number, old: number) {
 		this.push(EFFECT_FRAME_WORD, 0, index, old)
 	}
@@ -179,6 +192,10 @@ export class A32History extends ReversibleHistory implements A32EffectSink, A32C
 
 	wordAt(index: number): number {
 		return this.column(index, WORD)
+	}
+
+	passedAt(index: number): boolean {
+		return this.column(index, PASSED) !== 0
 	}
 
 	kindAt(index: number): number {
@@ -227,6 +244,8 @@ export class A32History extends ReversibleHistory implements A32EffectSink, A32C
 				case EFFECT_CPSR: columns[EFFECT_B][slot] = cpu.cpsr; cpu.cpsr = b; break
 				case EFFECT_MEMORY: columns[EFFECT_B][slot] = cpu.load(a, this.effect(position, EFFECT_SIZE)); cpu.restore(a, this.effect(position, EFFECT_SIZE), b); break
 				case EFFECT_MONITOR: columns[EFFECT_B][slot] = cpu.exclusive; cpu.exclusive = b; break
+				case EFFECT_FP_REGISTER: columns[EFFECT_B][slot] = cpu.s[a]; cpu.s[a] = b; break
+				case EFFECT_FPSCR: columns[EFFECT_B][slot] = cpu.fpscr; cpu.fpscr = b; break
 				case EFFECT_OUTPUT: columns[EFFECT_B][slot] = linux.output.length; columns[EFFECT_A][slot] = b; linux.output = this.outputText.exchange(linux.output, b); break
 				case EFFECT_INPUT: columns[EFFECT_B][slot] = linux.inputIndex; linux.inputIndex = b; break
 				case EFFECT_WAITING: columns[EFFECT_B][slot] = +linux.waiting; linux.waiting = b !== 0; break

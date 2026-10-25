@@ -62,11 +62,7 @@ const definition: ArchitectureDefinition = {
 					)
 				},
 				createMachine(program, _settings, options) {
-					if (
-						!(program instanceof AvrProgram) ||
-						program.diagnostics.some((diagnostic) => diagnostic.severity === 'error')
-					)
-						throw new Error('Not a valid AVR program')
+					if (!(program instanceof AvrProgram)) throw new Error('Not a valid AVR program')
 					const next = new AvrRuntime(program, options)
 					return next
 				},

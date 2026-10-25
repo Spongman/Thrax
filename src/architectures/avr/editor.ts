@@ -1,26 +1,24 @@
-import { stripAssemblyComment } from '../../core/assembly/text'
+import { inspectAssemblyToken, type TokenInspection } from '../../services/assemblyInspection'
 import type * as Monaco from 'monaco-editor'
 import type { DebugInspection, EditorHost, TokenDescription } from '../contracts'
 import { disposableGroup } from '../../core/disposableScope'
 import { registerAssemblyLanguage, registerTokenHover } from '../../services/assemblyLanguage'
 import { MNEMONICS } from './isa'
 import { avrInstructionHelp } from './instructionHelp'
+import { assemblyDefinitions, registerGotoDefinition } from '../../services/gotoDefinition'
 
-export function describeAvrToken(line: string, offset: number, state: DebugInspection): TokenDescription | null {
-	const comment = stripAssemblyComment(line, [';']).length
-	if (comment >= 0 && offset >= comment) return null
-	for (const match of line.matchAll(/[A-Za-z_.$][\w.$]*/g)) {
-		if (offset < match.index || offset >= match.index + match[0].length) continue
-		const token = match[0], span = { start: match.index, length: token.length }
-		const key = /^r\d+$/i.test(token) ? token.toLowerCase() : token.toUpperCase()
-		const value = state.registers[key]
-		if (value !== undefined) return { ...span, register: key, contents: [`**${token}** = ${value} (0x${value.toString(16)})`] }
-		const address = state.labels.get(token)
-		if (address !== undefined) return { ...span, address, contents: [`**${token}** = ${address} (0x${address.toString(16)})`] }
-		const contents = avrInstructionHelp(token)
-		return contents ? { ...span, ...contents } : null
-	}
-	return null
+export const avrDefinitions = assemblyDefinitions({ comments: [';'] })
+
+const inspection: TokenInspection = {
+	tokens: /[A-Za-z_.$][\w.$]*/g, comments: [';'],
+	register: token => /^r\d+$/i.test(token) ? token.toLowerCase() : token.toUpperCase(),
+	registerText: (token, _id, value) => `**${token}** = ${value} (0x${value.toString(16)})`,
+	labelText: (token, address) => `**${token}** = ${address} (0x${address.toString(16)})`,
+	help: avrInstructionHelp,
+}
+
+export function describeAvrToken(text: string, offset: number, state: DebugInspection): TokenDescription | null {
+	return inspectAssemblyToken(text, offset, state, inspection)
 }
 
 export function installEditor(monaco: typeof Monaco, host: EditorHost) {
@@ -45,5 +43,6 @@ export function installEditor(monaco: typeof Monaco, host: EditorHost) {
 			completions: MNEMONICS.map((name) => ({ label: name, insertText: name, kind: monaco.languages.CompletionItemKind.Keyword })),
 		}))
 		scope.add(registerTokenHover(monaco, 'avr', (line, offset) => describeAvrToken(line, offset, host.inspection())))
+		scope.add(registerGotoDefinition(monaco, host, 'avr', avrDefinitions))
 	})
 }

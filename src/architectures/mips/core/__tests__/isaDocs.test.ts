@@ -3,6 +3,7 @@ import { INSTRUCTION_MNEMONICS } from '../isa'
 import { INSTRUCTION_DOCS, INSTRUCTION_NAMES, instructionDoc, instructionHelp as describeInstruction, instructionSignature } from '../isaDocs'
 
 const instructionHelp = (name: string) => describeInstruction(name)?.contents ?? null
+const manual = 'https://asm-editor.specy.app/documentation/mips/instruction/'
 
 const mnemonics = [...INSTRUCTION_MNEMONICS].map((mnemonic) => mnemonic.toLowerCase())
 
@@ -37,7 +38,7 @@ describe('instruction docs', () => {
 
 	it('shows a basic instruction with its own form', () => {
 		expect(instructionHelp('add')).toEqual([
-			'**ADD** — ADD (basic instruction)',
+			`**[ADD](${manual}add "Open ADD in the manual")** — ADD (basic instruction)`,
 			'Add two registers, trapping on signed overflow.',
 			'Syntax: `add $t1,$t2,$t3`',
 			'Pseudo forms: `add $t1,$t2,-100` · `add $t1,$t2,100000`',
@@ -47,7 +48,7 @@ describe('instruction docs', () => {
 
 	it('shows a pseudo-instruction as one', () => {
 		expect(instructionHelp('move')).toEqual([
-			'**MOVE** — MOVE (pseudo-instruction)',
+			`**[MOVE](${manual}move "Open MOVE in the manual")** — MOVE (pseudo-instruction)`,
 			'Copy one register into another.',
 			'Syntax: `move $t1,$t2`',
 		])

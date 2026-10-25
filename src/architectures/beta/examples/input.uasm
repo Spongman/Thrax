@@ -1,0 +1,96 @@
+// Interactive Input
+// Read a line into a buffer, then print it.
+
+.include "beta.uasm"
+.options tty                // RDCHAR and WRCHAR need the tty
+
+	CMOVE(stack, SP)
+	CMOVE(64, R1)           // read_line(buffer, 64)
+	PUSH(R1)
+	CMOVE(buffer, R1)
+	PUSH(R1)
+	CALL(read_line, 2)
+
+	PUSH(R1)                // print_string(buffer)
+	CALL(print_string, 1)
+	HALT()
+
+// read_line(buffer, size): read up to size - 1 characters, through the first
+// newline, into buffer and end them with a zero.
+read_line:
+	PUSH(LP) PUSH(BP)
+	MOVE(SP, BP)
+	PUSH(R1) PUSH(R2) PUSH(R3)
+	LD(BP, -12, R1)         // R1 <- where the next character goes
+	LD(BP, -16, R2)
+	ADD(R1, R2, R2)
+	SUBC(R2, 1, R2)         // R2 <- the last byte, kept for the zero
+rl_next:
+	CMPLT(R1, R2, R3)
+	BF(R3, rl_done)         // the buffer is full
+	RDCHAR()                // R0 <- next character, waiting for one to be typed
+	PUSH(R0)
+	PUSH(R1)
+	CALL(store_byte, 2)
+	ADDC(R1, 1, R1)
+	CMPEQC(R0, '\n', R3)
+	BF(R3, rl_next)
+rl_done:
+	PUSH(R31)               // the terminating zero
+	PUSH(R1)
+	CALL(store_byte, 2)
+	POP(R3) POP(R2) POP(R1)
+	MOVE(BP, SP)
+	POP(BP) POP(LP)
+	RTN()
+
+// store_byte(address, byte): stores are whole words, so merge the byte into
+// the word that holds it.
+store_byte:
+	PUSH(LP) PUSH(BP)
+	MOVE(SP, BP)
+	PUSH(R1) PUSH(R2) PUSH(R3) PUSH(R4)
+	LD(BP, -12, R1)         // R1 <- address
+	ANDC(R1, 3, R2)
+	SHLC(R2, 3, R2)         // R2 <- the byte's bit offset in its word
+	ANDC(R1, -4, R1)        // R1 <- the word's address
+	CMOVE(0xFF, R3)
+	SHL(R3, R2, R3)
+	XORC(R3, -1, R3)        // R3 <- mask that clears the old byte
+	LD(R1, 0, R4)
+	AND(R4, R3, R4)
+	LD(BP, -16, R3)         // R3 <- byte, moved into place
+	ANDC(R3, 0xFF, R3)
+	SHL(R3, R2, R3)
+	OR(R4, R3, R4)
+	ST(R4, 0, R1)
+	POP(R4) POP(R3) POP(R2) POP(R1)
+	MOVE(BP, SP)
+	POP(BP) POP(LP)
+	RTN()
+
+// print_string(s): write the zero-terminated string at address s.
+print_string:
+	PUSH(LP) PUSH(BP)
+	MOVE(SP, BP)
+	PUSH(R0) PUSH(R1) PUSH(R2) PUSH(R3)
+	LD(BP, -12, R1)         // R1 <- address of the next character
+ps_next:
+	ANDC(R1, -4, R3)        // loads are whole words, so fetch the word holding it
+	LD(R3, 0, R0)
+	ANDC(R1, 3, R2)         // and shift its byte down; words are little-endian
+	SHLC(R2, 3, R2)
+	SHR(R0, R2, R0)
+	ANDC(R0, 0xFF, R0)
+	BEQ(R0, ps_done)        // stop at the terminating zero
+	WRCHAR()
+	ADDC(R1, 1, R1)
+	BR(ps_next)
+ps_done:
+	POP(R3) POP(R2) POP(R1) POP(R0)
+	MOVE(BP, SP)
+	POP(BP) POP(LP)
+	RTN()
+
+buffer: STORAGE(16)         // 64 bytes
+stack: STORAGE(64)

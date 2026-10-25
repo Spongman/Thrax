@@ -154,7 +154,8 @@ export function codeRowOf(row: SourceRow, memory: MemoryInspector): CodeRow {
 	const wordBytes = Math.min(memory.wordBytes, row.length ?? memory.wordBytes)
 	const bytes = Array.from({ length: row.length ?? wordBytes }, (_, offset) => {
 		const within = offset % wordBytes
-		return memory.byte(row.address + offset - within + (littleEndian ? wordBytes - 1 - within : within)) ?? 0
+		const groupBytes = Math.min(wordBytes, (row.length ?? wordBytes) - offset + within)
+		return memory.byte(row.address + offset - within + (littleEndian ? groupBytes - 1 - within : within)) ?? 0
 	})
 	return { address: row.address, instruction: true, bytes }
 }

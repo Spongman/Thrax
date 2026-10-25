@@ -8,11 +8,14 @@ import {
 	sizeCode,
 	type EffectiveAddress
 } from './isa'
+import { encodeFpu } from './fpuEncoding'
 
 export interface EncodingContext {
 	pc: number
 	emitting: boolean
 	model: CpuModel
+	/** An MC68881/MC68882 is attached. */
+	fpu?: boolean
 	value(text: string): number
 }
 function range(value: number, low: number, high: number, context: EncodingContext, what: string) {
@@ -101,6 +104,8 @@ function registerList(text: string): number {
 	return mask
 }
 export function encodeInstruction(operation: string, args: string[], c: EncodingContext): number[] {
+	const fpu = encodeFpu(operation, args, c)
+	if (fpu) return fpu
 	const split = operation.toLowerCase().split('.'),
 		name = split[0],
 		suffix = split[1],

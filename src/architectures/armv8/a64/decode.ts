@@ -6,6 +6,7 @@
  * operand already worked out (a bitmask, a shifted imm12, a byte offset).
  */
 
+import { DOUBLE, expandImm8, SINGLE } from '../shared/fp'
 import { decodeBitMasks, logicalImmediate } from './isa'
 
 export class Op {
@@ -60,7 +61,72 @@ export class Op {
 	static readonly LOAD_LITERAL = 30
 	/** LDP/STP/LDPSW. */
 	static readonly LOAD_STORE_PAIR = 31
+	// Scalar floating point: `size` is the operand bytes, 4 (S) or 8 (D).
+	/** FMOV/FABS/FNEG/FSQRT/FCVT/FRINT*: `opc` the opcode field. */
+	static readonly FP_DP1 = 32
+	/** FMUL/FDIV/FADD/FSUB/FMAX/FMIN/FMAXNM/FMINNM/FNMUL: `opc`. */
+	static readonly FP_DP2 = 33
+	/** FMADD/FMSUB/FNMADD/FNMSUB: `opc` is o1:o0. */
+	static readonly FP_DP3 = 34
+	/** FCMP/FCMPE: `opc` bit 0 compares with zero, bit 1 signals. */
+	static readonly FP_CMP = 35
+	/** FCCMP/FCCMPE: `cond`, `imm` the nzcv, `opc` 1 for FCCMPE. */
+	static readonly FP_CCMP = 36
+	static readonly FP_CSEL = 37
+	/** FMOV (immediate): `imm` the expanded bits, `amount` the imm8. */
+	static readonly FP_IMM = 38
+	/** FCVT[NPMZA][SU], SCVTF, UCVTF, FMOV (general): `shift` rmode, `opc` opcode, `sf` the integer width. */
+	static readonly FP_INT = 39
+	/** FCVTZ[SU], [SU]CVTF with fraction bits: `amount` fbits. */
+	static readonly FP_FIXED = 40
+	/** MRS and MSR (register): `imm` the system register, o0:op1:CRn:CRm:op2. */
+	static readonly MRS = 41
+	static readonly MSR = 42
 }
+
+/** System registers MRS and MSR reach, as o0:op1:CRn:CRm:op2. */
+export const SYSREG_NZCV = 0x5A10
+export const SYSREG_FPCR = 0x5A20
+export const SYSREG_FPSR = 0x5A21
+export const SYSREG_NAMES: Readonly<Record<number, string>> = { [SYSREG_NZCV]: 'nzcv', [SYSREG_FPCR]: 'fpcr', [SYSREG_FPSR]: 'fpsr' }
+
+/** FP_DP1 opcodes. */
+export const FP1_FMOV = 0
+export const FP1_FABS = 1
+export const FP1_FNEG = 2
+export const FP1_FSQRT = 3
+export const FP1_FCVT_S = 4
+export const FP1_FCVT_D = 5
+export const FP1_FRINTN = 8
+export const FP1_FRINTP = 9
+export const FP1_FRINTM = 10
+export const FP1_FRINTZ = 11
+export const FP1_FRINTA = 12
+export const FP1_FRINTX = 14
+export const FP1_FRINTI = 15
+
+/** FP_DP2 opcodes. */
+export const FP2_FMUL = 0
+export const FP2_FDIV = 1
+export const FP2_FADD = 2
+export const FP2_FSUB = 3
+export const FP2_FMAX = 4
+export const FP2_FMIN = 5
+export const FP2_FMAXNM = 6
+export const FP2_FMINNM = 7
+export const FP2_FNMUL = 8
+
+/** FP_INT opcodes; rmode picks N, P, M or Z for the first two. */
+export const FPI_FCVTS = 0
+export const FPI_FCVTU = 1
+export const FPI_SCVTF = 2
+export const FPI_UCVTF = 3
+export const FPI_FCVTAS = 4
+export const FPI_FCVTAU = 5
+/** FMOV from FP to general. */
+export const FPI_FMOV_TO = 6
+/** FMOV from general to FP. */
+export const FPI_FMOV_FROM = 7
 
 /** DP3 operations. */
 export const DP3_MADD = 0
@@ -135,11 +201,13 @@ export interface A64Instruction {
 	readonly size: number
 	readonly access: number
 	readonly mode: number
+	/** A load or store of SIMD&FP registers: B, H, S, D or Q by `size`. */
+	readonly fp: boolean
 }
 
 const NONE: A64Instruction = Object.freeze({
 	op: Op.UNDEFINED, word: 0, sf: false, rd: 0, rn: 0, rm: 0, ra: 0, opc: 0, setFlags: false, sub: false, invert: false, immediate: false,
-	imm: 0n, shift: 0, amount: 0, cond: 0, immr: 0, imms: 0, wmask: 0n, tmask: 0n, size: 0, access: 0, mode: 0,
+	imm: 0n, shift: 0, amount: 0, cond: 0, immr: 0, imms: 0, wmask: 0n, tmask: 0n, size: 0, access: 0, mode: 0, fp: false,
 })
 
 const signExtend = (value: number, bits: number) => (value << (32 - bits)) >> (32 - bits)
@@ -221,6 +289,12 @@ function decodeBranchSystem(word: number): A64Instruction {
 	if (((word & 0xFFE0001F) >>> 0) === 0xD4200000) return make(word, Op.BRK, { imm: BigInt((word >>> 5) & 0xFFFF) })
 	// Hints: NOP and the rest, which do nothing here.
 	if (((word & 0xFFFFF01F) >>> 0) === 0xD503201F) return make(word, Op.NOP, { imm: BigInt((word >>> 5) & 0x7F) })
+	// MRS and MSR (register) of the system registers above.
+	if (((word & 0xFFD00000) >>> 0) === 0xD5100000) {
+		const sysreg = (word >>> 5) & 0x7FFF
+		if (!SYSREG_NAMES[sysreg]) return undefinedOf(word)
+		return make(word, (word >>> 21) & 1 ? Op.MRS : Op.MSR, { imm: BigInt(sysreg) })
+	}
 	if (((word & 0xFFFFFC1F) >>> 0) === 0xD61F0000) return make(word, Op.BR, {})
 	if (((word & 0xFFFFFC1F) >>> 0) === 0xD63F0000) return make(word, Op.BLR, {})
 	if (((word & 0xFFFFFC1F) >>> 0) === 0xD65F0000) return make(word, Op.RET, {})
@@ -294,6 +368,7 @@ function decodeDataRegister(word: number): A64Instruction {
 }
 
 function decodeLoadStore(word: number): A64Instruction {
+	if ((word >>> 26) & 1) return decodeLoadStoreFp(word)
 	// LDR (literal): W, X and LDRSW.
 	if ((word & 0x3B000000) === 0x18000000) {
 		if ((word >>> 26) & 1) return undefinedOf(word)
@@ -336,7 +411,37 @@ function decodeLoadStore(word: number): A64Instruction {
 			if (sizeBits >= 2) return undefinedOf(word)
 			access = ACCESS_SIGNED32; sf = false
 	}
-	const fields = { sf, size, access }
+	return loadStoreForm(word, { sf, size, access })
+}
+
+/** SIMD&FP loads and stores: the integer forms with V set. */
+function decodeLoadStoreFp(word: number): A64Instruction {
+	if ((word & 0x3B000000) === 0x18000000) {
+		const opc = word >>> 30
+		if (opc === 3) return undefinedOf(word)
+		return make(word, Op.LOAD_LITERAL, { fp: true, size: 4 << opc, access: ACCESS_LOAD, imm: BigInt(signExtend((word >>> 5) & 0x7FFFF, 19) * 4) })
+	}
+	if ((word & 0x3A000000) === 0x28000000) {
+		const opc = word >>> 30
+		const index = (word >>> 23) & 3
+		if (opc === 3 || index === 0) return undefinedOf(word)
+		const size = 4 << opc
+		return make(word, Op.LOAD_STORE_PAIR, {
+			fp: true, size, mode: index === 1 ? MODE_POST : index === 3 ? MODE_PRE : MODE_OFFSET, ra: (word >>> 10) & 31,
+			access: (word >>> 22) & 1 ? ACCESS_LOAD : ACCESS_STORE, imm: BigInt(signExtend((word >>> 15) & 0x7F, 7) * size),
+		})
+	}
+	if ((word & 0x3B000000) !== 0x38000000 && (word & 0x3B000000) !== 0x39000000) return undefinedOf(word)
+	const sizeBits = word >>> 30
+	const opc = (word >>> 22) & 3
+	// opc 1x is Q, with size 00 only.
+	if (opc & 2 && sizeBits !== 0) return undefinedOf(word)
+	return loadStoreForm(word, { fp: true, size: opc & 2 ? 16 : 1 << sizeBits, access: opc & 1 ? ACCESS_LOAD : ACCESS_STORE })
+}
+
+/** The addressing forms of a one-register load or store. */
+function loadStoreForm(word: number, fields: Partial<A64Instruction> & { size: number }): A64Instruction {
+	const { size } = fields
 	if ((word >>> 24) & 1) {
 		return make(word, Op.LOAD_STORE, { ...fields, mode: MODE_OFFSET, imm: BigInt(((word >>> 10) & 0xFFF) * size) })
 	}
@@ -355,6 +460,64 @@ function decodeLoadStore(word: number): A64Instruction {
 	return undefinedOf(word)
 }
 
+/** Scalar floating-point data processing; Advanced SIMD vector words are undefined. */
+function decodeFloat(word: number): A64Instruction {
+	if (((word & 0xFF000000) >>> 0) === 0x1F000000) {
+		const ftype = (word >>> 22) & 3
+		if (ftype > 1) return undefinedOf(word)
+		return make(word, Op.FP_DP3, { size: 4 << ftype, opc: (((word >>> 21) & 1) << 1) | ((word >>> 15) & 1), ra: (word >>> 10) & 31 })
+	}
+	if ((word & 0x7F000000) !== 0x1E000000) return undefinedOf(word)
+	const sf = (word >>> 31) === 1
+	const ftype = (word >>> 22) & 3
+	if (ftype > 1) return undefinedOf(word)
+	const size = 4 << ftype
+	const rmode = (word >>> 19) & 3
+	const opcode = (word >>> 16) & 7
+	if (!((word >>> 21) & 1)) {
+		const scale = (word >>> 10) & 63
+		const valid = (rmode === 3 && opcode < 2) || (rmode === 0 && (opcode === FPI_SCVTF || opcode === FPI_UCVTF))
+		if (!valid || (!sf && scale < 32)) return undefinedOf(word)
+		return make(word, Op.FP_FIXED, { sf, size, shift: rmode, opc: opcode, amount: 64 - scale })
+	}
+	const low = (word >>> 10) & 63
+	if (low === 0) {
+		let valid: boolean
+		if (opcode < 2) valid = true
+		else if (opcode < 6) valid = rmode === 0
+		else valid = rmode === 0 && sf === (ftype === 1)
+		if (!valid) return undefinedOf(word)
+		return make(word, Op.FP_INT, { sf, size, shift: rmode, opc: opcode })
+	}
+	if (sf) return undefinedOf(word)
+	if ((low & 0x1F) === 0x10) {
+		const op = (word >>> 15) & 63
+		const conversion = op === FP1_FCVT_S || op === FP1_FCVT_D
+		if (op > FP1_FRINTI || op === 6 || op === 7 || op === 13 || (conversion && op - FP1_FCVT_S === ftype)) return undefinedOf(word)
+		return make(word, Op.FP_DP1, { size, opc: op })
+	}
+	if ((low & 0xF) === 0x8) {
+		const opcode2 = word & 31
+		if (low !== 0x8 || opcode2 & 7) return undefinedOf(word)
+		if (opcode2 & 8 && (word >>> 16) & 31) return undefinedOf(word)
+		return make(word, Op.FP_CMP, { size, opc: opcode2 >>> 3 })
+	}
+	if ((low & 7) === 4) {
+		if ((word >>> 5) & 31) return undefinedOf(word)
+		const imm8 = (word >>> 13) & 0xFF
+		return make(word, Op.FP_IMM, { size, amount: imm8, imm: expandImm8(imm8, size === 8 ? DOUBLE : SINGLE) })
+	}
+	switch (low & 3) {
+		case 1: return make(word, Op.FP_CCMP, { size, cond: (word >>> 12) & 15, imm: BigInt(word & 15), opc: (word >>> 4) & 1 })
+		case 2: {
+			const op = (word >>> 12) & 15
+			if (op > FP2_FNMUL) return undefinedOf(word)
+			return make(word, Op.FP_DP2, { size, opc: op })
+		}
+		default: return make(word, Op.FP_CSEL, { size, cond: (word >>> 12) & 15 })
+	}
+}
+
 function decodeWord(word: number): A64Instruction {
 	word >>>= 0
 	const op0 = (word >>> 25) & 15
@@ -362,6 +525,7 @@ function decodeWord(word: number): A64Instruction {
 	if ((op0 & 0b1110) === 0b1010) return decodeBranchSystem(word)
 	if ((op0 & 0b0111) === 0b0101) return decodeDataRegister(word)
 	if ((op0 & 0b0101) === 0b0100) return decodeLoadStore(word)
+	if ((op0 & 0b0111) === 0b0111) return decodeFloat(word)
 	return undefinedOf(word)
 }
 

@@ -42,7 +42,7 @@ describe('the token a pointer is over', () => {
 		const text = 'addu $t2, $t1, $zero'
 		expect(tipParagraphs(describeToken(text, at(text, 'addu'), state)?.contents ?? []))
 			.toEqual([
-				'**ADDU** — ADD Unsigned (basic instruction)',
+				'**[ADDU](https://asm-editor.specy.app/documentation/mips/instruction/addu "Open ADDU in the manual")** — ADD Unsigned (basic instruction)',
 				'Add two registers, wrapping around on overflow.',
 				'Syntax: `addu $t1,$t2,$t3`',
 				'Pseudo forms: `addu $t1,$t2,100000`',

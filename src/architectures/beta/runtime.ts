@@ -1,5 +1,5 @@
+import { RamInspector } from '../../core/ramInspector'
 import { notifyHistorySeek } from '../../core/observer'
-import { rewindHistoryTo } from '../../core/historyCursor'
 /**
  * A BetaMachine behind the neutral machine contract: the run loop, breakpoints,
  * pacing, observers and user edits the debugger drives.
@@ -28,25 +28,6 @@ const REGISTER_ID = /^R(\d+)$/
 const RDCHAR_INPUT: PendingInput = Object.freeze({ type: 'string', prompt: 'RDCHAR is waiting for input' })
 /** A program taking keyboard interrupts can be typed to while it runs. */
 const KEYBOARD_INPUT: PendingInput = Object.freeze({ type: 'string', prompt: 'Type to raise keyboard interrupts' })
-
-/** Debugger reads of the flat memory; nothing here can fault or record. */
-class BetaMemory implements MemoryInspector {
-	readonly wordBytes = 4
-	readonly littleEndian = true
-
-	constructor(private readonly bytes: Uint8Array) {}
-
-	byte(address: number): number | undefined {
-		return address >= 0 && address < this.bytes.length ? this.bytes[address] : undefined
-	}
-
-	word(address: number): number | undefined {
-		const at = address & ~3
-		const bytes = this.bytes
-		if (at < 0 || at > bytes.length - 4) return undefined
-		return (bytes[at] | (bytes[at + 1] << 8) | (bytes[at + 2] << 16) | (bytes[at + 3] << 24)) >>> 0
-	}
-}
 
 export interface BetaRuntimeOptions {
 	memoryBytes?: number
@@ -78,6 +59,11 @@ export class BetaRuntime implements Machine {
 		depth: () => this.machine.callStack.depth,
 		step: () => this.advance() === STEP_WAIT ? ExecutionStep.WAIT : ExecutionStep.ADVANCED,
 	})
+	private readonly historyCommands = this.execution.historyCommands({
+		history: () => this.history, cursor: () => this.historyCursor,
+		undo: () => this.machine.history?.stepBack() ?? false,
+		after: () => this.resumed(),
+	})
 
 	private readonly memoryEdits = new MemoryEdits({
 		region: () => ({ start: 0, end: this.machine.cpu.memory.length - 1 }),
@@ -101,6 +87,7 @@ export class BetaRuntime implements Machine {
 	}
 
 	get pc() { return this.machine.cpu.fetchAddress() }
+	get stopReason() { return this.execution.reason(this.machine.halted, this.fault, this.machine.cpu.faultAddress) }
 	get halted() { return this.machine.halted || this.execution.stopped || this.fault !== null }
 
 	/**
@@ -220,28 +207,22 @@ export class BetaRuntime implements Machine {
 	pause() { this.execution.pause() }
 	stop() { this.execution.stop() }
 	stepBack(): boolean {
-		const log = this.machine.history
-		if (!log || !log.stepBack()) return false
-		this.resumed()
-		return true
+		return this.historyCommands.stepBack()
 	}
 
 	rewindTo(id: number): boolean {
-		const log = this.machine.history
-		return !!log && rewindHistoryTo(this.history, () => this.historyCursor, id, () => log.stepBack(), () => this.resumed())
+		return this.historyCommands.rewindTo(id)
 	}
 
 	/** Back from a rewind: whatever ended the run is undone with it. */
 	private resumed() {
 		this.fault = null
-		this.execution.stopped = false
-		this.paused = true
-		this.execution.running = false
 		this.seekObservers()
 	}
 
 	/** Keeps the mode the PC is in; only the address moves, back through the MMU in user mode. */
 	setProgramCounter(address: number) {
+		if (!this.execution.canEdit(address)) return
 		const { pc, segmentation, segBase } = this.machine.cpu
 		const user = !(pc & SUPERVISOR)
 		const target = segmentation && user ? (address - segBase) & ADDRESS_MASK : address & ADDRESS_MASK
@@ -275,6 +256,7 @@ export class BetaRuntime implements Machine {
 	}
 
 	writeRegister(id: string, value: number): boolean {
+		if (typeof value !== 'number' || !this.execution.canEdit(value)) return false
 		if (id === 'PC') {
 			const changed = this.machine.editPc(value)
 			this.fault = null
@@ -286,19 +268,22 @@ export class BetaRuntime implements Machine {
 	}
 
 	inspectMemory(): MemoryInspector {
-		return new BetaMemory(this.machine.cpu.memory)
+		return new RamInspector(this.machine.cpu.memory, { wordBytes: 4, littleEndian: true })
 	}
 
 	writeByte(address: number, value: number) {
+		if (!this.execution.canEdit(value) || !Number.isSafeInteger(address) || address < 0) return false
 		return this.machine.editBytes(address, [value])
 	}
 
 	/** Shifts `[address, limit]` up a byte; what is past the last non-zero byte stays. */
 	insertByte(address: number, limit: number, value: number): boolean {
+		if (!this.execution.canEdit(value)) return false
 		return this.memoryEdits.insert(address, limit, value)
 	}
 
 	deleteByte(address: number, limit: number): boolean {
+		if (!this.execution.canEdit(address)) return false
 		return this.memoryEdits.delete(address, limit)
 	}
 
@@ -307,7 +292,6 @@ export class BetaRuntime implements Machine {
 	}
 
 	dispose() {
-		this.onProgress = null
 		this.stop()
 		this.execution.dispose()
 	}

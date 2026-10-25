@@ -88,7 +88,7 @@ describe('RV32C encodings', () => {
 		expect(assemble('.option rvc\nnop', false).diagnostics).not.toEqual([])
 		expect(assemble('.option norvc\nc.nop').diagnostics).not.toEqual([])
 		expect(assemble('.option norvc\nnop\n.option rvc\nc.nop').diagnostics).toEqual([])
-		expect(definition.settings.defaults).toEqual({ isa: 'rv32im' })
+		expect(definition.settings.defaults).toEqual({ isa: 'rv32im', float: 'none' })
 	})
 })
 

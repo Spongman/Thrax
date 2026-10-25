@@ -11,7 +11,7 @@ import { downloadBlob, downloadText } from './download'
 import { deleteGist, publishGist, readGitHubToken } from './github'
 import { useGitHubSession, type BoundGist } from './githubSession'
 import { connectedFolder, openFolder, pickFiles, readFiles, reconnectFolder, removeFromFolder, saveWithPicker, sourceAccept, writeToFolder } from './localFiles'
-import { knownArchitectures } from '../architectures/registry'
+import { architectureSelection, knownArchitectures } from '../architectures/registry'
 import { loadGist, loadWorkspaceFromUrl, type LoadedWorkspace } from './remote'
 import { shareLink } from './share'
 import { baseName, newFileExtension, type WorkspaceSnapshot } from './workspace'
@@ -22,7 +22,7 @@ const fileCount = (count: number) => `${count} file${count === 1 ? '' : 's'}`
 
 function replaceWith(loaded: LoadedWorkspace): string {
 	const { snapshot } = loaded
-	if (!knownArchitectures().includes(snapshot.architecture)) throw new Error(`Unknown architecture '${snapshot.architecture}'`)
+	if (!knownArchitectures().includes(architectureSelection(snapshot.architecture).id)) throw new Error(`Unknown architecture '${snapshot.architecture}'`)
 	store().openFiles(snapshot.files, { replace: true, active: snapshot.active, assembleAll: snapshot.assembleAll, architecture: snapshot.architecture })
 	useGitHubSession.getState().setGist(loaded.origin.gist ?? null)
 	return `Opened ${fileCount(snapshot.files.length)}`
@@ -43,7 +43,7 @@ export async function openFilesFromDisk(): Promise<string | null> {
 function projectFromFolder(folder: { name: string, files: WorkspaceSnapshot['files'] } | null): string | null {
 	if (!folder) return null
 	if (folder.files.length === 0) {
-		store().openFiles([{ title: `main${newFileExtension(store().target?.definition)}`, code: '' }], { replace: true, assembleAll: true })
+		store().openFiles([{ title: `main${newFileExtension(store().target?.definition, store().targetVariant)}`, code: '' }], { replace: true, assembleAll: true })
 	} else {
 		store().openFiles(folder.files, { replace: true, assembleAll: folder.files.length > 1 })
 	}
@@ -120,7 +120,7 @@ export async function deleteDocumentEverywhere(documentId: string): Promise<void
  * left where they are: this clears the workspace, not the disk.
  */
 export function clearProject(): string {
-	store().openFiles([{ title: `untitled${newFileExtension(store().target?.definition)}`, code: '' }], { replace: true, assembleAll: false })
+	store().openFiles([{ title: `untitled${newFileExtension(store().target?.definition, store().targetVariant)}`, code: '' }], { replace: true, assembleAll: false })
 	useGitHubSession.getState().setGist(null)
 	return connectedFolder() ? `Cleared the workspace; ${connectedFolder()!.name} is untouched` : 'Cleared the workspace'
 }

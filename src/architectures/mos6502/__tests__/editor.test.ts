@@ -32,7 +32,7 @@ describe('6502 data tips', () => {
 
 	it('describes mnemonics with their modes', () => {
 		const described = tip('\tldx #1', 'ldx')
-		expect(described?.contents[0]).toBe('**LDX**')
+		expect(described?.contents[0]).toBe('**[LDX](https://www.pagetable.com/c64ref/6502/?tab=2#LDX "Open LDX in the manual")**')
 		expect(described?.contents[1]).toBe('Load X (NZ)')
 		expect(described?.contents[3]).toBe('Modes: immediate, zero page, zero page,Y, absolute, absolute,Y')
 	})

@@ -13,7 +13,6 @@ import { betaProfile } from './profile'
 import { BETA_REGISTERS } from './registers'
 import { BetaRuntime } from './runtime'
 import { BETA_SETTINGS, type BetaSettings } from './settings'
-import type { BetaSourceIndex } from './sourceIndex'
 import { assembleUasm } from './uasm'
 import { describeUasmToken, libraryMacros } from './editor/dataTips'
 import { UASM_LANGUAGE_ID } from './editor/grammar'
@@ -39,11 +38,9 @@ const definition: ArchitectureDefinition<ArchitectureServices<BetaSettings>> = {
 	examples: EXAMPLES,
 	settings: BETA_SETTINGS,
 	createServices(): ArchitectureServices<BetaSettings> {
-		return createArchitectureServices<BetaSettings>(({ check }) => {
-			/** The last program assembled, whose index finds library macros for the editor. */
-			let index: BetaSourceIndex | null = null
-			/** The last program that assembled, whose symbols the data tips show. */
-			let latest: BetaAssembly | null = null
+		return createArchitectureServices<BetaSettings>(({ check, program: inspectionProgram }) => {
+			/** The loaded program, or a successful preview before the first load. */
+			const current = () => inspectionProgram() as BetaAssembly | null
 			return {
 				disassembly: betaDisassembly,
 				// UASM has one translation unit: the entry file, with the rest reached by `.include`.
@@ -56,10 +53,6 @@ const definition: ArchitectureDefinition<ArchitectureServices<BetaSettings>> = {
 						result.diagnostics.push({ severity: 'error', file: main.name, message: `The program needs ${end} bytes of memory; the machine has ${settings.memoryBytes}` })
 					}
 					const program = new BetaAssembly(main.name, result.image, result.diagnostics, result.directives, result.values)
-					if (result.image) {
-						index = program.betaIndex
-						latest = program
-					}
 					return program
 				},
 				createMachine(program, settings, options) {
@@ -78,7 +71,7 @@ const definition: ArchitectureDefinition<ArchitectureServices<BetaSettings>> = {
 				profile: (settings) => betaProfile(settings.memoryBytes),
 				exportWords: (program) => betaAssembly(program).words(),
 				describeToken: (text, column, state) => describeUasmToken(text, column, state, {
-					value: (name) => latest?.values.get(name),
+					value: (name) => current()?.values.get(name),
 					macro: (name) => libraryMacros().get(name) ?? [],
 				}),
 				async installEditor(monaco, host) {
@@ -88,9 +81,9 @@ const definition: ArchitectureDefinition<ArchitectureServices<BetaSettings>> = {
 						files: () => host.files(),
 						active: () => host.active(),
 						open: (file, line) => host.open(file, line),
-						sourceIndex: () => index,
+						sourceIndex: () => current()?.betaIndex ?? null,
 						inspection: () => host.inspection(),
-						values: () => latest?.values ?? null,
+						values: () => current()?.values ?? null,
 					})
 					return contribution
 				},

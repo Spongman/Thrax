@@ -1,13 +1,11 @@
+import { RamInspector } from '../../core/ramInspector'
 import { instructionSetFor } from './instructions'
-import { describeValueEffect, textChange } from '../../core/historyView'
+import { snapshotEffects } from '../../core/historyView'
 import { notifyHistorySeek } from '../../core/observer'
-import { editTransaction } from '../../core/editTransaction'
-import { rewindHistoryTo } from '../../core/historyCursor'
+import { capturedHistoryEdit } from '../../core/editTransaction'
 import { MemoryEdits } from '../../core/memoryEdits'
-import { historyNeighbour } from '../../core/historyCursor'
 import { ExecutionController } from '../../core/executionController'
 import type {
-	DescribedEffect,
 	HistoryFormatter,
 	Machine,
 	MachineOptions,
@@ -20,6 +18,10 @@ import { decodeInstruction, disassemble } from './decode'
 import type { M68kRecord } from './history'
 import { MEMORY_BYTES, REGISTER_NAMES } from './isa'
 import type { M68kAssembly } from './program'
+import { describe80 } from './extended'
+import { fpRegister, FPCR_MASK, FPSR_MASK, setRegister } from './fpu'
+import { FPCR, FP_WORDS } from './fpuIsa'
+import { FP_CONTROL_NAMES, FP_NAMES } from './profile'
 
 export { instructionSetFor } from './instructions'
 export class M68kRuntime implements Machine {
@@ -39,6 +41,11 @@ export class M68kRuntime implements Machine {
 		depth: () => this.callStack.length,
 		ready: () => !this.cpu.pending || this.history.timeline.ahead,
 	})
+	private readonly historyCommands = this.execution.historyCommands({
+		history: () => this.history, cursor: () => this.historyCursor,
+		undo: () => !this.disposed && this.cpu.undo(),
+		after: () => notifyHistorySeek(this.observers, this.instructionCount),
+	})
 
 	private readonly memoryEdits = new MemoryEdits({
 		region: () => this.disposed ? null : ({ start: 0, end: 0 + this.cpu.memory.length - 1 }),
@@ -55,7 +62,7 @@ export class M68kRuntime implements Machine {
 		readonly program: M68kAssembly,
 		options: MachineOptions
 	) {
-		this.cpu = new M68kCpu(program.model, options.historyLimit)
+		this.cpu = new M68kCpu(program.model, options.historyLimit, program.coprocessor)
 		this.history = this.cpu.history
 		this.observers = this.cpu.observers
 		this.speed = options.speed
@@ -73,49 +80,39 @@ export class M68kRuntime implements Machine {
 						decodeInstruction(
 							(address) => record.words[(address - record.address) / 2] ?? 0,
 							entry.address,
-							this.cpu.model
+							this.cpu.model,
+							this.fpu
 						)
 					)
 				} catch {
 					return 'illegal'
 				}
 			},
-			effects: (entry, applied) => {
-				const log = this.history.log,
-					index = log.indexOfId(entry.id)
-				if (index < 0) return []
-				const position = log.first + index,
-					slot = position % log.entries.capacity,
-					c = log.entries.block(position).buffers.columns
-				const neighbour = historyNeighbour(log, this.historyCursor, index),
-					next = neighbour?.columns,
-					nextSlot = neighbour?.slot ?? 0
-				const effects: DescribedEffect[] = []
-				const add = (effect: Omit<DescribedEffect, 'label' | 'applied'>) =>
-					effects.push(describeValueEffect(applied, { ...effect }, 32))
-				for (let r = 0; r < 16; r++) {
-					const value = c.registers[slot * 16 + r],
-						after = next ? next.registers[nextSlot * 16 + r] : this.cpu.registers[r]
-					if (value !== after) add({ subject: REGISTER_NAMES[r], register: REGISTER_NAMES[r], value })
+			effects: (entry, applied) => snapshotEffects(this.history.log, this.historyCursor, entry.id, applied, 32, effects => {
+				effects.registers('registers', 16, 0, 16, r => this.cpu.registers[r], (r, value) => ({ subject: REGISTER_NAMES[r], register: REGISTER_NAMES[r], value }))
+				if (effects.before('sr') !== effects.after('sr', this.cpu.sr)) effects.add({ subject: 'CCR', register: 'CCR', value: effects.before('sr') & 31 })
+				if (this.fpu) {
+					const word = (i: number) => effects.before('fp', i, FP_WORDS) >>> 0,
+						changed = (i: number) => word(i) !== effects.after('fp', this.cpu.fp[i], i, FP_WORDS) >>> 0
+					for (let r = 0; r < 8; r++) if (changed(r * 3) || changed(r * 3 + 1) || changed(r * 3 + 2)) {
+						const raw = (BigInt(word(r * 3) >>> 16) << 64n) | (BigInt(word(r * 3 + 1)) << 32n) | BigInt(word(r * 3 + 2))
+						effects.add({ subject: FP_NAMES[r], register: FP_NAMES[r], text: describe80(raw) })
+					}
+					FP_CONTROL_NAMES.forEach((name, i) => { if (changed(FPCR + i)) effects.add({ subject: name, register: name, value: word(FPCR + i) }) })
 				}
-				if (c.sr[slot] !== (next ? next.sr[nextSlot] : this.cpu.sr))
-					add({ subject: 'CCR', register: 'CCR', value: c.sr[slot] & 31 })
-				for (let p = log.effectStart(index); p < log.effectStart(index) + log.effectCount(index); p++) {
-					const e = log.effects.block(p).buffers.columns,
-						s = p % log.effects.capacity
-					add({ subject: `[$${e.address[s].toString(16)}]`, address: e.address[s], value: e.value[s] })
-				}
-				const length = next ? next.outputLength[nextSlot] : this.cpu.output.length
-				if (length !== c.outputLength[slot])
-					add({ subject: 'console', detail: textChange(this.cpu.fullOutput, c.outputLength[slot], length) })
-				if (c.halted[slot] !== (next ? next.halted[nextSlot] : +this.cpu.halted)) add({ subject: 'halted' })
-				return effects
-			}
+				effects.memory('address', 'value', address => `[$${address.toString(16)}]`)
+				effects.text('outputLength', this.cpu.output.length, this.cpu.fullOutput)
+				effects.halted(this.cpu.halted)
+			})
 		}
+	}
+	get fpu() {
+		return this.cpu.coprocessor !== 'none'
 	}
 	get pc() {
 		return this.cpu.pc
 	}
+	get stopReason() { return this.execution.reason(this.cpu.halted) }
 	get halted() {
 		return this.cpu.halted || this.execution.stopped
 	}
@@ -137,7 +134,9 @@ export class M68kRuntime implements Machine {
 		return this.history.timeline.index
 	}
 	step() {
-		if (!this.halted && !this.disposed) this.cpu.step()
+		if (this.halted || this.disposed) return
+		try { this.cpu.step() }
+		catch (error) { this.execution.recordFault(error); throw error }
 	}
 	provideInput(input: string) {
 		return !this.disposed && this.cpu.provideInput(input)
@@ -156,7 +155,7 @@ export class M68kRuntime implements Machine {
 	}
 	async stepOver() {
 		if (this.halted) return
-		const d = this.cpu.decode()
+		const d = this.execution.inspectInstruction(() => this.cpu.decode())
 		if (d.name === 'jsr' || d.name === 'bsr') {
 			const returnAddress = this.pc + d.length
 			await this.execution.stepOver(returnAddress)
@@ -167,35 +166,23 @@ export class M68kRuntime implements Machine {
 	}
 	pause() { this.execution.pause() }
 	stop() { this.execution.stop() }
-	stepBack() {
-		this.pause()
-		const undone = this.cpu.undo()
-		if (undone) {
-			this.execution.stopped = false
-			notifyHistorySeek(this.observers, this.instructionCount)
-		}
-		return undone
+	stepBack(): boolean {
+		return this.historyCommands.stepBack()
 	}
 	rewindTo(id: number): boolean {
-		return rewindHistoryTo(this.history, () => this.historyCursor, id, () => this.cpu.undo(), () => {
-			this.execution.stopped = false
-			this.pause()
-			notifyHistorySeek(this.observers, this.instructionCount)
-		})
+		return this.historyCommands.rewindTo(id)
 	}
-	private edit(change: () => void) {
-		if (this.disposed) return
-		editTransaction(change, {
+	private edit(change: () => void): boolean {
+		if (this.disposed) return false
+		return capturedHistoryEdit(change, {
 			begin: () => this.history.begin(this.cpu.saved()),
-			commit: () => { this.history.log.close() },
-			rollback: () => {
-				this.history.log.close()
-				this.cpu.undo()
-				this.history.timeline.branch()
-			},
+			close: () => { this.history.log.close() },
+			undo: () => { this.cpu.undo() },
+			branch: () => { this.history.timeline.branch() },
 		})
 	}
 	setProgramCounter(address: number) {
+		if (!this.execution.canEdit(address)) return
 		this.cpu.range(address, 2, true)
 		this.edit(() => {
 			this.cpu.pc = address
@@ -211,12 +198,29 @@ export class M68kRuntime implements Machine {
 			PC: this.pc,
 			SR: this.cpu.sr,
 			CCR: this.cpu.sr & 31,
-			...Object.fromEntries(['C', 'V', 'Z', 'N', 'X'].map((name, bit) => [name, (this.cpu.sr >> bit) & 1]))
+			...Object.fromEntries(['C', 'V', 'Z', 'N', 'X'].map((name, bit) => [name, (this.cpu.sr >> bit) & 1])),
+			...(this.fpu ? {
+				...Object.fromEntries(FP_NAMES.map((name, i) => [name, fpRegister(this.cpu.fp, i)])),
+				...Object.fromEntries(FP_CONTROL_NAMES.map((name, i) => [name, this.cpu.fp[FPCR + i] >>> 0]))
+			} : {})
 		}
 	}
 	writeRegister(id: string, value: RegisterValue) {
+		const fpIndex = this.fpu ? FP_NAMES.indexOf(id) : -1
+		if (fpIndex >= 0) {
+			if (!this.execution.canEdit(value)) return false
+			let raw: bigint
+			try { raw = BigInt(value) } catch { return false }
+			if (raw < 0n || raw >= 1n << 80n) return false
+			return this.edit(() => setRegister(this.cpu.fp, fpIndex, raw))
+		}
+		const control = this.fpu ? FP_CONTROL_NAMES.indexOf(id) : -1
+		if (control >= 0) {
+			if (!this.execution.canEdit(value) || !Number.isInteger(Number(value))) return false
+			return this.edit(() => { this.cpu.fp[FPCR + control] = Number(value) & [FPCR_MASK, FPSR_MASK, -1][control] })
+		}
+		if (!this.execution.canEdit(value) || !Number.isInteger(Number(value))) return false
 		const number = Number(value)
-		if (!Number.isInteger(number)) return false
 		if (id === 'PC') {
 			try {
 				this.setProgramCounter(number)
@@ -226,46 +230,37 @@ export class M68kRuntime implements Machine {
 			}
 		}
 		if (id === 'CCR') {
-			this.edit(() => {
+			return this.edit(() => {
 				this.cpu.sr = 0x2000 | (number & 31)
 			})
-			return true
 		}
 		const flag = ['C', 'V', 'Z', 'N', 'X'].indexOf(id)
 		if (flag >= 0) {
-			this.edit(() => {
+			return this.edit(() => {
 				this.cpu.sr = (this.cpu.sr & ~(1 << flag)) | ((number & 1) << flag)
 			})
-			return true
 		}
 		const register = id === 'SP' ? 15 : REGISTER_NAMES.indexOf(id)
 		if (register < 0) return false
-		this.edit(() => {
+		return this.edit(() => {
 			this.cpu.registers[register] = number
 		})
-		return true
 	}
 	inspectMemory(): MemoryInspector {
-		return {
-			wordBytes: 2,
-			littleEndian: false,
-			byte: (address) =>
-				Number.isInteger(address) && address >= 0 && address < MEMORY_BYTES ? this.cpu.memory[address] : undefined,
-			word: (address) =>
-				Number.isInteger(address) && address >= 0 && address < MEMORY_BYTES
-					? this.cpu.view.getUint16(address & ~1, false)
-					: undefined
-		}
+		return new RamInspector(this.cpu.memory, { wordBytes: 2, littleEndian: false })
 	}
+
 	writeByte(address: number, value: number) {
-		if (!Number.isInteger(address) || address < 0 || address >= MEMORY_BYTES || this.disposed) return false
-		this.edit(() => this.cpu.putByte(address, value))
-		return true
+		if (!this.execution.canEdit(value) || !Number.isSafeInteger(address) || address < 0) return false
+		if (address >= MEMORY_BYTES) return false
+		return this.edit(() => this.cpu.putByte(address, value))
 	}
 	insertByte(address: number, limit: number, value: number): boolean {
+		if (!this.execution.canEdit(value)) return false
 		return this.memoryEdits.insert(address, limit, value)
 	}
 	deleteByte(address: number, limit: number): boolean {
+		if (!this.execution.canEdit(address)) return false
 		return this.memoryEdits.delete(address, limit)
 	}
 	configure(options: { speed?: number | null; pacedAddresses?: ReadonlySet<number> | null }) {
@@ -286,10 +281,9 @@ export class M68kRuntime implements Machine {
 	}
 	dispose() {
 		this.disposed = true
-		this.execution.dispose()
-		this.execution.running = false
-		this.onProgress = null
-		this.observers.length = 0
-		this.history.log.clear()
+		this.execution.dispose(() => {
+			this.observers.length = 0
+			this.history.log.clear()
+		})
 	}
 }

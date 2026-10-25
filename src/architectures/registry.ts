@@ -1,7 +1,6 @@
 import type * as Monaco from 'monaco-editor'
 import { DEFAULT_ARCHITECTURE } from '../services/workspace'
 import type { ArchitectureActivation, ArchitectureDefinition, ArchitectureServices, Disposable, EditorHost } from './contracts'
-import { manifest as arm26Manifest } from './arm26/manifest'
 import { manifest as armv8Manifest } from './armv8/manifest'
 import { manifest as avrManifest } from './avr/manifest'
 import { manifest as betaManifest } from './beta/manifest'
@@ -10,6 +9,10 @@ import { manifest as mipsManifest } from './mips/manifest'
 import { manifest as mos6502Manifest } from './mos6502/manifest'
 import { manifest as riscvManifest } from './riscv/manifest'
 import { manifest as z80Manifest } from './z80/manifest'
+import type { TargetSettings } from '../core/settings'
+
+export type TargetSettingsSelector = (definition: ArchitectureDefinition<unknown>) => TargetSettings
+type PreparedServices = Disposable & { prepare?(settings: TargetSettings): Promise<void> }
 
 /** A later request replaced this one before it could commit. */
 export class ActivationSuperseded extends Error {
@@ -24,6 +27,10 @@ type Loader<Services> = () => Promise<{ default: ArchitectureDefinition<Services
 export interface ArchitectureManifest {
 	id: string
 	name: string
+	/** Who designed it, shown beside the name. */
+	maker?: string
+	/** The native profile selected before any per-family preference is saved. */
+	defaultVariant?: string
 	/** Ids of the panels its definition contributes. */
 	panels: readonly string[]
 	/** Source file extensions beyond the shared defaults. */
@@ -37,7 +44,6 @@ const loaders: Record<string, Loader<ArchitectureServices>> = {
 	mos6502: () => import('./mos6502'),
 	z80: () => import('./z80'),
 	armv8: () => import('./armv8'),
-	arm26: () => import('./arm26'),
 	avr: () => import('./avr'),
 	riscv: () => import('./riscv'),
 	m68k: () => import('./m68k'),
@@ -49,7 +55,6 @@ const manifests: Readonly<Record<string, ArchitectureManifest>> = {
 	mos6502: mos6502Manifest,
 	z80: z80Manifest,
 	armv8: armv8Manifest,
-	arm26: arm26Manifest,
 	avr: avrManifest,
 	riscv: riscvManifest,
 	m68k: m68kManifest,
@@ -57,6 +62,19 @@ const manifests: Readonly<Record<string, ArchitectureManifest>> = {
 
 /** Ids of every architecture the catalog can load. */
 export const knownArchitectures = (): string[] => Object.keys(loaders)
+
+/** Legacy saved targets move to family selectors; all CPU wiring stays here. */
+export function architectureSelection(id: string, settings: TargetSettings = {}) {
+	const aliases: Record<string, { id: string, defaults: TargetSettings, rename?: readonly [string, string] }> = {
+		arm26: { id: 'armv8', defaults: { executionState: 'arm3' }, rename: ['cpuModel', 'executionState'] },
+		w65816: { id: 'mos6502', defaults: { cpuModel: 'w65816' } },
+	}
+	const alias = aliases[id]
+	if (!alias) return { id, settings }
+	const migrated = { ...settings, ...alias.defaults }
+	if (alias.rename && settings[alias.rename[0]] !== undefined) migrated[alias.rename[1]] = settings[alias.rename[0]]
+	return { id: alias.id, settings: migrated }
+}
 
 export const architectureManifests = (): readonly ArchitectureManifest[] => Object.values(manifests)
 
@@ -80,7 +98,7 @@ export function createArchitectureRegistry<Services>(catalog: Readonly<Record<st
 			listeners.add(listener)
 			return () => { listeners.delete(listener) }
 		},
-		async activate(id: string): Promise<ArchitectureActivation<Services>> {
+		async activate(id: string, selectSettings?: TargetSettingsSelector): Promise<ArchitectureActivation<Services>> {
 			const request = ++generation
 			// Choosing the target in force again cancels a load in progress, and nothing more.
 			if (active?.definition.id === id) return active
@@ -93,7 +111,14 @@ export function createArchitectureRegistry<Services>(catalog: Readonly<Record<st
 			}
 			const ids = definition.registers.map((register) => register.id)
 			if (new Set(ids).size !== ids.length) throw new Error(`Duplicate register IDs: ${id}`)
-			const services = definition.createServices()
+			const services: Services & PreparedServices = definition.createServices()
+			try {
+				await services.prepare?.(selectSettings?.(definition) ?? definition.settings.defaults)
+				if (request !== generation) throw new ActivationSuperseded()
+			} catch (error) {
+				services.dispose()
+				throw error
+			}
 			let disposed = false
 			const next: ArchitectureActivation<Services> = {
 				definition,
@@ -129,8 +154,8 @@ export function createComposition(catalog: Readonly<Record<string, Loader<Archit
 
 	return {
 		/** Application startup and store tests explicitly await this before assembling. */
-		initializeArchitecture(id = DEFAULT_ARCHITECTURE) {
-			initialization ??= registry.activate(id).catch((error: unknown) => {
+		initializeArchitecture(id = DEFAULT_ARCHITECTURE, selectSettings?: TargetSettingsSelector) {
+			initialization ??= registry.activate(id, selectSettings).catch((error: unknown) => {
 				initialization = undefined
 				throw error
 			})
@@ -141,8 +166,8 @@ export function createComposition(catalog: Readonly<Record<string, Loader<Archit
 		 * Replaces the active architecture.  Rejects when superseded by a later
 		 * request; the previous activation stays in force when loading fails.
 		 */
-		async activateArchitecture(id: string) {
-			const activation = await registry.activate(id)
+		async activateArchitecture(id: string, selectSettings?: TargetSettingsSelector) {
+			const activation = await registry.activate(id, selectSettings)
 			initialization = Promise.resolve(activation)
 			return activation
 		},

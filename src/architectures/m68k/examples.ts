@@ -1,278 +1,228 @@
 import type { Example } from '../contracts'
-import { mandelbrot } from './mandelbrot'
-export const EXAMPLES: Record<string, Example> = {
-	mandelbrot,
+import mandelbrotSource from './examples/mandelbrot.asm?raw'
+import ackermannSource from './examples/ackermann.asm?raw'
+import helloSource from './examples/hello.asm?raw'
+import factorialSource from './examples/factorial.asm?raw'
+import bitmapSource from './examples/bitmap.asm?raw'
+import stackSource from './examples/stack.asm?raw'
+import sumSource from './examples/sum.asm?raw'
+import fibonacciSource from './examples/fibonacci.asm?raw'
+import loopSource from './examples/loop.asm?raw'
+import bitwiseSource from './examples/bitwise.asm?raw'
+import inputSource from './examples/input.asm?raw'
+import returnArgumentsSource from './examples/return-arguments.asm?raw'
+import scaledTableSource from './examples/scaled-table.asm?raw'
+import mandelbrotFpuSource from './examples/mandelbrot-fpu.asm?raw'
+import floatingPointSource from './examples/floating-point.asm?raw'
+
+/** Source programs are architecture-local text assets; this file holds metadata. */
+export const EXAMPLES: Readonly<Record<string, Example>> = {
+	mandelbrot: {
+		name: 'Mandelbrot Set',
+		description: 'Signed word multiplication draws the 32 by 32 Mandelbrot view in 8.8 fixed point.',
+		tools: ['bitmap'],
+		code: mandelbrotSource
+	},
 	ackermann: {
 		name: 'Ackermann',
 		description: 'Nested BSR/RTS calls compute A(3, 3) = 61, printed with TRAP #15.',
-		code: `.text
-_start:
-moveq #3,d1
-moveq #3,d2
-bsr ack
-moveq #3,d0
-trap #15
-moveq #9,d0
-trap #15
-ack:
-tst.l d1
-beq base
-tst.l d2
-beq zero
-move.l d1,-(sp)
-subq.l #1,d2
-bsr ack
-move.l d1,d2
-move.l (sp)+,d1
-subq.l #1,d1
-bra ack
-zero:
-subq.l #1,d1
-moveq #1,d2
-bra ack
-base:
-move.l d2,d1
-addq.l #1,d1
-rts
-`,
+		code: ackermannSource
 	},
 	hello: {
 		name: 'Hello, THRAX!',
 		description: 'Educational TRAP #15 task 14 prints a zero-terminated string from A1.',
-		code: `.data
-message: .asciz "Hello, THRAX!\\n"
-.text
-_start:
-    lea message,a1
-    moveq #14,d0
-    trap #15
-    moveq #9,d0
-    trap #15
-`
+		code: helloSource
 	},
 	factorial: {
 		name: 'Factorial',
 		description: 'Word multiplication, BSR/RTS and a DBRA loop; prints 120.',
-		code: `.text
-_start:
-    moveq #5,d1
-    bsr factorial
-    moveq #3,d0
-    trap #15
-    moveq #9,d0
-    trap #15
-factorial:
-    move.w d1,d2
-    moveq #1,d1
-    subq.w #1,d2
-loop:
-    move.w d2,d3
-    addq.w #1,d3
-    mulu.w d3,d1
-    dbra d2,loop
-    rts
-`
+		code: factorialSource
 	},
 	bitmap: {
 		tools: ['bitmap'],
 		name: 'Bitmap Display',
 		description: 'Draw the common 32 by 32 red/blue gradient using long stores and postincrement.',
-		code: `.text
-_start:
-    movea.l #$10000,a0
-    moveq #0,d2
-    moveq #31,d3
-row:
-    moveq #0,d4
-    moveq #31,d5
-pixel:
-    move.l d2,d6
-    or.l d4,d6
-    move.l d6,(a0)+
-    addq.l #8,d4
-    dbra d5,pixel
-    addi.l #$80000,d2
-    dbra d3,row
-    moveq #9,d0
-    trap #15
-`
+		code: bitmapSource
 	},
 	stack: {
 		name: 'Stack and Registers',
 		description: 'Save registers, change values, restore them and rewind the stack.',
-		code: `.text
-_start:
-    moveq #42,d1
-    moveq #-7,d2
-    movem.l d1-d2/a0,-(sp)
-    clr.l d1
-    clr.l d2
-    movem.l (sp)+,d1-d2/a0
-    moveq #3,d0
-    trap #15
-    moveq #9,d0
-    trap #15
-`
+		code: stackSource
 	},
 	sum: {
 		name: 'Sum of Numbers',
 		description: 'Add 5 and 3, store the result, then print 8.',
-		code: `.data
-result: dc.l 0
-.text
-_start:
-    moveq #5,d1
-    moveq #3,d2
-    add.l d2,d1
-    move.l d1,result
-    moveq #3,d0
-    trap #15
-    moveq #9,d0
-    trap #15
-`
+		code: sumSource
 	},
 	fibonacci: {
 		name: 'Fibonacci',
 		description: 'Compute the tenth Fibonacci number with a DBRA loop; prints 55.',
-		code: `.data
-result: dc.l 0
-.text
-_start:
-    moveq #0,d2
-    moveq #1,d3
-    moveq #9,d4
-next:
-    move.l d2,d5
-    add.l d3,d5
-    move.l d3,d2
-    move.l d5,d3
-    dbra d4,next
-    move.l d2,result
-    move.l d2,d1
-    moveq #3,d0
-    trap #15
-    moveq #9,d0
-    trap #15
-`
+		code: fibonacciSource
 	},
 	loop: {
 		name: 'Loop Counter',
 		description: 'Print one through five, one number per line, and retain the last counter in RAM.',
-		code: `.data
-counter: dc.l 0
-.text
-_start:
-    moveq #1,d2
-    moveq #4,d3
-next:
-    move.l d2,counter
-    move.l d2,d1
-    moveq #3,d0
-    trap #15
-    moveq #10,d1
-    moveq #6,d0
-    trap #15
-    addq.l #1,d2
-    dbra d3,next
-    moveq #9,d0
-    trap #15
-`
+		code: loopSource
 	},
 	bitwise: {
 		name: 'Bitwise Operations',
 		description: 'Compare AND, OR and XOR using 12 and 10; prints 8, 14 and 6.',
-		code: `.data
-results: dc.l 0,0,0
-.text
-_start:
-    moveq #12,d2
-    moveq #10,d5
-    move.l d2,d3
-    move.l d2,d4
-    and.l d5,d2
-    or.l d5,d3
-    eor.l d5,d4
-    move.l d2,results
-    move.l d3,results+4
-    move.l d4,results+8
-    move.l d2,d1
-    moveq #3,d0
-    trap #15
-    moveq #10,d1
-    moveq #6,d0
-    trap #15
-    move.l d3,d1
-    moveq #3,d0
-    trap #15
-    moveq #10,d1
-    moveq #6,d0
-    trap #15
-    move.l d4,d1
-    moveq #3,d0
-    trap #15
-    moveq #10,d1
-    moveq #6,d0
-    trap #15
-    moveq #9,d0
-    trap #15
-`
+		code: bitwiseSource
 	},
 	input: {
 		name: 'Interactive Input',
 		description: 'Read a signed integer into D1, store it, and echo it through educational TRAP #15.',
-		code: `.data
-result: dc.l 0
-.text
-_start:
-    moveq #5,d0
-    trap #15
-    move.l d1,result
-    moveq #3,d0
-    trap #15
-    moveq #9,d0
-    trap #15
-`
+		code: inputSource
 	}
 }
 
-export const EXAMPLES_68010: Record<string, Example> = {
-	...EXAMPLES,
+export const EXAMPLES_68010: Readonly<Record<string, Example>> = {
+	mandelbrot: {
+		name: 'Mandelbrot Set',
+		description: 'Signed word multiplication draws the 32 by 32 Mandelbrot view in 8.8 fixed point.',
+		tools: ['bitmap'],
+		code: mandelbrotSource
+	},
+	ackermann: {
+		name: 'Ackermann',
+		description: 'Nested BSR/RTS calls compute A(3, 3) = 61, printed with TRAP #15.',
+		code: ackermannSource
+	},
+	hello: {
+		name: 'Hello, THRAX!',
+		description: 'Educational TRAP #15 task 14 prints a zero-terminated string from A1.',
+		code: helloSource
+	},
+	factorial: {
+		name: 'Factorial',
+		description: 'Word multiplication, BSR/RTS and a DBRA loop; prints 120.',
+		code: factorialSource
+	},
+	bitmap: {
+		tools: ['bitmap'],
+		name: 'Bitmap Display',
+		description: 'Draw the common 32 by 32 red/blue gradient using long stores and postincrement.',
+		code: bitmapSource
+	},
+	stack: {
+		name: 'Stack and Registers',
+		description: 'Save registers, change values, restore them and rewind the stack.',
+		code: stackSource
+	},
+	sum: {
+		name: 'Sum of Numbers',
+		description: 'Add 5 and 3, store the result, then print 8.',
+		code: sumSource
+	},
+	fibonacci: {
+		name: 'Fibonacci',
+		description: 'Compute the tenth Fibonacci number with a DBRA loop; prints 55.',
+		code: fibonacciSource
+	},
+	loop: {
+		name: 'Loop Counter',
+		description: 'Print one through five, one number per line, and retain the last counter in RAM.',
+		code: loopSource
+	},
+	bitwise: {
+		name: 'Bitwise Operations',
+		description: 'Compare AND, OR and XOR using 12 and 10; prints 8, 14 and 6.',
+		code: bitwiseSource
+	},
+	input: {
+		name: 'Interactive Input',
+		description: 'Read a signed integer into D1, store it, and echo it through educational TRAP #15.',
+		code: inputSource
+	},
 	returnArguments: {
-		name: '68010: RTD and arguments',
+		name: '68010: RTD and Arguments',
 		description: 'RTD restores the caller PC and removes one long stack argument.',
-		code: `.text
-_start:
-    move.l #42,-(sp)
-    bsr printArgument
-    moveq #9,d0
-    trap #15
-printArgument:
-    move.l 4(sp),d1
-    moveq #3,d0
-    trap #15
-    rtd #4
-`
+		code: returnArgumentsSource
 	}
 }
 
-export const EXAMPLES_68020: Record<string, Example> = {
-	...EXAMPLES_68010,
+export const EXAMPLES_68020: Readonly<Record<string, Example>> = {
+	mandelbrot: {
+		name: 'Mandelbrot Set',
+		description: 'Signed word multiplication draws the 32 by 32 Mandelbrot view in 8.8 fixed point.',
+		tools: ['bitmap'],
+		code: mandelbrotSource
+	},
+	ackermann: {
+		name: 'Ackermann',
+		description: 'Nested BSR/RTS calls compute A(3, 3) = 61, printed with TRAP #15.',
+		code: ackermannSource
+	},
+	hello: {
+		name: 'Hello, THRAX!',
+		description: 'Educational TRAP #15 task 14 prints a zero-terminated string from A1.',
+		code: helloSource
+	},
+	factorial: {
+		name: 'Factorial',
+		description: 'Word multiplication, BSR/RTS and a DBRA loop; prints 120.',
+		code: factorialSource
+	},
+	bitmap: {
+		tools: ['bitmap'],
+		name: 'Bitmap Display',
+		description: 'Draw the common 32 by 32 red/blue gradient using long stores and postincrement.',
+		code: bitmapSource
+	},
+	stack: {
+		name: 'Stack and Registers',
+		description: 'Save registers, change values, restore them and rewind the stack.',
+		code: stackSource
+	},
+	sum: {
+		name: 'Sum of Numbers',
+		description: 'Add 5 and 3, store the result, then print 8.',
+		code: sumSource
+	},
+	fibonacci: {
+		name: 'Fibonacci',
+		description: 'Compute the tenth Fibonacci number with a DBRA loop; prints 55.',
+		code: fibonacciSource
+	},
+	loop: {
+		name: 'Loop Counter',
+		description: 'Print one through five, one number per line, and retain the last counter in RAM.',
+		code: loopSource
+	},
+	bitwise: {
+		name: 'Bitwise Operations',
+		description: 'Compare AND, OR and XOR using 12 and 10; prints 8, 14 and 6.',
+		code: bitwiseSource
+	},
+	input: {
+		name: 'Interactive Input',
+		description: 'Read a signed integer into D1, store it, and echo it through educational TRAP #15.',
+		code: inputSource
+	},
+	returnArguments: {
+		name: '68010: RTD and Arguments',
+		description: 'RTD restores the caller PC and removes one long stack argument.',
+		code: returnArgumentsSource
+	},
 	scaledTable: {
-		name: '68020: scaled table index',
+		name: '68020: Scaled Table Index',
 		description: 'Brief scaled indexing selects a long table entry; EXTB sign-extends a byte.',
-		code: `.data
-table: dc.l 10,20,30,40
-.text
-_start:
-    lea table,a0
-    moveq #2,d1
-    move.l 0(a0,d1.l*4),d1
-    move.b #$80,d2
-    extb.l d2
-    moveq #3,d0
-    trap #15
-    moveq #9,d0
-    trap #15
-`
+		code: scaledTableSource
+	}
+}
+
+/** MC68020 with an MC68881/MC68882: Mandelbrot uses the FPU and a floating-point example is added. */
+export const EXAMPLES_68020_FPU: Readonly<Record<string, Example>> = {
+	...EXAMPLES_68020,
+	mandelbrot: {
+		name: 'Mandelbrot Set',
+		description: 'Single-precision FPU arithmetic draws the 32 by 32 Mandelbrot view, matching the MIPS port.',
+		tools: ['bitmap'],
+		code: mandelbrotFpuSource
+	},
+	floatingpoint: {
+		name: 'Floating-point Arithmetic',
+		description: 'FMOVECR, FSQRT, FSIN and an FPU compare print 45, 1414 and 500 with TRAP #15.',
+		code: floatingPointSource
 	}
 }

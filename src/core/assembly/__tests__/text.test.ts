@@ -1,10 +1,32 @@
 import { describe, expect, it } from 'vitest'
-import { splitOperands, stripAssemblyComment } from '../text'
+import { maskAssemblyComments, splitOperands, stripAssemblyComment } from '../text'
 import { integerArithmetic } from '../integerArithmetic'
 import { Op } from '../expressions'
 import { visitSourceLines } from '../sourceLines'
 
 describe('configurable assembler helpers', () => {
+	it('masks multiline comments without moving columns, CRLFs or quoted markers', () => {
+		const code = '.ascii "/* // \\" */" /* hidden\r\nstill hidden */ label: // rest\r\nnext:'
+		const masked = maskAssemblyComments(code, { line: ['//'], block: ['/*', '*/'] })
+		expect(masked.length).toBe(code.length)
+		expect(masked.indexOf('label:')).toBe(code.indexOf('label:'))
+		expect(masked.indexOf('next:')).toBe(code.indexOf('next:'))
+		expect(masked.split('\r\n')).toHaveLength(3)
+		expect(masked).toContain('.ascii "/* // \\" */"')
+		expect(masked).not.toContain('hidden')
+		expect(masked).not.toContain('rest')
+		expect(maskAssemblyComments('x /* unclosed\ny', { line: [], block: ['/*', '*/'] })).toBe('x            \n ')
+		expect(maskAssemblyComments('// hidden\rlabel:', { line: ['//'] })).toBe('         \rlabel:')
+	})
+
+	it('selects GNU character constants and Z80 identifier apostrophes by dialect', () => {
+		const syntax = { line: ['//'], block: ['/*', '*/'], singleQuotes: 'character' } as const
+		expect(maskAssemblyComments(".byte '/ // hidden", syntax)).toBe(".byte '/          ")
+		expect(maskAssemblyComments(".byte '\\' // hidden", syntax)).toBe(".byte '\\'          ")
+		expect(maskAssemblyComments(".byte '/' /* x */ label:", syntax)).toBe(".byte '/'         label:")
+		expect(maskAssemblyComments("ex af,af' ; hidden", { line: [';'], identifierApostrophes: true })).toBe("ex af,af'         ")
+	})
+
 	it('keeps comment markers, commas and escaped quotes inside literals', () => {
 		expect(stripAssemblyComment('db "a;\\"b", \';\' ; comment', [';'])).toBe('db "a;\\"b", \';\' ')
 		expect(stripAssemblyComment('ldr r0, ="x//y" // comment', ['@', '//'])).toBe('ldr r0, ="x//y" ')

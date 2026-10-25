@@ -5,7 +5,7 @@
  */
 
 import { InstructionCategory, PipelineResult, type HistoryRecord, type InstructionInfo, type InstructionSet, type PipelineModel } from '../../contracts'
-import { INSN_ALU, INSN_BRANCH, INSN_JUMP, INSN_LOAD, INSN_STORE, INSN_TRAP, registerTraffic, staticFlags } from './classify'
+import { DEPENDENCY_V0, INSN_ALU, INSN_BRANCH, INSN_JUMP, INSN_LOAD, INSN_STORE, INSN_TRAP, registerTraffic, staticFlags } from './classify'
 import { decode, Op } from './decode'
 import { disassemble } from './disassemble'
 
@@ -45,6 +45,17 @@ ENCODINGS[Op.DP1] = 'Data processing (1 source)'
 ENCODINGS[Op.LOAD_STORE] = 'Load/store register'
 ENCODINGS[Op.LOAD_LITERAL] = 'Load register (literal)'
 ENCODINGS[Op.LOAD_STORE_PAIR] = 'Load/store pair'
+ENCODINGS[Op.FP_DP1] = 'Floating-point data processing (1 source)'
+ENCODINGS[Op.FP_DP2] = 'Floating-point data processing (2 source)'
+ENCODINGS[Op.FP_DP3] = 'Floating-point data processing (3 source)'
+ENCODINGS[Op.FP_CMP] = 'Floating-point compare'
+ENCODINGS[Op.FP_CCMP] = 'Floating-point conditional compare'
+ENCODINGS[Op.FP_CSEL] = 'Floating-point conditional select'
+ENCODINGS[Op.FP_IMM] = 'Floating-point immediate'
+ENCODINGS[Op.FP_INT] = 'Conversion between floating-point and integer'
+ENCODINGS[Op.FP_FIXED] = 'Conversion between floating-point and fixed-point'
+ENCODINGS[Op.MRS] = 'Move from system register'
+ENCODINGS[Op.MSR] = 'Move to system register'
 
 /** X0-X30, then SP as register 31. */
 const REGISTER_NAMES: readonly string[] = [...Array.from({ length: 31 }, (_, index) => `X${index}`), 'SP']
@@ -69,7 +80,9 @@ function infoOf(word: number): InstructionInfo {
 		encoding: d.op,
 		reads,
 		writes,
-		loadWrites: flags & INSN_LOAD ? (d.op === Op.LOAD_STORE_PAIR ? [d.rd, d.ra] : [d.rd]).filter(n => n !== 31) : undefined,
+		loadWrites: flags & INSN_LOAD
+			? d.fp ? (d.op === Op.LOAD_STORE_PAIR ? [d.rd, d.ra] : [d.rd]).map(n => DEPENDENCY_V0 + n) : (d.op === Op.LOAD_STORE_PAIR ? [d.rd, d.ra] : [d.rd]).filter(n => n !== 31)
+			: undefined,
 		isLoad: (flags & INSN_LOAD) !== 0,
 		isBranch: (flags & INSN_BRANCH) !== 0,
 		isJump: (flags & INSN_JUMP) !== 0,
@@ -104,6 +117,9 @@ const STAGE_WB = 4
  * a branch decides in EX or, with the option, in ID.
  */
 export const A64_PIPELINE: PipelineModel = Object.freeze({
+	name: 'A32/A64 five-stage teaching pipeline',
+	description: 'Hypothetical single-issue, in-order pipeline. AArch32 and AArch64 specify instruction behavior, not a particular core pipeline. Multiply/divide, floating point, caches and bus latency are not modeled here.',
+	resultStages: Object.freeze({ alu: STAGE_EX, load: STAGE_MEM }),
 	stages: Object.freeze([
 		{ label: 'IF', name: 'Instruction fetch', kind: 'if' },
 		{ label: 'ID', name: 'Decode and register read', kind: 'id' },
@@ -136,7 +152,7 @@ export const A64_PIPELINE: PipelineModel = Object.freeze({
 
 export const a64InstructionSet: InstructionSet = {
 	encodings: ENCODINGS,
-	registerNames: [...REGISTER_NAMES, 'NZCV'],
+	registerNames: [...REGISTER_NAMES, 'NZCV', ...Array.from({ length: 32 }, (_, index) => `V${index}`), 'FPCR', 'FPSR'],
 	pipeline: A64_PIPELINE,
 	describe: (instruction) => describeWord(instruction as number),
 	decodeExecuted(entry) {

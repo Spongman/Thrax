@@ -38,8 +38,73 @@ not simulated.
 
 SR displays `$2000 | CCR`; only the five condition bits are editable. There
 are no separate user/supervisor stacks, privilege transitions, interrupt mask
-behavior, trace handling, FPU, MMU, cache or cycle model. Privileged instructions
-including MOVE to SR, STOP, RESET and RTE are excluded.
+behavior, trace handling, MMU, cache or cycle model. Privileged instructions
+including MOVE to SR, STOP, RESET and RTE are excluded. The optional floating-point
+coprocessor is described below.
+
+## Optional MC68881/MC68882 coprocessor
+
+With the MC68020 selected, the **Math coprocessor** setting offers None (default),
+MC68881 or MC68882. The two execute identically here: the MC68882's concurrent
+execution, extra pipelining and speed are not modelled, and there is no cycle
+model. The setting is not offered for the MC68000/MC68010 and a stored choice
+falls back to None: those CPUs have no coprocessor interface, so a 68881 could
+only be driven as a memory-mapped peripheral through its response/command
+registers, never by F-line instructions. Without the coprocessor, F-line words
+are rejected by the assembler and fault at execution. Encodings follow the
+[MC68881/MC68882 User's Manual](https://www.nxp.com/docs/en/reference-manual/MC68881UM.pdf)
+and section 5 of the Programmer's Reference Manual (coprocessor ID 1).
+
+**State.** FP0–FP7, FPCR, FPSR (condition codes N/Z/I/NAN, quotient byte,
+exception status and accrued exceptions) and FPIAR. FP registers are exact
+extended precision, not JS doubles: each holds the 80 significant bits of the
+96-bit memory format (sign, 15-bit exponent, 64-bit mantissa with explicit
+integer bit), and the register panel shows those raw bits. Data tips and
+history show an approximate decimal value. Reset leaves FP0–FP7 holding the
+default NaN `$7FFF…FFFF` and the control registers zero. History stores the
+whole FPU state per instruction, so stepping back restores it bit for bit.
+
+**Arithmetic.** FMOVE, FADD, FSUB, FMUL, FDIV, FSGLMUL, FSGLDIV, FABS, FNEG,
+FSQRT, FINT, FINTRZ, FMOD, FREM, FSCALE, FGETEXP, FGETMAN, FCMP and FTST are
+exact and correctly rounded using the FPCR rounding mode (RN/RZ/RM/RP) and
+precision (extended/single/double). Single/double rounding precision narrows
+the mantissa only; the extended exponent range is kept. FSGLMUL/FSGLDIV round to
+a single-precision mantissa. Extended values with a zero exponent field scale by
+2^-16383, as on the 68881. NaN operands propagate (the destination NaN wins and
+is made quiet); a NaN the FPU creates is the positive default NaN.
+
+**Transcendentals.** FSIN, FCOS, FSINCOS, FTAN, FASIN, FACOS, FATAN, FSINH, FCOSH,
+FTANH, FATANH, FETOX, FETOXM1, FTWOTOX, FTENTOX, FLOGN, FLOGNP1, FLOG10 and FLOG2
+are evaluated in IEEE double precision (about 53 significant bits, typically
+within 1–2 double ulps) and then rounded to the FPCR precision; they are not
+accurate to the full 64-bit extended mantissa. Logarithms and the exponential
+family split the binary exponent so results beyond double range stay correct to
+about double precision; trigonometric arguments beyond double range are treated
+as infinite (operand error). INEX2 is set except for known exact cases.
+
+**Formats and transfers.** FMOVE converts B/W/L/S/D/X/P sources and destinations,
+including immediates (`#1.5`, `#-2.5e3` or integers) and packed decimal with a
+static `{#k}` or dynamic `{Dn}` k-factor (default `{#17}`); a four-digit decimal
+exponent sets OPERR. Packed input conversion sets INEX1. Out-of-range integer
+stores set OPERR and write the largest integer of the operand's sign. FMOVECR
+returns correctly rounded constants for offsets $00, $0B–$0F and $30–$3F; other
+offsets fault. FMOVE/FMOVEM move FPCR, FPSR and FPIAR, and FMOVEM.X moves static or
+dynamic FP register lists in 96-bit format. `dc.s`, `dc.d` and `dc.x` take
+decimal literals.
+
+**Conditions.** FBcc (word/long), FScc, FDBcc and FTRAPcc implement all 32
+predicates; the IEEE-nonaware ones (SF … ST) set BSUN when NAN is set. FNOP is
+supported.
+
+**Exceptions.** Status and accrued bits follow the manual. An exception enabled
+in FPCR, or a taken FTRAPcc, stops with a debugger fault and the instruction is
+undone; coprocessor exception processing and its stack frames are not simulated.
+FSAVE and FRESTORE are privileged (supervisor-only) and excluded like other
+privileged instructions.
+
+With a coprocessor the examples add **Floating-point Arithmetic**, and
+**Mandelbrot Set** becomes the FPU version: single-precision rounding via FPCR
+reproduces the MIPS port's iteration counts pixel for pixel.
 
 ## Implemented integer subset
 

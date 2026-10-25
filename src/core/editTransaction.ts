@@ -20,6 +20,24 @@ export function editTransaction(change: () => void, transaction: EditTransaction
 	return true
 }
 
+/** Native backends retain their codecs and share only failed-edit cleanup. */
+export function capturedHistoryEdit(change: () => void, capture: {
+	begin(): void
+	close(): void
+	undo(): unknown
+	branch(): unknown
+}): true {
+	return editTransaction(change, {
+		begin: () => capture.begin(),
+		commit: () => capture.close(),
+		rollback: () => {
+			capture.close()
+			capture.undo()
+			capture.branch()
+		},
+	})
+}
+
 /** Sparse-delta codecs share close/undo/discard policy as well as edit lifetime. */
 export function deltaHistoryEdit(change: () => void, history: {
 	end(): boolean

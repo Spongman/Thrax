@@ -1,4 +1,4 @@
-import { formatInstructionHelp, type InstructionHelp } from '../../core/instructionHelp'
+import { formatInstructionHelp, instructionLinks, type InstructionHelp } from '../../core/instructionHelp'
 import { ALL_MNEMONICS, INSN_BY_NAME, MODE_NAMES, NMOS_MODEL, type CpuModel } from './isa'
 
 /** What each instruction does, and the flags it sets. */
@@ -31,6 +31,15 @@ const SUMMARIES: Readonly<Record<string, string>> = {
 	PHY: 'Push Y', PLY: 'Pull Y (NZ)', WAI: 'Wait for an interrupt', STP: 'Stop until reset',
 }
 
+// These references leave the browser's target name intact. pagetable hides
+// undocumented instructions by default; Oxyron exposes those in static text.
+const nmosLink = instructionLinks('https://www.pagetable.com/c64ref/6502/?tab=2', name => `#${name.toUpperCase()}`)
+const cmosLink = instructionLinks('https://www.pagetable.com/c64ref/6502/?cpu=65c02s&tab=2', name => `#${name.toUpperCase()}`)
+const undocumentedLink = instructionLinks('https://www.oxyron.de/html/opcodes02.html', name => {
+	const operand = ['anc', 'alr', 'arr', 'axs', 'xaa'].includes(name) ? ' #{imm}' : name === 'kil' ? ' = halts' : ' {adr}'
+	return `#:~:text=${encodeURIComponent(name.toUpperCase() + operand)}`
+})
+
 // These shapes follow the addressing-mode order in isa.ts.
 const OPERANDS = ['', 'A', '#value', '$zp', '$zp,X', '$zp,Y', '$address', '$address,X', '$address,Y',
 	'($address)', '($zp,X)', '($zp),Y', 'target', '($zp)', '($address,X)', '$zp, target']
@@ -51,6 +60,7 @@ export function mos6502InstructionHelp(text: string, model: CpuModel = NMOS_MODE
 		kind: !model.cmos && insn >= 98 ? 'undocumented NMOS instruction' : undefined,
 		forms: modes.map((mode) => `${text.toUpperCase()}${OPERANDS[mode] ? ` ${OPERANDS[mode]}` : ''}`),
 		details: [`Modes: ${modes.map((mode) => MODE_NAMES[mode]).join(', ')}`],
+		link: model.cmos ? cmosLink(name) : insn >= 98 ? undocumentedLink(name) : nmosLink(name),
 		reference: model.cmos ? 'https://wdc65xx.com/support/documentation/' : undefined,
 	})
 }

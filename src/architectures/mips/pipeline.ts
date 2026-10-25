@@ -15,6 +15,8 @@ const MEM = 3
 const WB = 4
 
 export const MIPS_PIPELINE: PipelineModel = Object.freeze({
+	name: 'MIPS five-stage teaching pipeline',
+	description: 'Single-issue, in-order estimate with the selected bypass, resolution and prediction rules. It does not model MARS instruction timing, floating-point unit latency, caches or bus contention.',
 	stages: Object.freeze([
 		{ label: 'IF', name: 'Instruction fetch', kind: 'if' },
 		{ label: 'ID', name: 'Instruction decode', kind: 'id' },

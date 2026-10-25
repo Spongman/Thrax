@@ -19,6 +19,7 @@ import type { AssemblySource } from '../../../../core/assembly/sources'
 import { TokenKind, positionOf, type Position } from '../../../../core/assembly/tokens'
 import { AssemblyError } from '../../../../core/diagnostics'
 import type { Diagnostic } from '../../../contracts'
+import { DOUBLE, numberToBits, SINGLE } from '../../shared/fp'
 import { DATA_BASE, TEXT_BASE } from '../layout'
 import { encoderFor, isMnemonic, type EncodeContext, type PoolSlot } from './encoder'
 import { parseOperands, parseValue, type Value } from './operands'
@@ -85,6 +86,8 @@ export interface A64AssemblyOptions {
 	/** Workspace documents that `.include` may name. */
 	files?: readonly AssemblySource[]
 	limits?: AssemblerLimits
+	/** SIMD&FP instructions assemble; on unless false. */
+	floatingPoint?: boolean
 }
 
 export interface A64AssemblyResult {
@@ -108,6 +111,9 @@ const DATA_SIZES: Readonly<Record<string, number>> = {
 	'.quad': 8, '.xword': 8, '.dword': 8, '.8byte': 8,
 }
 
+/** IEEE-754 data: single and double precision. */
+const FLOAT_SIZES: Readonly<Record<string, number>> = { '.float': 4, '.single': 4, '.double': 8 }
+
 /** Directives GNU uses for object files and debugging, which mean nothing here. */
 const IGNORED = new Set([
 	'.type', '.size', '.file', '.ident', '.arch', '.cpu', '.local', '.weak', '.hidden', '.protected', '.loc', '.func', '.endfunc',
@@ -115,7 +121,7 @@ const IGNORED = new Set([
 ])
 
 export const A64_DIRECTIVES: readonly string[] = Object.freeze([
-	'.text', '.data', '.bss', '.rodata', '.section', '.global', '.globl', ...Object.keys(DATA_SIZES), '.ascii', '.asciz', '.string',
+	'.text', '.data', '.bss', '.rodata', '.section', '.global', '.globl', ...Object.keys(DATA_SIZES), ...Object.keys(FLOAT_SIZES), '.ascii', '.asciz', '.string',
 	'.align', '.p2align', '.balign', '.space', '.skip', '.zero', '.fill', '.equ', '.set', '.ltorg', '.pool', '.include', '.end',
 	'.macro', '.endm', '.rept', '.endr', '.inst', '.error', ...IGNORED,
 ].sort())
@@ -165,7 +171,7 @@ class Parser {
 	private expansions = 0
 	private expandedLines = 0
 
-	constructor(private readonly files: Map<string, AssemblySource>, private readonly limit: number) {}
+	constructor(private readonly files: Map<string, AssemblySource>, private readonly limit: number, private readonly floatingPoint = true) {}
 
 	parse(main: AssemblySource) {
 		this.reader.push(linesOf(main.name, main.code))
@@ -257,7 +263,7 @@ class Parser {
 		} else if (name.startsWith('.')) {
 			this.directive(name, operands, at, line, head)
 		} else {
-			const environment = { pool: (size: number, value: Value) => this.poolSlot(size, value) }
+			const environment = { pool: (size: number, value: Value) => this.poolSlot(size, value), floatingPoint: this.floatingPoint }
 			this.instruction(at, line, encoderFor(head.text, parseOperands(operands, at), at, environment))
 		}
 		return false
@@ -366,6 +372,8 @@ class Parser {
 	private directive(name: string, tokens: A64Token[], at: Position, line: LogicalLine, head: A64Token) {
 		const size = DATA_SIZES[name]
 		if (size !== undefined) return this.data(size, tokens, at, line)
+		const real = FLOAT_SIZES[name]
+		if (real !== undefined) return this.realData(real, tokens, at, line)
 		if (IGNORED.has(name) || name.startsWith('.cfi_')) return
 		switch (name) {
 			case '.text': return this.select(SECTION_TEXT, at)
@@ -477,12 +485,27 @@ class Parser {
 			encode: (hook) => {
 				const context = contextOf(hook)
 				return values.flatMap((value) => {
+					if (value.real !== null) throw new AssemblyError(`${value.real} is not an integer; use .float or .double`, value.at)
 					const result = context.value(value)
 					if (size < 8 && (result < -(1n << (bits - 1n)) || result >= 1n << bits)) {
 						throw new AssemblyError(`Value ${result} does not fit in ${size} byte${size === 1 ? '' : 's'}`, value.at)
 					}
 					return littleEndian(BigInt.asUintN(size * 8, result), size)
 				})
+			},
+		})
+	}
+
+	/** `.float` and `.double`: reals, or integer expressions, rounded to nearest. */
+	private realData(size: number, tokens: A64Token[], at: Position, line: LogicalLine) {
+		const values = this.values(tokens, at)
+		const format = size === 8 ? DOUBLE : SINGLE
+		const provenance: Provenance = { kind: 'data', source: location(at), expansion: line.expansion }
+		this.statements.push({
+			kind: Fragment, size: size * values.length, provenance, at,
+			encode: (hook) => {
+				const context = contextOf(hook)
+				return values.flatMap((value) => littleEndian(numberToBits(value.real ?? Number(context.value(value)), format), size))
 			},
 		})
 	}
@@ -628,7 +651,7 @@ export function assembleA64(main: AssemblySource, options: A64AssemblyOptions = 
 	const files = new Map((options.files ?? []).map((file) => [normalize(file.name), file]))
 	files.set(normalize(main.name), main)
 	const config = a64Config(options.limits)
-	const parser = new Parser(files, config.limits.diagnostics)
+	const parser = new Parser(files, config.limits.diagnostics, options.floatingPoint ?? true)
 	parser.parse(main)
 	const none = { image: null, values: new Map<string, number>(), globals: parser.globals }
 	if (parser.diagnostics.length) return { ...none, diagnostics: parser.diagnostics }

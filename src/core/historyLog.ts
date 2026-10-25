@@ -44,7 +44,7 @@ export class HistoryLog {
 	/** The entry end at which the oldest block has to go for the entry limit. */
 	private evictAt = Number.POSITIVE_INFINITY
 
-	constructor(readonly layout: HistoryBufferLayout, capacity?: number) {
+	constructor(readonly layout: HistoryBufferLayout, capacity?: number, private readonly beforeOverflow?: () => void) {
 		this.entries = new HistoryRecords(layout, 'entry', capacity)
 		this.effects = new HistoryRecords(layout, 'effect', capacity)
 	}
@@ -247,6 +247,7 @@ export class HistoryLog {
 
 	/** The open entry cannot be held whole: the log empties and refuses the rest of it. */
 	private overflow() {
+		this.beforeOverflow?.()
 		this.overflows += 1
 		this.lastEviction = 'oversized-entry'
 		this.open = -1

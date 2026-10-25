@@ -1,37 +1,36 @@
+import { riscvIsa } from './variants'
 import { describeRiscvToken, installEditor } from './editor'
 import { createArchitectureServices } from '../../core/architectureServices'
 import type { ArchitectureDefinition, ArchitectureServices } from '../contracts'
 import { assembleRiscv } from './assembler'
-import { COMPRESSED_EXAMPLES, EXAMPLES } from './examples'
 import { manifest } from './manifest'
-import { REGISTERS, riscvProfile } from './profile'
-import { RiscvAssembly, createRiscvDisassembly, riscvDisassembly } from './program'
+import { riscvProfile } from './profile'
+import { RiscvAssembly, createRiscvDisassembly } from './program'
 import { RiscvRuntime } from './runtime'
-import { RISCV_SETTINGS, type RiscvSettings } from './settings'
+import { DEFAULT_RISCV_SETTINGS, RISCV_SETTINGS, type RiscvSettings } from './settings'
 
-const compressedVariant = {
-	language: 'thrax-riscv',
-	registers: REGISTERS,
-	registerBanks: [{ id: 'cpu', label: 'Integer' }],
-	examples: COMPRESSED_EXAMPLES
+const disassemblies = new Map<string, ReturnType<typeof createRiscvDisassembly>>()
+const disassemblyFor = (compressed: boolean, flen: number) => {
+	const key = `${compressed}:${flen}`
+	let disassembly = disassemblies.get(key)
+	if (!disassembly) disassemblies.set(key, (disassembly = createRiscvDisassembly(compressed, flen)))
+	return disassembly
 }
-const compressedDisassembly = createRiscvDisassembly(true)
+const programIsa = (program: RiscvAssembly) =>
+	`rv32im${program.flen ? 'f' : ''}${program.flen === 64 ? 'd' : ''}${program.compressed ? 'c' : ''}`
 
 const definition: ArchitectureDefinition<ArchitectureServices<RiscvSettings>> = {
 	...manifest,
-	language: 'thrax-riscv',
-	registers: REGISTERS,
-	registerBanks: [{ id: 'cpu', label: 'Integer' }],
-	examples: EXAMPLES,
+	...riscvIsa(DEFAULT_RISCV_SETTINGS).view,
 	settings: RISCV_SETTINGS,
-	variant: (settings) => (settings.isa === 'rv32imc' ? compressedVariant : definition),
+	variant: (settings) => riscvIsa(settings).view,
 	createServices() {
-		return createArchitectureServices<RiscvSettings>(() => {
-			let compressed = false
+		return createArchitectureServices<RiscvSettings>(({ program: inspectionProgram }) => {
+			const current = () => inspectionProgram() as RiscvAssembly | null
 			return {
 				assemble(sources, settings) {
-					compressed = settings.isa === 'rv32imc'
-					return assembleRiscv(sources, compressed)
+					const isa = riscvIsa(settings)
+					return assembleRiscv(sources, isa.compressed, isa.flen)
 				},
 				createMachine(program, _settings, options) {
 					if (!(program instanceof RiscvAssembly)) throw new Error('Not a RISC-V program')
@@ -40,12 +39,13 @@ const definition: ArchitectureDefinition<ArchitectureServices<RiscvSettings>> = 
 				},
 				profile: () => riscvProfile,
 				get disassembly() {
-					return compressed ? compressedDisassembly : riscvDisassembly
+					const program = current()
+					return disassemblyFor(!!program?.compressed, program?.flen ?? 0)
 				},
 				describeToken: describeRiscvToken,
 				installEditor,
 			}
-		})
+		}, { variant: settings => riscvIsa(settings).id, programVariant: program => programIsa(program as RiscvAssembly) })
 	}
 }
 export default definition

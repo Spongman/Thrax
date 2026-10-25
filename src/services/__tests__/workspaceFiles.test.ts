@@ -17,6 +17,19 @@ const WORKSPACE: WorkspaceSnapshot = {
 }
 
 describe('the workspace document', () => {
+	it('preserves explicit unchanged example links but strips stale or malformed baselines', () => {
+		const files = [
+			{ title: 'sum.asm', code: 'sum', example: { id: 'sum', source: 'sum' } },
+			{ title: 'edited.asm', code: 'edited sum', example: { id: 'sum', source: 'sum' } },
+			{ title: 'plain.asm', code: 'sum' },
+		]
+		const result = fromWorkspaceDocument(toWorkspaceDocument({ ...WORKSPACE, files }))!
+		expect(result.files[0].example).toEqual({ id: 'sum', source: 'sum' })
+		expect(result.files[1]).not.toHaveProperty('example')
+		expect(result.files[2]).not.toHaveProperty('example')
+		const malformed = { ...toWorkspaceDocument(WORKSPACE), files: [{ title: 'a.asm', code: '', example: { id: 3, source: '' } }] }
+		expect(fromWorkspaceDocument(malformed)!.files[0]).not.toHaveProperty('example')
+	})
 	it('reads back what it wrote, without the ids a session makes up', () => {
 		const written = JSON.parse(JSON.stringify(toWorkspaceDocument(WORKSPACE)))
 		expect(fromWorkspaceDocument(written)).toEqual(WORKSPACE)

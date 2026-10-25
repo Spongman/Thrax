@@ -18,9 +18,11 @@ export class OperandKind {
 	static readonly EXTEND = 4
 	static readonly LITERAL = 5
 	static readonly EXPRESSION = 6
+	/** A SIMD&FP register as B, H, S, D or Q. */
+	static readonly FP_REGISTER = 7
 }
 
-const { REGISTER, IMMEDIATE, MEMORY, SHIFT, EXTEND, LITERAL, EXPRESSION } = OperandKind
+const { REGISTER, IMMEDIATE, MEMORY, SHIFT, EXTEND, LITERAL, EXPRESSION, FP_REGISTER } = OperandKind
 
 /** A value worked out once symbols are known; `exact` holds a literal's full 64 bits. */
 export interface Value {
@@ -28,6 +30,8 @@ export interface Value {
 	exact: bigint | null
 	/** `:lo12:`: only the low 12 bits, as ADD and loads take a page offset. */
 	lo12: boolean
+	/** A real literal, with at most a sign: `#1.5`, `-2.0e3`. */
+	real: number | null
 	at: Position
 }
 
@@ -68,7 +72,18 @@ export interface LiteralOperand { kind: 5, value: Value, at: Position }
 /** A bare expression; `name` is set when it is a single identifier, such as a condition. */
 export interface ExpressionOperand { kind: 6, value: Value, name: string | null, at: Position }
 
-export type Operand = RegisterOperand | ImmediateOperand | MemoryOperand | ShiftOperand | ExtendOperand | LiteralOperand | ExpressionOperand
+/** Bn, Hn, Sn, Dn or Qn: `size` is its bytes. */
+export interface FpRegisterOperand { kind: 7, n: number, size: number, name: string, at: Position }
+
+export type Operand = RegisterOperand | ImmediateOperand | MemoryOperand | ShiftOperand | ExtendOperand | LiteralOperand | ExpressionOperand | FpRegisterOperand
+
+const FP_SIZES: Readonly<Record<string, number>> = { b: 1, h: 2, s: 4, d: 8, q: 16 }
+
+/** The SIMD&FP register a name spells, or null. */
+export function fpRegisterByName(name: string): { n: number, size: number } | null {
+	const match = /^([bhsdq])([0-9]|[12][0-9]|3[01])$/.exec(name.toLowerCase())
+	return match ? { n: Number(match[2]), size: FP_SIZES[match[1]] } : null
+}
 
 /** GNU as precedence: multiplicative and shifts, then bitwise, then additive. */
 export const A64_EXPRESSIONS: ExpressionSyntax = {
@@ -138,7 +153,20 @@ export function parseValue(tokens: readonly A64Token[], at: Position): Value {
 	const expr = parseExpression(cursor, A64_EXPRESSIONS)
 	if (!expr) fail(`Unexpected '${rest[0].text}'`, position)
 	if (!cursor.atEnd()) fail(`Unexpected '${cursor.peek().text}' after the value`, positionOf(cursor.peek()))
-	return { expr: expr!, exact, lo12, at: position }
+	return { expr: expr!, exact, lo12, real: realLiteral(rest), at: position }
+}
+
+/** A real literal with at most a sign before it, or null. */
+function realLiteral(tokens: readonly A64Token[]): number | null {
+	const last = tokens[tokens.length - 1]
+	if (!last?.real) return null
+	if (tokens.length === 1) return last.value!
+	if (tokens.length !== 2 || tokens[0].kind !== TokenKind.Operator) return null
+	switch (tokens[0].text) {
+		case '-': return -last.value!
+		case '+': return last.value!
+	}
+	return null
 }
 
 /** A number with at most a sign or complement before it, exactly. */
@@ -216,6 +244,8 @@ export function parseOperand(tokens: readonly A64Token[], at: Position): Operand
 	if (tokens.length === 1) {
 		const register = registerOperand(head)
 		if (register) return register
+		const fp = head.kind === TokenKind.Identifier ? fpRegisterByName(head.text) : null
+		if (fp) return { kind: FP_REGISTER, ...fp, name: head.text.toLowerCase(), at: position }
 	}
 	const modifier = modifierOperand(tokens)
 	if (modifier) return modifier

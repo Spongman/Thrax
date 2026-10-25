@@ -1,9 +1,12 @@
 /**
  * An ARMv8-A core in AArch32 state, User mode, running the A32 instruction
  * set (ARM DDI 0487, part F) as the shared ARM library decodes it under its
- * ARMv8 profile. There is no Thumb, no VFP or Advanced SIMD and no
- * coprocessor: those words are undefined, and a branch that would enter
- * Thumb state stops the program with a fault saying so.
+ * ARMv8 profile, with VFPv4-D16 floating point (S0-S31 overlaid as D0-D15,
+ * and FPSCR; see ../shared/a32/vfp.ts) unless it is switched off. There is
+ * no Thumb, no Advanced SIMD and no other coprocessor: those words are
+ * undefined, and a branch that would enter Thumb state stops the program
+ * with a fault saying so. FP exceptions are never trapped; they accumulate
+ * in FPSCR.
  *
  * State: R0-R14, a 32-bit PC (reading as the instruction's address + 8, a
  * store of it included), and the CPSR: N Z C V Q in bits 31-27, GE in 19-16,
@@ -13,7 +16,7 @@
  * Memory is one little-endian region from `base`, as for the AArch64 state.
  * With SCTLR.A clear, LDR, STR and the halfword forms may be unaligned and
  * read the bytes they name, unrotated; LDRD, STRD, LDM, STM, LDREX and STREX
- * need a word-aligned address. Addresses outside memory go to an optional
+ * need a word-aligned address, as do VLDR, VSTR, VLDM and VSTM. Addresses outside memory go to an optional
  * device, else fault. A write to the PC other than by B or BL interworks, as
  * ARMv7 and later do: bit 0 set would enter Thumb.
  *
@@ -22,12 +25,21 @@
  * written.
  */
 
-import { alu, conditionPassed, dataProcessing, rotatedImmediate, shiftByImmediate, shiftByRegister } from '../../arm/a32/alu'
+import {
+	DOUBLE, FPSR_FLAGS, FpEnv, ROUND_TIEEVEN, ROUND_ZERO, SINGLE, expandImm8, fixedToFp, fpAbs, fpAdd, fpCompare, fpConvert, fpDiv, fpMul, fpMulAdd, fpNeg,
+	fpSqrt, fpToFixed, type FpFormat,
+} from '../shared/fp'
+import {
+	FPSCR_WRITABLE, VA_ADD, VA_DIV, VA_FMA, VA_FMS, VA_FNMA, VA_MLA, VA_MLS, VA_MUL, VA_NMLA, VA_NMLS, VA_NMUL, VA_SUB, VK_ARITH, VK_BLOCK,
+	VK_COMPARE, VK_CONVERT, VK_CORE_PAIR, VK_CORE_SINGLE, VK_FIXED, VK_FROM_INT, VK_MOV_IMM, VK_TO_INT, VK_TRANSFER, VK_UNARY, VK_VMRS, VK_VMSR, VU_ABS,
+	VU_MOV, VU_NEG, decodeVfp, type VfpInstruction,
+} from '../shared/a32/vfp'
+import { alu, conditionPassed, dataProcessing, rotatedImmediate, shiftByImmediate, shiftByRegister } from '../shared/a32/alu'
 import {
 	ARCH_V8, COND_AL, COND_NV, FLAG_C, FLAG_N, FLAG_Z, FORMAT_BLOCK, FORMAT_BLX_IMMEDIATE, FORMAT_BRANCH, FORMAT_BREAKPOINT, FORMAT_DATA, FORMAT_DIVIDE,
 	FORMAT_EXCHANGE, FORMAT_EXCLUSIVE, FORMAT_EXTRA_TRANSFER, FORMAT_HINT, FORMAT_MEDIA, FORMAT_MULTIPLY, FORMAT_STATUS, FORMAT_SWI, FORMAT_TRANSFER,
-	FORMAT_WIDE_MOVE, R_LR, R_PC, branchOffset, formatOf, isTestOp, popCount,
-} from '../../arm/a32/isa'
+	FORMAT_VFP, FORMAT_WIDE_MOVE, R_LR, R_PC, branchOffset, formatOf, isTestOp, popCount,
+} from '../shared/a32/isa'
 
 /** What step() did. */
 export const STEP_OK = 0
@@ -74,6 +86,9 @@ export interface A32EffectSink {
 	memory(address: number, size: number, old: number): void
 	/** The exclusive monitor's address, -1 when it is open. */
 	monitor(old: number): void
+	/** S0-S31, as unsigned bits. */
+	fpRegister(index: number, old: number): void
+	fpscr(old: number): void
 }
 
 /** The system call layer `svc` enters; it changes state only through the CPU's recorded writes. */
@@ -94,6 +109,8 @@ export interface A32CpuOptions {
 	base: number
 	/** Bytes of memory, a positive multiple of 16. */
 	bytes: number
+	/** VFP on; off, its words are undefined. On when absent. */
+	floatingPoint?: boolean
 }
 
 const hex = (value: number) => `0x${(value >>> 0).toString(16).toUpperCase().padStart(8, '0')}`
@@ -142,11 +159,18 @@ export class A32Cpu {
 	faultDetail = ''
 	/** The word the last step() fetched. */
 	instruction = 0
+	/** Predicate outcome of the last fetched instruction, retained with history. */
+	passed = false
+	/** S0-S31; D<n> is S<2n+1>:S<2n>. */
+	readonly s = new Uint32Array(32)
+	fpscr = 0
+	readonly floatingPoint: boolean
 
 	constructor(options: A32CpuOptions) {
 		const { base, bytes } = options
 		if (!(bytes > 0 && bytes % 16 === 0 && base + bytes <= 2 ** 32)) throw new RangeError(`Invalid memory size ${bytes}`)
 		this.base = base
+		this.floatingPoint = options.floatingPoint ?? true
 		this.memory = new Uint8Array(bytes)
 		this.view = new DataView(this.memory.buffer)
 	}
@@ -160,6 +184,9 @@ export class A32Cpu {
 		this.fault = FAULT_NONE
 		this.faultAddress = 0
 		this.faultDetail = ''
+		this.passed = false
+		this.s.fill(0)
+		this.fpscr = 0
 	}
 
 	/** R0-R14, or the PC + 8 for R15, as an instruction reads it. */
@@ -169,6 +196,7 @@ export class A32Cpu {
 
 	/** Executes one instruction; returns a STEP_* code. */
 	step(): number {
+		this.passed = false
 		const pc = this.pc
 		if (pc & 3) return this.fail(FAULT_PC_ALIGNMENT, pc)
 		const fetch = this.offsetOf(pc, 4)
@@ -177,6 +205,7 @@ export class A32Cpu {
 		this.instruction = word
 		const cond = word >>> 28
 		if (cond !== COND_AL && cond !== COND_NV && !conditionPassed(cond, this.cpsr)) return this.next()
+		this.passed = true
 		switch (formatOf(word, ARCH_V8)) {
 			case FORMAT_DATA: return this.dataProcessing(word)
 			case FORMAT_MULTIPLY: return this.multiply(word)
@@ -238,6 +267,7 @@ export class A32Cpu {
 				if ((word >>> 0) === 0xF57FF01F) this.setExclusive(EXCLUSIVE_OPEN)
 				return this.next()
 			case FORMAT_BREAKPOINT: return this.fail(FAULT_BREAKPOINT, pc)
+			case FORMAT_VFP: return this.floatingPoint ? this.vfp(decodeVfp(word)!) : this.undefined()
 			default: return this.undefined()
 		}
 	}
@@ -257,6 +287,34 @@ export class A32Cpu {
 	/** Sets NZCV, recorded. */
 	setFlags(flags: number) {
 		this.setCpsr((this.cpsr & 0x0FFFFFFF) | (flags & 0xF0000000))
+	}
+
+	/** Writes S`index`, recorded. */
+	writeSingle(index: number, value: number) {
+		this.sink?.fpRegister(index, this.s[index])
+		this.s[index] = value
+	}
+
+	/** S`index`, or D`index` when `double`, as bits. */
+	readFp(index: number, double: boolean): bigint {
+		return double ? (BigInt(this.s[2 * index + 1]) << 32n) | BigInt(this.s[2 * index]) : BigInt(this.s[index])
+	}
+
+	/** Writes S`index`, or both halves of D`index`, recorded. */
+	writeFp(index: number, double: boolean, bits: bigint) {
+		if (!double) {
+			this.writeSingle(index, Number(bits & 0xFFFF_FFFFn))
+			return
+		}
+		this.writeSingle(2 * index, Number(bits & 0xFFFF_FFFFn))
+		this.writeSingle(2 * index + 1, Number((bits >> 32n) & 0xFFFF_FFFFn))
+	}
+
+	setFpscr(value: number) {
+		const fpscr = value >>> 0
+		if (fpscr === this.fpscr) return
+		this.sink?.fpscr(this.fpscr)
+		this.fpscr = fpscr
 	}
 
 	setCpsr(value: number) {
@@ -601,6 +659,125 @@ export class A32Cpu {
 		// User mode writes only the flags (f) and GE (s); the control and extension fields are ignored.
 		const writable = (fields & 8 ? PSR_FLAGS_FIELD : 0) | (fields & 4 ? PSR_STATUS_FIELD : 0)
 		this.setCpsr((this.cpsr & ~writable) | (value & writable))
+		return this.next()
+	}
+
+	/** One VFP instruction whose condition passed. */
+	private vfp(v: VfpInstruction): number {
+		const env = new FpEnv(this.fpscr)
+		const fmt: FpFormat = v.double ? DOUBLE : SINGLE
+		const read = (index: number) => this.readFp(index, v.double)
+		switch (v.kind) {
+			case VK_ARITH: {
+				const n = read(v.n)
+				const m = read(v.m)
+				const d = read(v.d)
+				const product = () => fpMul(n, m, fmt, env)
+				let result: bigint
+				switch (v.op) {
+					case VA_MLA: result = fpAdd(d, product(), fmt, env); break
+					case VA_MLS: result = fpAdd(d, fpNeg(product(), fmt), fmt, env); break
+					case VA_NMLA: result = fpAdd(fpNeg(d, fmt), fpNeg(product(), fmt), fmt, env); break
+					case VA_NMLS: result = fpAdd(fpNeg(d, fmt), product(), fmt, env); break
+					case VA_MUL: result = product(); break
+					case VA_NMUL: result = fpNeg(product(), fmt); break
+					case VA_ADD: result = fpAdd(n, m, fmt, env); break
+					case VA_SUB: result = fpAdd(n, m, fmt, env, true); break
+					case VA_DIV: result = fpDiv(n, m, fmt, env); break
+					case VA_FMA: result = fpMulAdd(d, n, m, fmt, env); break
+					case VA_FMS: result = fpMulAdd(d, fpNeg(n, fmt), m, fmt, env); break
+					case VA_FNMA: result = fpMulAdd(fpNeg(d, fmt), fpNeg(n, fmt), m, fmt, env); break
+					// VFNMS.
+					default: result = fpMulAdd(fpNeg(d, fmt), n, m, fmt, env)
+				}
+				this.writeFp(v.d, v.double, result)
+				break
+			}
+			case VK_MOV_IMM: this.writeFp(v.d, v.double, expandImm8(v.imm, fmt)); break
+			case VK_UNARY: {
+				const m = read(v.m)
+				this.writeFp(v.d, v.double, v.op === VU_MOV ? m : v.op === VU_ABS ? fpAbs(m, fmt) : v.op === VU_NEG ? fpNeg(m, fmt) : fpSqrt(m, fmt, env))
+				break
+			}
+			case VK_COMPARE: {
+				const nzcv = fpCompare(read(v.d), v.zero ? 0n : read(v.m), v.signal, fmt, env)
+				this.setFpscr((this.fpscr & 0x0FFFFFFF) | (nzcv << 28) | env.flags)
+				return this.next()
+			}
+			case VK_CONVERT: this.writeFp(v.d, v.dDouble, fpConvert(read(v.m), fmt, v.dDouble ? DOUBLE : SINGLE, env)); break
+			case VK_TO_INT: this.writeFp(v.d, false, fpToFixed(read(v.m), 0, !v.signed, v.roundZero ? ROUND_ZERO : env.mode, 32, fmt, env)); break
+			case VK_FROM_INT: {
+				const bits = this.s[v.m]
+				this.writeFp(v.d, v.double, fixedToFp(BigInt(v.signed ? bits | 0 : bits), 0, fmt, env))
+				break
+			}
+			case VK_FIXED: {
+				if (v.load) {
+					const fixed = fpToFixed(read(v.d), v.imm, !v.signed, ROUND_ZERO, v.size, fmt, env)
+					// The result is extended to the register's width.
+					this.writeFp(v.d, v.double, v.signed ? BigInt.asUintN(fmt.bits, BigInt.asIntN(v.size, fixed)) : fixed)
+				} else {
+					const low = BigInt.asUintN(v.size, read(v.d))
+					this.writeFp(v.d, v.double, fixedToFp(v.signed ? BigInt.asIntN(v.size, low) : low, v.imm, fmt, env, ROUND_TIEEVEN))
+				}
+				break
+			}
+			case VK_CORE_SINGLE:
+				if (v.load) this.writeRegister(v.rt, this.s[v.n] | 0)
+				else this.writeSingle(v.n, this.r[v.rt] >>> 0)
+				return this.next()
+			case VK_CORE_PAIR: {
+				// Rt takes the low word, Rt2 the high.
+				const first = v.double ? 2 * v.m : v.m
+				if (v.load) {
+					this.writeRegister(v.rt, this.s[first] | 0)
+					this.writeRegister(v.rt2, this.s[first + 1] | 0)
+				} else {
+					this.writeSingle(first, this.r[v.rt] >>> 0)
+					this.writeSingle(first + 1, this.r[v.rt2] >>> 0)
+				}
+				return this.next()
+			}
+			case VK_VMRS:
+				if (v.rt === R_PC) this.setFlags(this.fpscr)
+				else this.writeRegister(v.rt, this.fpscr | 0)
+				return this.next()
+			case VK_VMSR:
+				this.setFpscr((this.fpscr & ~FPSCR_WRITABLE) | (this.r[v.rt] & FPSCR_WRITABLE))
+				return this.next()
+			case VK_TRANSFER: {
+				const base = v.rn === R_PC ? (this.pc + 8) & ~3 : this.r[v.rn]
+				const address = (v.up ? base + v.imm : base - v.imm) >>> 0
+				return this.fpTransfer(address, v.d, v.double ? 2 : 1, v.load, v.double)
+			}
+			case VK_BLOCK: {
+				const base = this.read(v.rn)
+				const bytes = 4 * v.imm
+				const start = (v.up ? base : base - bytes) >>> 0
+				return this.fpTransfer(start, v.d, v.imm, v.load, v.double, () => {
+					if (v.writeback) this.writeRegister(v.rn, v.up ? base + bytes : base - bytes)
+				})
+			}
+		}
+		if (env.flags) this.setFpscr(this.fpscr | (env.flags & FPSR_FLAGS))
+		return this.next()
+	}
+
+	/** `words` words between memory at `address` and the FP registers from `first`; checked before anything is written. */
+	private fpTransfer(address: number, first: number, words: number, load: boolean, double: boolean, writeback?: () => void): number {
+		if (address & 3) return this.fail(FAULT_ALIGNMENT, address)
+		for (let index = 0; index < words; index++) {
+			const at = (address + 4 * index) >>> 0
+			if (!this.accessible(at, 4)) return this.fail(FAULT_ADDRESS, at)
+		}
+		// D<n> starts at S<2n>.
+		const s = double ? 2 * first : first
+		writeback?.()
+		for (let index = 0; index < words; index++) {
+			const at = (address + 4 * index) >>> 0
+			if (load) this.writeSingle(s + index, this.load(at, 4) >>> 0)
+			else this.store(at, 4, this.s[s + index] | 0)
+		}
 		return this.next()
 	}
 

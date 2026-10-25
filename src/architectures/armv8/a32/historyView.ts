@@ -6,11 +6,11 @@ import type { PolledTerminal } from '../../../core/devices/polledTerminal'
  */
 
 import { formatRegister, formatWord } from '../../../core/format'
-import { disassembleA32 } from '../../arm/a32/disassemble'
-import { ARCH_V8 } from '../../arm/a32/isa'
+import { disassembleA32 } from '../shared/a32/disassemble'
+import { ARCH_V8 } from '../shared/a32/isa'
 import type { DescribedEffect, HistoryFormatter } from '../../contracts'
 import {
-	EFFECT_BREAK, EFFECT_CPSR, EFFECT_DISPLAY, EFFECT_EXIT, EFFECT_FRAME_DEPTH, EFFECT_HALTED, EFFECT_INPUT, EFFECT_KEY, EFFECT_MEMORY,
+	EFFECT_BREAK, EFFECT_CPSR, EFFECT_DISPLAY, EFFECT_EXIT, EFFECT_FP_REGISTER, EFFECT_FPSCR, EFFECT_FRAME_DEPTH, EFFECT_HALTED, EFFECT_INPUT, EFFECT_KEY, EFFECT_MEMORY,
 	EFFECT_MONITOR, EFFECT_OUTPUT, EFFECT_PC, EFFECT_REGISTER, EFFECT_WAITING, ENTRY_EDIT, type A32History,
 } from './history'
 import type { A32Executed } from './instructions'
@@ -23,13 +23,14 @@ class A32Record implements A32Executed {
 		readonly address: number,
 		readonly kind: 'instruction' | 'edit',
 		readonly word: number,
+		readonly passed: boolean,
 	) {}
 }
 
 /** Live over the log: entries come and go as the machine runs and rewinds. */
 export class A32HistoryView extends HistoryView<A32History, A32Record> {
 	protected record(log: A32History, index: number): A32Record {
-		return new A32Record(log.idAt(index), log.countAt(index), log.pcAt(index), log.kindAt(index) === ENTRY_EDIT ? 'edit' : 'instruction', log.wordAt(index))
+		return new A32Record(log.idAt(index), log.countAt(index), log.pcAt(index), log.kindAt(index) === ENTRY_EDIT ? 'edit' : 'instruction', log.wordAt(index), log.passedAt(index))
 	}
 }
 
@@ -64,6 +65,8 @@ export function a32HistoryFormatter(log: A32History | null, linux: A32Linux, key
 					case EFFECT_PC: at({ subject: 'PC', register: 'PC', value: b >>> 0 }); break
 					case EFFECT_CPSR: at({ subject: 'CPSR', register: 'CPSR', value: b >>> 0 }); break
 					case EFFECT_MEMORY: at({ subject: `[${formatWord(a)}]`, address: a, value: b >>> 0 }); break
+					case EFFECT_FP_REGISTER: at({ subject: `S${a}`, register: `S${a}`, value: b >>> 0 }); break
+					case EFFECT_FPSCR: at({ subject: 'FPSCR', register: 'FPSCR', value: b >>> 0 }); break
 					case EFFECT_MONITOR: at({ subject: 'exclusive monitor', text: b < 0 ? 'open' : formatWord(b) }); break
 					case EFFECT_OUTPUT: at({ subject: 'console', detail: JSON.stringify(linux.output.slice(b, b + 32)) }); break
 					case EFFECT_INPUT: at({ subject: 'read', detail: JSON.stringify(linux.input.slice(b, b + 32)) }); break

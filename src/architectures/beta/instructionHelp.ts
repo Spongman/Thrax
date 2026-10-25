@@ -1,4 +1,5 @@
-import { formatInstructionHelp, type InstructionHelp, type InstructionTable } from '../../core/instructionHelp'
+import { htmlInstructionLink } from './htmlReferences'
+import { preferInstructionLinks, formatInstructionHelp, instructionLinks, type InstructionHelp, type InstructionTable } from '../../core/instructionHelp'
 
 const ALU: InstructionTable = {
 	add: ['RA,RB,RC', 'Add RA and RB into RC, keeping the low 32 bits.'],
@@ -51,6 +52,15 @@ const DOCS: InstructionTable = {
 	svc: ['CODE', 'Invoke the supervisor-call exception with the supplied service code.'],
 }
 
+// Beta Documentation (6.004, Spring 2009): section 5 describes each instruction, section 7.2 the convenience macros.
+const PAGES: Readonly<Record<number, string>> = {
+	4: 'add addc and andc', 5: 'beq bf bne bt', 6: 'cmpeq cmpeqc cmple cmplec', 7: 'cmplt cmpltc div divc', 8: 'jmp ld ldr',
+	9: 'mul mulc or orc', 10: 'shl shlc shr shrc', 11: 'sra srac st sub', 12: 'subc xor xorc', 14: 'br move cmove push', 15: 'pop allocate deallocate',
+}
+const linkFallback = instructionLinks('https://ocw.mit.edu/courses/6-004-computation-structures-spring-2009/c1b18db634e4052b737b87e2021e4b12_MIT6_004s09_lab_beta_doc.pdf',
+	Object.fromEntries(Object.entries(PAGES).flatMap(([page, names]) => names.split(' ').map((name) => [name, Number(page)]))))
+const link = preferInstructionLinks(htmlInstructionLink, linkFallback)
+
 export function betaInstructionHelp(name: string, definitions: readonly string[] = []): InstructionHelp | null {
 	const lower = name.toLowerCase()
 	const entry = Object.prototype.hasOwnProperty.call(DOCS, lower) ? DOCS[lower] : undefined
@@ -61,6 +71,7 @@ export function betaInstructionHelp(name: string, definitions: readonly string[]
 		summary: entry?.[1] ?? 'Assembler macro; its expansion is shown below.',
 		kind: 'UASM macro', forms,
 		details: definitions.map((definition) => `\`${definition}\``),
+		link: entry && link(lower),
 		reference: entry ? 'https://ocw.mit.edu/courses/6-004-computation-structures-spring-2009/resources/mit6_004s09_lab_beta_summary/' : undefined,
 	})
 }

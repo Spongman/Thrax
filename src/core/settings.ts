@@ -128,13 +128,24 @@ export type SettingControl =
 	| { kind: 'check' }
 	| { kind: 'text', placeholder?: string }
 	/** One of a fixed list; values compare by identity. */
-	| { kind: 'choice', options: readonly { value: unknown, label: string }[] }
+	| { kind: 'choice', options: readonly ChoiceOption[] }
+
+/** A choice; `when` offers it only for settings it applies to, such as another field's value. */
+export interface ChoiceOption { value: unknown, label: string, when?(settings: TargetSettings): boolean }
+
+/** The options of a choice offered for the current settings. */
+export const offeredOptions = (options: readonly ChoiceOption[], settings: TargetSettings) =>
+	options.filter(option => !option.when || option.when(settings))
 
 /** One field of an architecture's settings. */
 export interface SettingField<Settings extends TargetSettings = TargetSettings> {
 	key: keyof Settings & string
-	/** Dialog group it is shown in; one titled like a shared group joins it. */
+	/** Architecture-specific dialog group; common controls are shown separately. */
 	group: string
+	/** Identifies the family selector without inspecting its key or display label. */
+	role?: 'variant'
+	/** Omit controls that do not apply to the selected native variant. */
+	visibleWhen?(settings: Settings): boolean
 	label: string
 	hint?: string
 	control: SettingControl
@@ -150,7 +161,9 @@ export interface SettingField<Settings extends TargetSettings = TargetSettings> 
 /** The settings an architecture declares, and how the dialog shows them. */
 export interface ArchitectureSettings<Settings extends TargetSettings = TargetSettings> {
 	defaults: Settings
-	/** In dialog order; groups appear in the order their first field does. */
+	/** Optional display titles for architecture-owned group IDs. */
+	groups?: readonly { id: string, title: string }[]
+	/** Field order within each group; the dialog orders the standard groups. */
 	fields: readonly SettingField<Settings>[]
 	/** Read-only lines shown under a group, such as what a choice resolves to. */
 	details?(group: string, settings: Settings): readonly string[]

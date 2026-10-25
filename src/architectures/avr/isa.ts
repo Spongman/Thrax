@@ -48,58 +48,9 @@ export const FIXED: Readonly<Record<string, number>> = {
 	icall: 0x9509,
 	lpm: 0x95c8
 }
-export const BRANCH: Readonly<Record<string, number>> = {
-	brcs: 0,
-	brlo: 0,
-	breq: 1,
-	brmi: 2,
-	brvs: 3,
-	brlt: 4,
-	brhs: 5,
-	brts: 6,
-	brie: 7,
-	brcc: 8,
-	brsh: 8,
-	brne: 9,
-	brpl: 10,
-	brvc: 11,
-	brge: 12,
-	brhc: 13,
-	brtc: 14,
-	brid: 15
-}
-export const MNEMONICS = [
-	...Object.keys(RR),
-	...Object.keys(IMM),
-	...Object.keys(SINGLE),
-	...Object.keys(FIXED),
-	...Object.keys(BRANCH),
-	'rjmp',
-	'rcall',
-	'jmp',
-	'call',
-	'lds',
-	'sts',
-	'ld',
-	'st',
-	'in',
-	'out',
-	'bset',
-	'bclr',
-	'sbrc',
-	'sbrs',
-	'bst',
-	'bld',
-	'clr',
-	'tst',
-	'lsl',
-	'rol',
-	'ser',
-	'sec',
-	'clc',
-	'sei',
-	'cli'
-]
+export { MNEMONICS, BRANCH } from './catalog'
+import { BRANCH } from './catalog'
+
 const signed = (value: number, bits: number) => (value << (32 - bits)) >> (32 - bits)
 const fixedEntries = Object.entries(FIXED)
 const rrEntries = Object.entries(RR)

@@ -8,6 +8,7 @@ export class M0Program extends ImageProgram<AssemblyImage> {
 		file: string,
 		assembled: AssemblyImage | null,
 		diagnostics: Diagnostic[],
+		readonly values: ReadonlyMap<string, number> = new Map(),
 	) {
 		super(file, assembled, diagnostics, { instructionBytes: 'mapping' })
 	}

@@ -11,7 +11,12 @@ const { Identifier, Number: NumberToken, String: StringToken, Operator, Newline,
 /** A token that may carry a number's exact value. */
 export interface A64Token extends Token {
 	big?: bigint
+	/** A real literal, such as 1.5 or 2e-3, whose value is `value`. */
+	real?: boolean
 }
+
+const FLOAT_START = /^[0-9]+(?:\.[0-9]*)?(?:e[0-9]*)?$/i
+const FLOAT = /^[0-9]+(?:\.[0-9]*(?:e[+-]?[0-9]+)?|e[+-]?[0-9]+)$/i
 
 const identifierStart = /[A-Za-z_.$]/
 const identifierPart = /[A-Za-z0-9_.$]/
@@ -80,6 +85,20 @@ export function tokenizeA64Line(text: string, file: string, line: number, column
 				continue
 			}
 			const value = parseA64Number(spelled)
+			if (value === null && FLOAT_START.test(spelled)) {
+				// A real such as 1.5, 2.5e-3 or 1e6, for floating-point immediates and data.
+				if (/e$/i.test(spelled) && /[+-]/.test(text[index] ?? '') && /[0-9]/.test(text[index + 1] ?? '')) {
+					index++
+					while (index < text.length && /[0-9]/.test(text[index])) index++
+				}
+				const real = text.slice(start, index)
+				if (FLOAT.test(real)) {
+					const token = push(NumberToken, start)
+					token.value = Number(real)
+					token.real = true
+					continue
+				}
+			}
 			if (value === null) {
 				tokens.push(makeToken(Invalid, `Malformed number ${spelled}`, file, line, column + start, index - start))
 				continue

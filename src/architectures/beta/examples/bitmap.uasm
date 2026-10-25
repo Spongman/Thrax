@@ -1,0 +1,30 @@
+// Bitmap Display
+// Fill a 32 x 32 grid of pixels. Tool settings: base address 0x1000, unit 8, width 256, height 256.
+
+.include "beta.uasm"
+
+	CMOVE(display, R0)      // pixel cursor
+	CMOVE(0, R1)            // row
+
+row:
+	CMOVE(0, R2)            // column
+
+column:
+	SHLC(R1, 19, R3)        // row scaled into the red channel
+	SHLC(R2, 3, R4)         // column scaled into the blue channel
+	OR(R3, R4, R5)
+	ST(R5, 0, R0)
+
+	ADDC(R0, 4, R0)
+	ADDC(R2, 1, R2)
+	CMPLTC(R2, 32, R6)
+	BT(R6, column)
+
+	ADDC(R1, 1, R1)
+	CMPLTC(R1, 32, R6)
+	BT(R6, row)
+
+	HALT()
+
+. = 0x1000
+display: STORAGE(32 * 32)   // 32 x 32 pixels, one 0x00RRGGBB word each, row-major

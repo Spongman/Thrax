@@ -1,0 +1,54 @@
+// Bitwise Operations
+// Print 12 AND 10, 12 OR 10 and 12 XOR 10.
+
+.include "beta.uasm"
+.options tty
+
+	CMOVE(stack, SP)
+	CMOVE(12, R1)           // R1 = 12 (binary: 1100)
+	CMOVE(10, R2)           // R2 = 10 (binary: 1010)
+
+	// AND operation
+	AND(R1, R2, R3)         // R3 = 12 & 10 = 8
+	PUSH(R3)
+	CALL(print_decimal, 1)
+
+	CMOVE(' ', R0)
+	WRCHAR()
+
+	// OR operation
+	OR(R1, R2, R3)          // R3 = 12 | 10 = 14
+	PUSH(R3)
+	CALL(print_decimal, 1)
+
+	CMOVE(' ', R0)
+	WRCHAR()
+
+	// XOR operation
+	XOR(R1, R2, R3)         // R3 = 12 ^ 10 = 6
+	PUSH(R3)
+	CALL(print_decimal, 1)
+
+	HALT()
+
+// print_decimal(n): write n >= 0 in decimal, leading digits first.
+print_decimal:
+	PUSH(LP) PUSH(BP)
+	MOVE(SP, BP)
+	PUSH(R0) PUSH(R1)
+	LD(BP, -12, R1)         // R1 <- n
+	DIVC(R1, 10, R0)        // R0 <- n / 10, the leading digits
+	BEQ(R0, pd_digit)
+	PUSH(R0)
+	CALL(print_decimal, 1)
+pd_digit:
+	MULC(R0, 10, R0)        // R0 <- n % 10, the last digit
+	SUB(R1, R0, R0)
+	ADDC(R0, '0', R0)
+	WRCHAR()
+	POP(R1) POP(R0)
+	MOVE(BP, SP)
+	POP(BP) POP(LP)
+	RTN()
+
+stack: STORAGE(64)

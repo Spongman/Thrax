@@ -1,0 +1,38 @@
+// Hello, THRAX!
+// Print a .text string with a print_string subroutine.
+
+.include "beta.uasm"
+.options tty
+
+	CMOVE(stack, SP)        // the stack grows up from the end of the program
+	CMOVE(message, R1)
+	PUSH(R1)
+	CALL(print_string, 1)
+	HALT()
+
+message: .text "Hello, THRAX!\n"
+
+// print_string(s): write the zero-terminated string at address s.
+print_string:
+	PUSH(LP) PUSH(BP)
+	MOVE(SP, BP)
+	PUSH(R0) PUSH(R1) PUSH(R2) PUSH(R3)
+	LD(BP, -12, R1)         // R1 <- address of the next character
+ps_next:
+	ANDC(R1, -4, R3)        // loads are whole words, so fetch the word holding it
+	LD(R3, 0, R0)
+	ANDC(R1, 3, R2)         // and shift its byte down; words are little-endian
+	SHLC(R2, 3, R2)
+	SHR(R0, R2, R0)
+	ANDC(R0, 0xFF, R0)
+	BEQ(R0, ps_done)        // stop at the terminating zero
+	WRCHAR()
+	ADDC(R1, 1, R1)
+	BR(ps_next)
+ps_done:
+	POP(R3) POP(R2) POP(R1) POP(R0)
+	MOVE(BP, SP)
+	POP(BP) POP(LP)
+	RTN()
+
+stack: STORAGE(64)

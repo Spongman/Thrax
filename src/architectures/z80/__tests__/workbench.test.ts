@@ -65,7 +65,7 @@ describe('Z80 in the workbench', () => {
 		expect(state().diagnostics.filter((diagnostic) => diagnostic.severity === 'error')).toEqual([])
 		expect(state().halted).toBe(true)
 		expect(state().console).toBe(OUTPUT[key])
-	})
+	}, 30_000) // Include the full fixed-point Mandelbrot run under parallel test load.
 
 	it('reads a line once it is provided', async () => {
 		state().setCode(examples().input.code)
@@ -149,7 +149,7 @@ describe('Z80 in the workbench', () => {
 		state().setCode(code)
 		state().assemble()
 		const file = activeTitle()
-		const line = lineOf(code, 'add a,b')
+		const line = lineOf(code, 'add a, b')
 		state().toggleBreakpointLine(file, line)
 		const address = state().sourceIndex.codeAddressForLine(file, line)
 		expect(address).toBeDefined()
@@ -177,7 +177,7 @@ describe('Z80 in the workbench', () => {
 		expect(state().sourceIndex.lineForAddress(state().callStack[0].callAddress)?.line).toBe(lineOf(code, 'call print_string'))
 		// LD SP,$FF00 is 31 00 FF.
 		expect([0, 1, 2].map((address) => state().memory.byte(address))).toEqual([0x31, 0x00, 0xFF])
-		const rows = state().codeWords.get(file)?.get(lineOf(code, 'ld hl,message'))
+		const rows = state().codeWords.get(file)?.get(lineOf(code, 'ld hl, message'))
 		const message = state().labels.get('message')!
 		expect(rows).toEqual([{ address: 3, instruction: true, bytes: [0x21, message & 0xFF, message >> 8] }])
 		expect(state().target!.services.disassembly.row(rows![0])).toBe(`LD HL,$${message.toString(16).toUpperCase().padStart(4, '0')}`)

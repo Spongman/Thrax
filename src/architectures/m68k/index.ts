@@ -1,3 +1,4 @@
+import { FPU_VIEWS, M68K_VARIANTS } from './variants'
 import { describeToken, installEditor } from './editor'
 import { createArchitectureServices } from '../../core/architectureServices'
 import type {
@@ -5,69 +6,47 @@ import type {
 	ArchitectureServices,
 } from '../contracts'
 import { assembleM68k } from './assembler'
-import { EXAMPLES, EXAMPLES_68010, EXAMPLES_68020 } from './examples'
 import { manifest } from './manifest'
-import { m68kProfile, REGISTERS } from './profile'
+import { m68kFpuProfile, m68kProfile } from './profile'
 import { M68kAssembly, m68kDisassembly } from './program'
 import { M68kRuntime } from './runtime'
-import { M68K_SETTINGS, type M68kSettings } from './settings'
+import { effectiveCoprocessor, M68K_SETTINGS, type M68kSettings } from './settings'
 
-const VARIANTS = {
-	'68000': {
-		language: 'thrax-m68k',
-		registers: REGISTERS,
-		registerBanks: [{ id: 'cpu', label: '68000 family' }],
-		examples: EXAMPLES
-	},
-	'68010': {
-		language: 'thrax-m68k',
-		registers: REGISTERS,
-		registerBanks: [{ id: 'cpu', label: '68000 family' }],
-		examples: EXAMPLES_68010
-	},
-	'68020': {
-		language: 'thrax-m68k',
-		registers: REGISTERS,
-		registerBanks: [{ id: 'cpu', label: '68000 family' }],
-		examples: EXAMPLES_68020
-	}
+const view = (settings: Partial<M68kSettings>) => {
+	const coprocessor = effectiveCoprocessor(settings)
+	return coprocessor === 'none' ? M68K_VARIANTS.select(settings.cpuModel).view : FPU_VIEWS[coprocessor]
 }
+const variantKey = (model: string, coprocessor: string) => (coprocessor === 'none' ? model : `${model}+${coprocessor}`)
 
 const definition: ArchitectureDefinition<ArchitectureServices<M68kSettings>> = {
 	...manifest,
-	language: 'thrax-m68k',
-	registers: REGISTERS,
-	registerBanks: [{ id: 'cpu', label: '68000 family' }],
-	examples: EXAMPLES,
+	...M68K_VARIANTS.select('68000').view,
 	settings: M68K_SETTINGS,
-	variant(settings) {
-		return settings.cpuModel === '68020'
-			? VARIANTS['68020']
-			: settings.cpuModel === '68010'
-				? VARIANTS['68010']
-				: VARIANTS['68000']
-	},
+	variant: settings => view(settings as Partial<M68kSettings>),
 	createServices() {
-		return createArchitectureServices<M68kSettings>(() => {
-			let model: M68kSettings['cpuModel'] = '68000'
+		return createArchitectureServices<M68kSettings>(({ program: inspectionProgram }) => {
+			const current = () => inspectionProgram() as M68kAssembly | null
+			const disassembly = () => m68kDisassembly(current()?.model ?? '68000', (current()?.coprocessor ?? 'none') !== 'none')
 			return {
 				assemble(sources, settings) {
-					model = settings.cpuModel
-					return assembleM68k(sources, model)
+					return assembleM68k(sources, settings.cpuModel, effectiveCoprocessor(settings))
 				},
 				createMachine(program, _settings, options) {
 					if (!(program instanceof M68kAssembly)) throw new Error('Not a 68000 program')
 					const next = new M68kRuntime(program, options)
 					return next
 				},
-				profile: () => m68kProfile,
+				profile: settings => (effectiveCoprocessor(settings) === 'none' ? m68kProfile : m68kFpuProfile),
 				disassembly: {
-					row: (row, next) => m68kDisassembly(model).row(row, next),
-					at: (memory, address) => m68kDisassembly(model).at(memory, address)
+					row: (row, next) => disassembly().row(row, next),
+					at: (memory, address) => disassembly().at(memory, address)
 				},
 				describeToken,
 				installEditor,
 			}
+		}, {
+			variant: settings => variantKey(settings.cpuModel, effectiveCoprocessor(settings)),
+			programVariant: program => variantKey((program as M68kAssembly).model, (program as M68kAssembly).coprocessor),
 		})
 	}
 }

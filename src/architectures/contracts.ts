@@ -47,11 +47,15 @@ export interface Disposable { dispose(): void }
 
 /** A bundled program offered in the Examples menu. */
 export interface Example {
+	/** Stable catalog key, retained when the shared menu copies an entry. */
+	id?: string
 	name: string
 	description: string
 	code: string
 	/** Shared or contributed tool panel ids to open and activate when loaded. */
 	tools?: readonly string[]
+	/** Human-readable hardware/extension requirements for the shared example menu. */
+	requirements?: readonly string[]
 	/** Optional colours for a byte-indexed Bitmap Display. */
 	bitmapPalette?: readonly number[]
 	/** Optional framebuffer format override for this example. */
@@ -83,6 +87,13 @@ export interface RegisterDescriptor {
 	format?: number
 	/** The register holding the high half when this one starts a double. */
 	pairsWith?: string
+	/** Big-endian pairs: this register holds the high half and `pairsWith` the low. */
+	highWordFirst?: boolean
+	/**
+	 * A non-IEEE float reading, by `FLOAT_ENCODINGS` key in `core/floatEncodings`.
+	 * On an integer register it adds single and double columns beside the integer ones.
+	 */
+	floatEncoding?: string
 }
 
 export interface RegisterBank { id: string; label: string }
@@ -148,6 +159,15 @@ export interface MachineProfile {
 	readonly dataBase?: number
 	/** Whether a value names memory, so only real addresses light across panels. */
 	isMappedAddress(value: number): boolean
+	/** How memory bytes read as text in the memory panel; ASCII when absent. */
+	readonly characterSet?: CharacterSet
+}
+
+/** A single-byte character set: Unicode code point of a byte, and the byte of a code point (-1 where none). */
+export interface CharacterSet {
+	readonly name: string
+	decode(byte: number): number
+	encode(code: number): number
 }
 
 /* -------------------------------------------------------------- program data */
@@ -336,6 +356,8 @@ export interface InstructionInfo {
 	readonly isLoad: boolean
 	readonly isBranch: boolean
 	readonly isJump: boolean
+	/** A computed PC cannot redirect before its own ALU/memory result exists. */
+	readonly controlResult?: 'alu' | 'load'
 }
 
 /**
@@ -414,6 +436,8 @@ export interface PipelineExecutionTiming {
 	completed: number
 	/** Speculative instructions discarded by this instruction. */
 	discarded: number
+	/** Clock ticks spent refilling after execution, distinct from discarded words. */
+	refillCycles?: number
 }
 
 /**
@@ -423,6 +447,11 @@ export interface PipelineExecutionTiming {
  * naming no option of a list takes its first.
  */
 export interface PipelineModel {
+	/** Identify the timing assumptions in the shared view. */
+	name?: string
+	description?: string
+	/** Stages producing computed PC values, when native metadata names them. */
+	resultStages?: { readonly alu: number, readonly load: number }
 	stages: readonly PipelineStage[]
 	/** Occupancy in cycles, at least one, of a stage for this executed instruction. */
 	stageCycles?(instruction: unknown, stage: number): number
@@ -447,6 +476,13 @@ export interface PipelineModel {
 }
 
 /* ----------------------------------------------------------------- machine */
+
+/** Terminal guest halt/exit, debugger Stop, or an unhandled native execution fault.
+ * Pauses, breakpoints and pending input are resumable and have no stop reason. */
+export type MachineStopReason =
+	| { kind: 'halt' }
+	| { kind: 'stop' }
+	| { kind: 'fault', message: string, address: number }
 
 /** What the debugger drives.  Faults are thrown as errors. */
 export interface RunControl {
@@ -487,6 +523,7 @@ export interface KeyboardDisplayDevice {
 
 /** One running instance of a program.  Owns its CPU, devices and history. */
 export interface Machine extends RunControl, Disposable {
+	readonly stopReason: MachineStopReason | null
 	readonly console: string
 	readonly callStack: readonly CallFrame[]
 	readonly program: LoadedProgram
@@ -496,9 +533,13 @@ export interface Machine extends RunControl, Disposable {
 	/** Every register by descriptor id, as a fresh record. */
 	registerValues(): Registers
 	/** A user edit, recorded as a history entry; false when refused. */
+	/** Integer bits, subject to native widths and restrictions. Invalid values or a
+	 * disposed session return false without changing state or retained history. */
 	writeRegister(id: string, value: RegisterValue): boolean
 	/** Side-effect-free memory reads, under a fresh identity per call. */
 	inspectMemory(): MemoryInspector
+	/** An integer byte edit at a nonnegative safe-integer address; native byte
+	 * masking is retained. Invalid edits and disposed sessions return false. */
 	writeByte(address: number, value: number): boolean
 	insertByte(address: number, limit: number, value: number): boolean
 	deleteByte(address: number, limit: number): boolean
@@ -544,6 +585,8 @@ export interface TokenDescription {
 
 /** What the editor integration reads from the workspace. */
 export interface EditorHost {
+	/** Current settings for variant-aware completion and instruction availability. */
+	settings?(): TargetSettings
 	files(): readonly { title: string, code: string }[]
 	active(): string | undefined
 	open(file: string, line: number): void
@@ -578,6 +621,12 @@ export interface ToolContribution {
  * call takes the architecture's own settings, as its definition declares them.
  */
 export interface ArchitectureServices<Settings extends TargetSettings = TargetSettings> extends Disposable {
+	/** Release the owned machine and inspection context. An expected machine
+	 * prevents a stale session from releasing its already-created replacement. */
+	releaseMachine(expected?: Machine): void
+	/** Load the selected backend before synchronous assembly, profiles or execution. */
+	prepare?(settings: Settings): Promise<void>
+	isPrepared?(settings: Settings): boolean
 	assemble(sources: AssemblySources, settings: Settings): AssembledProgram
 	/** A machine over a program that assembled without errors. */
 	createMachine(program: AssembledProgram, settings: Settings, options: MachineOptions): Machine
@@ -594,11 +643,15 @@ export interface ArchitectureServices<Settings extends TargetSettings = TargetSe
 
 /** What of a definition its settings can change. */
 export interface ArchitectureVariant {
+	/** Source-file naming can follow the selected dialect/backend. */
+	fileExtensions?: readonly string[]
 	/** Monaco language id its sources are edited in. */
 	language?: string
 	registers: readonly RegisterDescriptor[]
 	registerBanks?: readonly RegisterBank[]
 	examples: Readonly<Record<string, Example>>
+	/** Radix the register and memory panels first show integers in; 16 when absent. */
+	displayRadix?: 8 | 16
 }
 
 /** Factories own mutable state; definitions hold only configuration. */
@@ -612,6 +665,8 @@ export interface ArchitectureDefinition<Services = ArchitectureServices> {
 	registers: readonly RegisterDescriptor[]
 	registerBanks?: readonly RegisterBank[]
 	examples: Readonly<Record<string, Example>>
+	/** Radix the register and memory panels first show integers in; 16 when absent. */
+	displayRadix?: 8 | 16
 	/** Its own settings, persisted apart from every other architecture's. */
 	settings: ArchitectureSettings
 	/** Assembles several entry files at once, so "assemble all" is offered. */

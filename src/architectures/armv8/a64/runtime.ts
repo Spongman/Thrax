@@ -1,5 +1,5 @@
+import { RamInspector } from '../../../core/ramInspector'
 import { notifyHistorySeek } from '../../../core/observer'
-import { rewindHistoryTo } from '../../../core/historyCursor'
 /**
  * An A64Machine behind the neutral machine contract: the run loop,
  * breakpoints, pacing, observers and user edits the debugger drives.
@@ -21,30 +21,12 @@ import { a64RegisterValues, editTarget } from './registers'
 
 const READ_INPUT: PendingInput = Object.freeze({ type: 'string', prompt: 'read() is waiting for input' })
 
-/** Debugger reads of memory; nothing here can fault, record or reach a device. */
-class A64Memory implements MemoryInspector {
-	readonly wordBytes = 4
-	readonly littleEndian = true
-
-	constructor(private readonly bytes: Uint8Array, private readonly base: number) {}
-
-	byte(address: number): number | undefined {
-		const offset = address - this.base
-		return offset >= 0 && offset < this.bytes.length ? this.bytes[offset] : undefined
-	}
-
-	word(address: number): number | undefined {
-		const at = (address - this.base) & ~3
-		const bytes = this.bytes
-		if (address < this.base || at > bytes.length - 4) return undefined
-		return (bytes[at] | (bytes[at + 1] << 8) | (bytes[at + 2] << 16) | (bytes[at + 3] << 24)) >>> 0
-	}
-}
-
 export interface A64RuntimeOptions {
 	memoryBytes: number
 	historyLimit: number
 	speed: number | null
+	/** SIMD&FP instructions run; on unless false. */
+	floatingPoint?: boolean
 }
 
 export class A64Runtime implements Machine {
@@ -69,6 +51,11 @@ export class A64Runtime implements Machine {
 		depth: () => this.machine.callStack.depth,
 		step: () => this.advance() === STEP_WAIT ? ExecutionStep.WAIT : ExecutionStep.ADVANCED,
 	})
+	private readonly historyCommands = this.execution.historyCommands({
+		history: () => this.history, cursor: () => this.historyCursor,
+		undo: () => this.machine.history?.stepBack() ?? false,
+		after: () => this.resumed(),
+	})
 
 	private readonly memoryEdits = new MemoryEdits({
 		region: () => ({ start: this.machine.cpu.base, end: this.machine.cpu.base + this.machine.cpu.memory.length - 1 }),
@@ -78,7 +65,7 @@ export class A64Runtime implements Machine {
 	})
 
 	constructor(readonly program: A64Assembly, options: A64RuntimeOptions) {
-		this.machine = new A64Machine({ memoryBytes: options.memoryBytes, historyLimit: options.historyLimit })
+		this.machine = new A64Machine({ memoryBytes: options.memoryBytes, historyLimit: options.historyLimit, floatingPoint: options.floatingPoint })
 		this.machine.load(program.image())
 		this.speed = options.speed
 		this.history = new A64HistoryView(this.machine.history)
@@ -87,6 +74,7 @@ export class A64Runtime implements Machine {
 	}
 
 	get pc() { return this.machine.cpu.pc }
+	get stopReason() { return this.execution.reason(this.machine.halted, this.fault, this.machine.cpu.faultAddress) }
 	get halted() { return this.machine.halted || this.execution.stopped || this.fault !== null }
 	get pendingInput() { return !this.halted && this.machine.linux.waiting ? READ_INPUT : null }
 	get instructionCount() { return this.machine.instructionCount }
@@ -153,7 +141,8 @@ export class A64Runtime implements Machine {
 		if (flags & INSN_LOAD) for (const observer of observers) observer.onMemoryRead?.(memoryAddress, memorySize)
 		if (flags & INSN_STORE) {
 			// The stored register, which the store itself leaves as it was.
-			const value = Number(this.machine.cpu.read(word & 31) & MASK32)
+			const cpu = this.machine.cpu
+			const value = Number((decode(word).fp ? cpu.v[2 * (word & 31)] : cpu.read(word & 31)) & MASK32)
 			for (const observer of observers) observer.onMemoryWrite?.(memoryAddress, memorySize, value)
 		}
 		if (flags & INSN_BRANCH) {
@@ -200,27 +189,21 @@ export class A64Runtime implements Machine {
 	pause() { this.execution.pause() }
 	stop() { this.execution.stop() }
 	stepBack(): boolean {
-		const log = this.machine.history
-		if (!log || !log.stepBack()) return false
-		this.resumed()
-		return true
+		return this.historyCommands.stepBack()
 	}
 
 	rewindTo(id: number): boolean {
-		const log = this.machine.history
-		return !!log && rewindHistoryTo(this.history, () => this.historyCursor, id, () => log.stepBack(), () => this.resumed())
+		return this.historyCommands.rewindTo(id)
 	}
 
 	/** Back from a rewind: whatever ended the run is undone with it. */
 	private resumed() {
 		this.fault = null
-		this.execution.stopped = false
-		this.paused = true
-		this.execution.running = false
 		this.seekObservers()
 	}
 
 	setProgramCounter(address: number) {
+		if (!this.execution.canEdit(address)) return
 		this.machine.editPc(address)
 		this.fault = null
 		this.execution.stopped = false
@@ -247,13 +230,17 @@ export class A64Runtime implements Machine {
 	}
 
 	writeRegister(id: string, value: RegisterValue): boolean {
+		if (!this.execution.canEdit(value)) return false
 		const target = editTarget(id)
 		if (!target) return false
 		const machine = this.machine
 		switch (target.kind) {
 			case 'x': return machine.editRegister(target.index, BigInt(value))
-			case 'w': return machine.editW(target.index, Number(value))
+			case 'w': return machine.editW(target.index, Number(BigInt.asUintN(32, BigInt(value))))
 			case 'nzcv': return machine.editFlags(Number(BigInt(value) >> 28n) & 15)
+			case 'vlow': case 'vhigh': return machine.editVector(target.index, Number(BigInt.asUintN(32, BigInt(value))), target.kind === 'vhigh')
+			case 'fpcr': return machine.editFpcr(Number(BigInt.asUintN(32, BigInt(value))))
+			case 'fpsr': return machine.editFpsr(Number(BigInt.asUintN(32, BigInt(value))))
 		}
 		const changed = machine.editPc(Number(BigInt.asUintN(64, BigInt(value))))
 		this.fault = null
@@ -263,19 +250,22 @@ export class A64Runtime implements Machine {
 
 	inspectMemory(): MemoryInspector {
 		const cpu = this.machine.cpu
-		return new A64Memory(cpu.memory, cpu.base)
+		return new RamInspector(cpu.memory, { wordBytes: 4, littleEndian: true, base: cpu.base })
 	}
 
 	writeByte(address: number, value: number) {
+		if (!this.execution.canEdit(value) || !Number.isSafeInteger(address) || address < 0) return false
 		return this.machine.editBytes(address, [value])
 	}
 
 	/** Shifts `[address, limit]` up a byte; what is past the last non-zero byte stays. */
 	insertByte(address: number, limit: number, value: number): boolean {
+		if (!this.execution.canEdit(value)) return false
 		return this.memoryEdits.insert(address, limit, value)
 	}
 
 	deleteByte(address: number, limit: number): boolean {
+		if (!this.execution.canEdit(address)) return false
 		return this.memoryEdits.delete(address, limit)
 	}
 
@@ -284,7 +274,6 @@ export class A64Runtime implements Machine {
 	}
 
 	dispose() {
-		this.onProgress = null
 		this.stop()
 		this.execution.dispose()
 	}

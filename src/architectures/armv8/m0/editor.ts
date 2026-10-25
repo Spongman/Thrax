@@ -2,7 +2,7 @@ import { describeM0Token } from './dataTips'
 import { disposableGroup } from '../../../core/disposableScope'
 import { registerAssemblyLanguage, registerTokenHover } from '../../../services/assemblyLanguage'
 import type * as Monaco from 'monaco-editor'
-import { armConfiguration } from '../../arm/editor/grammar'
+import { armConfiguration } from '../shared/editor/grammar'
 import type { EditorHost } from '../../contracts'
 import { MNEMONICS as mnemonics, LANGUAGE, SPECIAL } from './isa'
 

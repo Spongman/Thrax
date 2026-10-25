@@ -1,3 +1,4 @@
+import { htmlInstructionLink } from './htmlReferences'
 /**
  * What each mnemonic does, in one line, and how that reads as a tip.
  *
@@ -13,7 +14,7 @@
  * (`simulator.ts:1641`).
  */
 
-import { formatInstructionHelp, instructionForms, type InstructionHelp } from '../../../core/instructionHelp'
+import { preferInstructionLinks, formatInstructionHelp, instructionForms, instructionLinks, type InstructionHelp } from '../../../core/instructionHelp'
 import { basicForms, pseudoForms } from './isa'
 
 /** Keyed by the lower case mnemonic, as `isa.ts` spells it. */
@@ -450,6 +451,30 @@ export function instructionSignature(mnemonic: string): string | undefined {
 	return basicForms(name)[0]?.example ?? pseudoForms(name)[0]?.example
 }
 
+// MIPS32 Architecture For Programmers Vol. II (MD00086) rev. 2.00 PDF pages.  Pseudo
+// instructions with one obvious base instruction open its page; the rest have no entry.
+const manualPages = new Map(Object.entries({
+	43: 'abs.s abs.d', 44: 'add', 45: 'add.s add.d', 46: 'addi subi', 47: 'addiu subiu', 48: 'addu move', 52: 'and', 53: 'andi',
+	54: 'b', 55: 'bal', 56: 'bc1f', 60: 'bc1t', 70: 'beq beqz', 73: 'bgez', 74: 'bgezal', 79: 'bgtz', 82: 'blez', 85: 'bltz',
+	86: 'bltzal', 91: 'bne bnez', 94: 'break', 95: 'c.eq.s c.eq.d c.lt.s c.lt.d c.le.s c.le.d', 109: 'ceil.w.s ceil.w.d',
+	113: 'clo', 114: 'clz', 119: 'cvt.d.s cvt.d.w', 124: 'cvt.s.d cvt.s.w', 127: 'cvt.w.s cvt.w.d', 132: 'div', 134: 'div.s div.d',
+	135: 'divu', 139: 'eret', 145: 'floor.w.s floor.w.d', 148: 'j', 149: 'jal', 150: 'jalr', 155: 'jr', 160: 'lb', 161: 'lbu',
+	162: 'ldc1 l.d', 165: 'lh', 166: 'lhu', 167: 'll', 169: 'lui', 171: 'lw', 172: 'lwc1 l.s', 174: 'lwl', 177: 'lwr', 182: 'madd',
+	185: 'maddu', 186: 'mfc0', 187: 'mfc1 mfc1.d', 191: 'mfhi', 192: 'mflo', 193: 'mov.s mov.d', 194: 'movf', 195: 'movf.s movf.d',
+	197: 'movn', 198: 'movn.s movn.d', 200: 'movt', 201: 'movt.s movt.d', 203: 'movz', 204: 'movz.s movz.d', 206: 'msub',
+	209: 'msubu', 210: 'mtc0', 211: 'mtc1 mtc1.d', 215: 'mthi', 216: 'mtlo', 217: 'mul', 218: 'mul.s mul.d', 219: 'mult',
+	220: 'multu', 221: 'neg.s neg.d', 226: 'nop', 227: 'nor not', 228: 'or', 229: 'ori', 248: 'round.w.s round.w.d', 252: 'sb',
+	253: 'sc', 257: 'sdc1 s.d', 263: 'sh', 264: 'sll', 265: 'sllv', 266: 'slt', 267: 'slti', 268: 'sltiu', 269: 'sltu',
+	270: 'sqrt.s sqrt.d', 271: 'sra', 272: 'srav', 273: 'srl', 274: 'srlv', 276: 'sub neg', 277: 'sub.s sub.d', 278: 'subu negu',
+	280: 'sw', 281: 'swc1 s.s', 283: 'swl', 285: 'swr', 295: 'syscall', 296: 'teq', 297: 'teqi', 298: 'tge', 299: 'tgei',
+	300: 'tgeiu', 301: 'tgeu', 309: 'tlt', 310: 'tlti', 311: 'tltiu', 312: 'tltu', 313: 'tne', 314: 'tnei',
+	317: 'trunc.w.s trunc.w.d', 323: 'xor', 324: 'xori',
+}).flatMap(([page, names]) => names.split(' ').map((name) => [name, Number(page)] as const)))
+// Mirrors: https://pages.hmc.edu/harris/class/e155/11/MIPS32InstructionSet.pdf (rev. 3.00, not byte-identical; page numbers differ)
+const manual = 'https://archive.org/download/MIPS_Technologies_MD00086/MIPS_Technologies_MD00086.pdf'
+const instructionLinkFallback = instructionLinks(manual, (name) => manualPages.get(name))
+export const instructionLink = preferInstructionLinks(htmlInstructionLink, instructionLinkFallback)
+
 /** Instruction help shared by source, disassembly and completion providers. */
 export function instructionHelp(mnemonic: string): InstructionHelp | null {
 	const summary = instructionDoc(mnemonic)
@@ -458,7 +483,7 @@ export function instructionHelp(mnemonic: string): InstructionHelp | null {
 	const basic = basicForms(name).map((form) => form.example)
 	const pseudo = pseudoForms(name).map((form) => form.example)
 	return formatInstructionHelp(name, {
-		summary, title: INSTRUCTION_NAMES[name],
+		summary, title: INSTRUCTION_NAMES[name], link: instructionLink(name),
 		kind: basic.length > 0 ? 'basic instruction' : 'pseudo-instruction',
 		forms: basic.length > 0 ? basic : pseudo,
 		details: basic.length > 0 && pseudo.length > 0 ? [`Pseudo forms: ${instructionForms(pseudo)}`] : [],

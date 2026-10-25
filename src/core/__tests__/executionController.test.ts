@@ -18,6 +18,31 @@ function fixture() {
 }
 
 describe('shared execution policy', () => {
+	it('accepts integer debugger values only while the session is live', () => {
+		const { controller } = fixture()
+		for (const value of [0, -1, 0xffffffff, 0xffffffffffffffffn]) expect(controller.canEdit(value)).toBe(true)
+		for (const value of [NaN, Infinity, 1.5, '1', null, undefined]) expect(controller.canEdit(value)).toBe(false)
+		controller.dispose()
+		expect(controller.canEdit(1)).toBe(false)
+		expect(controller.canEdit(1n)).toBe(false)
+	})
+
+	it('clears Stop and publishes once only after a successful native undo', () => {
+		const f = fixture(), after = vi.fn()
+		f.controller.stop()
+		expect(f.controller.stepBack(() => false, after)).toBe(false)
+		expect(f.controller.stopped).toBe(true)
+		expect(after).not.toHaveBeenCalled()
+		expect(f.controller.stepBack(() => true, after)).toBe(true)
+		expect(f.controller.stopped).toBe(false)
+		expect(f.host.paused).toBe(true)
+		expect(after).toHaveBeenCalledOnce()
+		f.controller.dispose()
+		const undo = vi.fn(() => true)
+		expect(f.controller.stepBack(undo, after)).toBe(false)
+		expect(undo).not.toHaveBeenCalled()
+	})
+
 	it('yields a paced run made entirely of code without source rows', async () => {
 		const f = fixture()
 		f.speed(30)
@@ -80,6 +105,7 @@ describe('shared execution policy', () => {
 
 	it('does not let an old cancelled run clear or advance a newer run', async () => {
 		const f = fixture()
+		const progress = f.host.onProgress
 		const yields: (() => void)[] = []
 		f.clock.yield = () => new Promise((resolve) => yields.push(resolve))
 		const old = f.controller.runUntil(() => false, 1)
@@ -95,7 +121,8 @@ describe('shared execution policy', () => {
 		yields[1]()
 		await current
 		expect(f.host.pc).toBe(2)
-		expect(f.host.onProgress).toHaveBeenCalledTimes(2)
+		expect(progress).toHaveBeenCalledTimes(2)
+		expect(f.host.onProgress).toBeNull()
 	})
 
 	it('changes speed during a sliced wait without accumulating a large catch-up burst', async () => {
