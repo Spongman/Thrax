@@ -1,11 +1,64 @@
 .history-retention {
-	flex: 0 0 auto;
-	padding: 3px 8px;
-	border-top: 1px solid var(--border-color, #444);
+	position: absolute;
+	inset: 6px 18px 6px 6px;
+	z-index: 1;
+	pointer-events: none;
 	font-size: 11px;
 	line-height: 1.5;
 }
 
-.history-retention summary {
+.history-retention-info {
+	position: absolute;
+	top: 0;
+	right: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 24px;
+	height: 24px;
+	padding: 3px;
+	border: 1px solid var(--border);
+	border-radius: 50%;
+	background: var(--surface-raised);
+	color: var(--text-secondary);
+	pointer-events: auto;
 	cursor: pointer;
+}
+
+.history-retention-info:hover,
+.history-retention-info:focus-visible {
+	color: var(--text-bright);
+	background: var(--surface-input-hover);
+}
+
+.history-retention-info:focus-visible {
+	outline: 1px solid var(--accent);
+	outline-offset: 2px;
+}
+
+.history-retention-info svg {
+	width: 16px;
+	height: 16px;
+}
+
+.history-retention-tooltip {
+	position: absolute;
+	top: 24px;
+	right: 0;
+	width: 440px;
+	max-width: 100%;
+	max-height: calc(100% - 24px);
+	overflow: auto;
+	box-sizing: border-box;
+	padding: 8px 10px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	background: var(--surface-overlay);
+	color: var(--text-primary);
+	box-shadow: 0 3px 10px #0006;
+	pointer-events: auto;
+}
+
+.history-retention-tooltip > div {
+	margin-top: 4px;
 }

@@ -313,20 +313,6 @@ function HistoryView({ entries, cursor, version, sourceOf, onSelect, onSetNow, o
 								    hovering either lights it in the editor without moving anything. */}
 								<button
 									type="button"
-									className={`history-address${entry.address === hoveredAddress ? ' address-hovered' : ''}`}
-									title={source ? `Go to ${source.file}:${source.line}` : 'No source line for this address'}
-									disabled={source === null}
-									onMouseEnter={() => onHoverAddress(entry.address)}
-									onMouseLeave={() => onHoverAddress(null)}
-									onClick={(event) => {
-										event.stopPropagation()
-										if (source) onSelectSource(source.file, source.line)
-									}}
-								>
-									<HexAddress value={entry.address} />
-								</button>
-								<button
-									type="button"
 									className="history-source"
 									title={source ? `Go to ${source.file}:${source.line}` : ''}
 									disabled={source === null}
@@ -338,6 +324,20 @@ function HistoryView({ entries, cursor, version, sourceOf, onSelect, onSetNow, o
 									}}
 								>
 									{source ? `${source.file}:${source.line}` : ''}
+								</button>
+								<button
+									type="button"
+									className={`history-address${entry.address === hoveredAddress ? ' address-hovered' : ''}`}
+									title={source ? `Go to ${source.file}:${source.line}` : 'No source line for this address'}
+									disabled={source === null}
+									onMouseEnter={() => onHoverAddress(entry.address)}
+									onMouseLeave={() => onHoverAddress(null)}
+									onClick={(event) => {
+										event.stopPropagation()
+										if (source) onSelectSource(source.file, source.line)
+									}}
+								>
+									<HexAddress value={entry.address} />
 								</button>
 								<button
 									type="button"

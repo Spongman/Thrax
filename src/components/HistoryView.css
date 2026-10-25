@@ -1,4 +1,5 @@
 .history-view {
+	position: relative;
 	display: flex;
 	flex-direction: column;
 	height: 100%;
@@ -63,8 +64,10 @@
 
 /* The instruction about to run, marked as the editor marks it. */
 .history-next {
-	width: 0;
+	/* Keep the columns aligned whether this row carries the marker or not. */
+	width: 7px;
 	height: 0;
+	box-sizing: border-box;
 	flex: none;
 	margin-right: 2px;
 }
