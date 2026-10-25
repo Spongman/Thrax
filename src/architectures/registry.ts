@@ -9,6 +9,7 @@ import { manifest as mipsManifest } from './mips/manifest'
 import { manifest as mos6502Manifest } from './mos6502/manifest'
 import { manifest as riscvManifest } from './riscv/manifest'
 import { manifest as z80Manifest } from './z80/manifest'
+import { manifest as m6800Manifest } from './m6800/manifest'
 import type { TargetSettings } from '../core/settings'
 
 export type TargetSettingsSelector = (definition: ArchitectureDefinition<unknown>) => TargetSettings
@@ -47,6 +48,7 @@ const loaders: Record<string, Loader<ArchitectureServices>> = {
 	avr: () => import('./avr'),
 	riscv: () => import('./riscv'),
 	m68k: () => import('./m68k'),
+	m6800: () => import('./m6800'),
 }
 
 const manifests: Readonly<Record<string, ArchitectureManifest>> = {
@@ -58,6 +60,7 @@ const manifests: Readonly<Record<string, ArchitectureManifest>> = {
 	avr: avrManifest,
 	riscv: riscvManifest,
 	m68k: m68kManifest,
+	m6800: m6800Manifest,
 }
 
 /** Ids of every architecture the catalog can load. */
