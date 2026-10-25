@@ -15,6 +15,7 @@ import { manifest as powerpcManifest } from './powerpc/manifest'
 import { manifest as alphaManifest } from './alpha/manifest'
 import { manifest as i8086Manifest } from './i8086/manifest'
 import { manifest as tms9900Manifest } from './tms9900/manifest'
+import { manifest as sparcManifest } from './sparc/manifest'
 import type { TargetSettings } from '../core/settings'
 
 export type TargetSettingsSelector = (definition: ArchitectureDefinition<unknown>) => TargetSettings
@@ -59,6 +60,7 @@ const loaders: Record<string, Loader<ArchitectureServices>> = {
 	alpha: () => import('./alpha'),
 	i8086: () => import('./i8086'),
 	tms9900: () => import('./tms9900'),
+	sparc: () => import('./sparc'),
 }
 
 const manifests: Readonly<Record<string, ArchitectureManifest>> = {
@@ -76,6 +78,7 @@ const manifests: Readonly<Record<string, ArchitectureManifest>> = {
 	alpha: alphaManifest,
 	i8086: i8086Manifest,
 	tms9900: tms9900Manifest,
+	sparc: sparcManifest,
 }
 
 /** Ids of every architecture the catalog can load. */
