@@ -23,6 +23,7 @@ describe.each(knownArchitectures())('%s shared debugger policy', (id) => {
 		for (const settings of architectureVariants(definition)) {
 			const services = definition.createServices()
 			const code = variantOf(definition, settings).examples.sum.code
+			await services.prepare?.(settings)
 			const program = services.assemble({ files: [{ name: 'main.asm', code }], entries: ['main.asm'] }, settings)
 			const machine = services.createMachine(program, settings, { speed: null, historyLimit: 100_000 })
 			try {
@@ -62,6 +63,7 @@ describe.each(knownArchitectures())('%s shared debugger policy', (id) => {
 		for (const settings of architectureVariants(definition)) {
 			const services = definition.createServices()
 			const code = variantOf(definition, settings).examples.ackermann.code
+			await services.prepare?.(settings)
 			const program = services.assemble({ files: [{ name: 'main.asm', code }], entries: ['main.asm'] }, settings)
 			expect(program.diagnostics.filter((d) => d.severity === 'error')).toEqual([])
 			const machine = services.createMachine(program, settings, { speed: null, historyLimit: 100_000 })
@@ -92,6 +94,7 @@ describe.each(knownArchitectures())('%s shared debugger policy', (id) => {
 		for (const settings of architectureVariants(definition)) {
 			const services = definition.createServices()
 			const code = variantOf(definition, settings).examples.sum.code
+			await services.prepare?.(settings)
 			const program = services.assemble({ files: [{ name: 'main.asm', code }], entries: ['main.asm'] }, settings)
 			const machine = services.createMachine(program, settings, { speed: null, historyLimit: 1000 })
 			try {
@@ -124,6 +127,7 @@ describe.each(knownArchitectures())('%s shared debugger policy', (id) => {
 it('keeps AVR shifts within flash, register aliases, special registers and SRAM', async () => {
 	const { definition } = await activateArchitecture('avr')
 	const services = definition.createServices(), settings = definition.settings.defaults
+	await services.prepare?.(settings)
 	const program = services.assemble({ files: [{ name: 'main.asm', code: 'break' }], entries: ['main.asm'] }, settings)
 	const machine = services.createMachine(program, settings, { speed: null, historyLimit: 1000 })
 	try {

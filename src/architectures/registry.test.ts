@@ -11,6 +11,39 @@ function moduleFor(id: string, dispose = vi.fn()) {
 }
 
 describe('architecture activation', () => {
+	it('prepares the requested settings before committing and releases a superseded preparation', async () => {
+		let finish!: () => void
+		const dispose = vi.fn(), prepare = vi.fn(() => new Promise<void>(resolve => { finish = resolve }))
+		const next = moduleFor('next', dispose)
+		const registry = createArchitectureRegistry<{ value: string, prepare?(settings: Record<string, unknown>): Promise<void> }>({
+			first: async () => moduleFor('first'),
+			next: async () => ({ default: { ...next.default, createServices: () => ({ value: 'next', dispose, prepare }) } }),
+		})
+		const first = await registry.activate('first')
+		const pending = registry.activate('next', () => ({ executionState: 'cortex-m0' }))
+		await vi.waitFor(() => expect(prepare).toHaveBeenCalledWith({ executionState: 'cortex-m0' }))
+		expect(registry.current()).toBe(first)
+		await registry.activate('first')
+		finish()
+		await expect(pending).rejects.toThrow('superseded')
+		expect(dispose).toHaveBeenCalledOnce()
+		expect(first.isCurrent()).toBe(true)
+		registry.dispose()
+	})
+
+	it('retains the previous activation when backend preparation fails', async () => {
+		const dispose = vi.fn(), next = moduleFor('broken', dispose)
+		const registry = createArchitectureRegistry<{ value: string }>({
+			first: async () => moduleFor('first'),
+			broken: async () => ({ default: { ...next.default, createServices: () => ({ value: 'broken', dispose, prepare: async () => { throw new Error('backend download failed') } }) } }),
+		})
+		const first = await registry.activate('first')
+		await expect(registry.activate('broken')).rejects.toThrow('backend download failed')
+		expect(dispose).toHaveBeenCalledOnce()
+		expect(registry.current()).toBe(first)
+		registry.dispose()
+	})
+
 	it('keeps the old activation usable when loading a replacement fails', async () => {
 		const registry = createArchitectureRegistry<{ value: string }>({
 			first: async () => moduleFor('first'),

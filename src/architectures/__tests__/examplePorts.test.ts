@@ -1,7 +1,7 @@
 /** Check the ports through the same assembler/runtime contracts the workbench uses. */
 import { describe, expect, it } from 'vitest'
 import { variantOf, type ArchitectureDefinition, type Machine } from '../contracts'
-import type { TargetSettings } from '../../core/settings'
+import { architectureVariants } from './helpers'
 import { activateArchitecture, knownArchitectures } from '../registry'
 import { CORE_EXAMPLE_IDS } from '../../core/exampleCatalog'
 import { BYTE_PALETTE, pixelBytes, pixelColor } from '../../components/bitmapPixels'
@@ -15,20 +15,7 @@ const EXPECTED_MANDELBROT_PALETTE = [
 ]
 
 function variants(definition: ArchitectureDefinition) {
-	const defaults = definition.settings.defaults
-	const configurations = [{ label: 'default', settings: defaults }]
-	const seen = new Set([variantOf(definition, defaults)])
-	for (const field of definition.settings.fields) {
-		if (field.control.kind !== 'choice') continue
-		for (const option of field.control.options) {
-			const settings: TargetSettings = { ...defaults, [field.key]: option.value }
-			const variant = variantOf(definition, settings)
-			if (seen.has(variant)) continue
-			seen.add(variant)
-			configurations.push({ label: `${field.key}=${option.value}`, settings })
-		}
-	}
-	return configurations
+	return architectureVariants(definition).map(settings => ({ label: JSON.stringify(settings), settings }))
 }
 
 function finish(machine: Machine, inputSupplied = false) {
@@ -51,6 +38,7 @@ describe.each(knownArchitectures())('%s example ports', (id) => {
 				const example = variant.examples.mandelbrot
 				const context = `${id}/${label}/mandelbrot`
 				expect(example.tools, context).toContain('bitmap')
+				await services.prepare?.(settings)
 				const program = services.assemble({ files: [{ name: 'main.asm', code: example.code }], entries: ['main.asm'] }, settings)
 				expect(program.diagnostics.filter((d) => d.severity === 'error'), context).toEqual([])
 				const machine = services.createMachine(program, settings, { speed: null, historyLimit: 100 })
@@ -61,13 +49,20 @@ describe.each(knownArchitectures())('%s example ports', (id) => {
 					const base = services.profile(settings).dataBase!
 					const actual: (number | undefined)[] = [], expected: number[] = []
 					for (let row = 0; row < 32; row++) for (let col = 0; col < 32; col++) {
-						const highPrecision = id === 'armv8' && settings.executionState !== 'cortex-m0'
+						const highPrecision = id === 'armv8' && ['aarch64', 'aarch32'].includes(String(settings.executionState))
 						const scale = highPrecision ? 65536 : 256
 						const cx = -2 * scale + col * (highPrecision ? 6144 : 20)
 						const cy = (highPrecision ? -98304 : -320) + row * (highPrecision ? 6144 : 20)
 						let x = 0, y = 0, iteration = 0
 						for (; iteration < 16; iteration++) {
-							if (id === 'mips') {
+							if (id === 's360' && (settings.cpuModel !== '360-30' || settings.floatingPoint !== false)) {
+								// Long hexadecimal floating point keeps at least 53 bits, like a double.
+								const xx = x * x, yy = y * y
+								if (xx + yy > 4) break
+								y = 2 * x * y - 1.25 + row * 2.5 / 32
+								x = xx - yy - 2 + col * 2.5 / 32
+							// The x86 coprocessor and Alpha ports are the MIPS binary32 program.
+							} else if (id === 'mips' || id === 'alpha' || id === 'powerpc' || id === 'sparc' || id === 'vax' && settings.fpu !== 'none' || id === 'pdp11' && settings.floatingPoint !== 'none' || (id === 'i8086' || id === 'm68k') && settings.coprocessor !== 'none' || id === 'riscv' && settings.float !== 'none' || highPrecision && settings.floatingPoint !== false) {
 								const xx = Math.fround(x * x), yy = Math.fround(y * y)
 								if (Math.fround(xx + yy) > 4) break
 								y = Math.fround(Math.fround(Math.fround(x * y) * 2) - 1.25 + row * 2.5 / 32)
@@ -91,11 +86,12 @@ describe.each(knownArchitectures())('%s example ports', (id) => {
 	if (['avr', 'riscv', 'm68k', 'armv8'].includes(id)) it('computes Ackermann with nested calls and restores the call stack', async () => {
 		const { definition } = await activateArchitecture(id)
 		for (const { settings, label } of variants(definition)) {
-			if (id === 'armv8' && settings.executionState !== 'cortex-m0') continue
+			if (id === 'armv8' && ['aarch64', 'aarch32'].includes(String(settings.executionState))) continue
 			const services = definition.createServices()
 			try {
 				const context = `${id}/${label}/ackermann`
 				const code = variantOf(definition, settings).examples.ackermann.code
+				await services.prepare?.(settings)
 				const program = services.assemble({ files: [{ name: 'main.asm', code }], entries: ['main.asm'] }, settings)
 				expect(program.diagnostics, context).toEqual([])
 				const machine = services.createMachine(program, settings, { speed: null, historyLimit: 100 })
@@ -106,7 +102,7 @@ describe.each(knownArchitectures())('%s example ports', (id) => {
 					if (id === 'avr') {
 						expect(machine.registerValues().r16, context).toBe(61)
 						expect(machine.inspectMemory().byte(0x10100), context).toBe(61)
-					} else expect(machine.console, context).toBe('61')
+					} else expect(machine.console, context).toBe(id === 'armv8' && ['arm2', 'arm3'].includes(String(settings.executionState)) ? 'A(3, 3) = 61' : '61')
 				} finally { machine.dispose() }
 			} finally { services.dispose() }
 		}
@@ -122,6 +118,7 @@ describe.each(knownArchitectures())('%s example ports', (id) => {
 					const example = examples[key]
 					if (!example) continue // AVR has no teaching console.
 					const context = `${id}/${label}/${key}`
+					await services.prepare?.(settings)
 					const program = services.assemble({ files: [{ name: 'main.asm', code: example.code }], entries: ['main.asm'] }, settings)
 					expect(program.diagnostics.filter((d) => d.severity === 'error'), context).toEqual([])
 					const machine = services.createMachine(program, settings, { speed: null, historyLimit: 100 })
@@ -142,7 +139,7 @@ describe.each(knownArchitectures())('%s example ports', (id) => {
 						const actual = [], expected = []
 						for (let row = 0; row < 32; row++) for (let column = 0; column < 32; column++) {
 							actual.push(pixelColor(memory, base + (row * 32 + column) * pixelBytes(services.profile(settings).bitmap), services.profile(settings).bitmap))
-							expected.push(id === 'mos6502' ? BYTE_PALETTE[((row + column) >> 2) & 15]
+							expected.push(id === 'mos6502' && settings.cpuModel !== 'w65816' ? BYTE_PALETTE[((row + column) >> 2) & 15]
 								: id === 'z80' ? BYTE_PALETTE[(row + column) & 15] : (row << 19) | (column << 3))
 						}
 						expect(actual, context).toEqual(expected)

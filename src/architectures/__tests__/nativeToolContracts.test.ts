@@ -19,6 +19,7 @@ describe.each(knownArchitectures())('%s shared tool contracts', id => {
 		const services = definition.createServices()
 		try {
 			const settings = definition.settings.defaults
+			await services.prepare?.(settings)
 			const program = services.assemble({ files: [{ name: 'main.asm', code: variantOf(definition, settings).examples.sum.code }], entries: ['main.asm'] }, settings)
 			expect(program.diagnostics.filter(d => d.severity === 'error')).toEqual([])
 			const machine = services.createMachine(program, settings, { speed: null, historyLimit: 10 })
@@ -40,6 +41,7 @@ describe.each(['z80', 'avr', 'mos6502', 'm68k', 'armv8'])('%s executed dependenc
 		const services = definition.createServices()
 		try {
 			for (const topic of ['sum', 'factorial', 'fibonacci', 'loop', 'bitwise', 'ackermann', 'mandelbrot']) {
+				await services.prepare?.(settings)
 				const program = services.assemble({ files: [{ name: 'main.asm', code: variantOf(definition, settings).examples[topic].code }], entries: ['main.asm'] }, settings)
 				expect(program.diagnostics.filter(d => d.severity === 'error')).toEqual([])
 				const machine = services.createMachine(program, settings, { speed: null, historyLimit: 100 })

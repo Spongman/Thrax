@@ -15,6 +15,7 @@ describe.each(knownArchitectures())('%s history navigation', (id) => {
 			const services = definition.createServices()
 			try {
 				const code = variantOf(definition, settings).examples.input.code
+				await services.prepare?.(settings)
 				const program = services.assemble({ files: [{ name: 'main.asm', code }], entries: ['main.asm'] }, settings)
 				const machine = services.createMachine(program, settings, { speed: null, historyLimit: 100_000 })
 				try {
@@ -44,6 +45,7 @@ describe.each(knownArchitectures())('%s history navigation', (id) => {
 			try {
 				for (const key of ['sum', 'bitmap', 'factorial']) {
 					const code = variantOf(definition, settings).examples[key].code
+					await services.prepare?.(settings)
 					const program = services.assemble({ files: [{ name: 'main.asm', code }], entries: ['main.asm'] }, settings)
 					expect(program.diagnostics.filter((d) => d.severity === 'error')).toEqual([])
 					const machine = services.createMachine(program, settings, { speed: null, historyLimit: 100_000 })
