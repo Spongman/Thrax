@@ -1,7 +1,7 @@
 import React from 'react'
 import type { ArchitectureDefinition } from '../architectures/contracts'
 import { architectureManifests } from '../architectures/registry'
-import { HEX_DIMMING_MODES, MAX_BACKSTEP_LIMIT, MAX_HIGHLIGHT_SECONDS, MIN_HIGHLIGHT_SECONDS, SETTINGS_VALIDATORS, type ArchitectureSettings, type SettingField, type TargetSettings, type HexDimming, type ThraxSettings } from '../core/settings'
+import { HEX_DIMMING_MODES, MAX_BACKSTEP_LIMIT, MAX_HIGHLIGHT_SECONDS, MIN_HIGHLIGHT_SECONDS, SETTINGS_VALIDATORS, offeredOptions, type ArchitectureSettings, type SettingField, type TargetSettings, type HexDimming, type ThraxSettings } from '../core/settings'
 import { useTHRAXStore } from '../store/thraxStore'
 import Modal from './Modal'
 import './SettingsDialog.css'
@@ -73,7 +73,7 @@ function revealSection(heading: HTMLElement) {
  * held inside its parent's box, so a section element of its own would let each
  * title scroll away with its section instead of stacking with the others.
  */
-function Group({ title, index, count, children }: { title: string, index: number, count: number, children: React.ReactNode }) {
+function Group({ title, scope, index, count, children }: { title: string, scope?: string, index: number, count: number, children: React.ReactNode }) {
 	return (
 		<>
 			<h3
@@ -82,6 +82,7 @@ function Group({ title, index, count, children }: { title: string, index: number
 				onClick={(event) => revealSection(event.currentTarget)}
 			>
 				{title}
+				{scope && <span className="settings-scope">{scope}</span>}
 			</h3>
 			{children}
 		</>
@@ -108,30 +109,39 @@ function Check({ label, hint, checked, onChange }: CheckProps) {
 }
 
 /**
- * Groups every architecture shares.  An architecture's field names Assembler or
- * Simulator to join that group, or a title of its own to have a group of its own.
+ * Common controls never share a section with architecture-specific fields.
  */
-const SHARED_GROUPS = ['Target', 'Assembler', 'Simulator', 'Display', 'Editor']
+const SHARED_GROUPS = ['Common', 'Display', 'Editor']
+const TARGET_GROUPS = ['CPU', 'Memory', 'Memory timing', 'Assembler', 'Execution']
 
 /**
- * Group titles in dialog order: the architecture's own groups, in the order its
- * fields name them, sit between the shared simulator and display groups.  The
- * assembler group is left out when there is nothing in it for this one.
+ * Architecture sections follow a consistent order, led by CPU, which holds the
+ * architecture selector.  Additional contributed groups follow those, then the
+ * shared settings.
  */
 export function dialogGroups(definition: ArchitectureDefinition | undefined): string[] {
-	const contributed = new Set(definition?.settings.fields.map((field) => field.group))
-	const own = [...contributed].filter((title) => !SHARED_GROUPS.includes(title))
-	const assembler = definition?.multipleEntries === true || contributed.has('Assembler')
-	return [...SHARED_GROUPS.slice(0, 3), ...own, ...SHARED_GROUPS.slice(3)].filter((title) => title !== 'Assembler' || assembler)
+	return dialogSections(definition).map(section => section.title)
+}
+
+/** Separate IDs keep an architecture's Display/Editor group distinct from the common one. */
+export function dialogSections(definition: ArchitectureDefinition | undefined, values = definition?.settings.defaults) {
+	const contributed = [...new Set(definition?.settings.fields.filter(field => !field.visibleWhen || field.visibleWhen(values!)).map((field) => field.group))]
+	const ordered = TARGET_GROUPS.filter((title) => title === 'CPU' || contributed.includes(title))
+	const additional = contributed.filter((title) => !TARGET_GROUPS.includes(title))
+	const shared = (title: string) => ({ id: `common:${title}`, title, group: title, architecture: false })
+	return [...[...ordered, ...additional].map(group => ({
+		id: `architecture:${group}`, group, architecture: true,
+		title: definition?.settings.groups?.find(section => section.id === group)?.title ?? group,
+	})), ...SHARED_GROUPS.map(shared)]
 }
 
 /** The rows an architecture contributes to one group, drawn with the shared controls. */
 export function TargetFields({ schema, group, values, onChange }: { schema: ArchitectureSettings, group: string, values: TargetSettings, onChange: (key: string, value: unknown) => void }) {
-	const fields = schema.fields.filter((field) => field.group === group)
+	const fields = schema.fields.filter((field) => field.group === group && (!field.visibleWhen || field.visibleWhen(values)))
 	const details = schema.details?.(group, values) ?? []
 	return (
 		<>
-			{fields.map((field) => <TargetField key={field.key} field={field} values={values} onChange={onChange} />)}
+			{fields.map((field) => <TargetField key={field.key} field={field} defaultValue={schema.defaults[field.key]} values={values} onChange={onChange} />)}
 			{details.length > 0 && <div className="settings-addresses">
 				{details.map((line) => <span key={line}>{line}</span>)}
 			</div>}
@@ -139,7 +149,7 @@ export function TargetFields({ schema, group, values, onChange }: { schema: Arch
 	)
 }
 
-function TargetField({ field, values, onChange }: { field: SettingField, values: TargetSettings, onChange: (key: string, value: unknown) => void }) {
+function TargetField({ field, defaultValue, values, onChange }: { field: SettingField, defaultValue: unknown, values: TargetSettings, onChange: (key: string, value: unknown) => void }) {
 	const { control, hint = '', key, label } = field
 	const value = values[key]
 	const disabled = field.enabledBy !== undefined && values[field.enabledBy] !== true
@@ -159,21 +169,32 @@ function TargetField({ field, values, onChange }: { field: SettingField, values:
 					/>
 				</label>
 			)
-		case 'choice':
+		case 'choice': {
 			// Options are keyed by position, since a value need not be a string.
+			const options = offeredOptions(control.options, values)
 			return (
 				<label className="settings-row settings-field" title={hint}>
 					<span>{label}</span>
 					<select
-						value={control.options.findIndex((option) => option.value === value)}
+						value={options.findIndex((option) => option.value === value)}
 						disabled={disabled}
-						onChange={(event) => onChange(key, control.options[Number(event.target.value)].value)}
+						onChange={(event) => onChange(key, options[Number(event.target.value)].value)}
 					>
-						{control.options.map((option, index) => <option key={option.label} value={index}>{option.label}</option>)}
+						{options.map((option, index) => <option key={option.label} value={index}>{option.label}{field.role === 'variant' && option.value === defaultValue ? ' (default)' : ''}</option>)}
 					</select>
 				</label>
 			)
+		}
 	}
+}
+
+/** Each architecture by name, its maker right-aligned beside it. */
+export function ArchitectureOptions() {
+	return architectureManifests().map(({ id, name, maker }) => <option key={id} value={id}>
+		<span>{maker && name.startsWith(`${maker} `) ? name.slice(maker.length + 1) : name}</span>
+		{/* The separator shows only where a select cannot lay out its options. */}
+		{maker && <span className="architecture-maker"><span className="architecture-separator"> · </span>{maker}</span>}
+	</option>)
 }
 
 interface SettingsDialogProps {
@@ -190,37 +211,32 @@ function SettingsDialog({ onClose }: SettingsDialogProps) {
 	const set = <Key extends keyof ThraxSettings>(key: Key) => (value: ThraxSettings[Key]) => setSetting(key, value)
 	const schema = target?.definition.settings
 	const multipleEntries = target?.definition.multipleEntries === true
-	const groups = dialogGroups(target?.definition)
-	const place = (title: string) => ({ title, index: groups.indexOf(title), count: groups.length })
+	const sections = dialogSections(target?.definition, targetSettings)
+	const place = (title: string) => ({ title, index: sections.findIndex(section => section.id === `common:${title}`), count: sections.length })
 	const contribution = (title: string) => schema && <TargetFields schema={schema} group={title} values={targetSettings} onChange={setTargetSetting} />
-	const ownGroups = groups.filter((title) => !SHARED_GROUPS.includes(title))
+	const ownGroups = sections.filter(section => section.architecture)
 
 	return (
 		<Modal title="Settings" onClose={onClose} className="settings-dialog" movable persistKey="dialog.settings">
-			<Group {...place('Target')}>
-				<label className="settings-row settings-field" title="The processor the open files are assembled for and run on">
-					<span>
-						Architecture
-						<span className="settings-hint">Switching keeps the open files and ends the run; the Examples menu follows it</span>
-					</span>
-					<select value={architecture} onChange={(event) => void switchArchitecture(event.target.value)}>
-						{architectureManifests().map(({ id, name }) => <option key={id} value={id}>{name}</option>)}
+			{ownGroups.map((section) => <Group key={section.id} title={section.title} index={sections.indexOf(section)} count={sections.length} scope={target?.definition.name}>
+				{section.group === 'CPU' && <label className="settings-row settings-field" title="The processor the open files are assembled for and run on">
+					<span>Architecture</span>
+					<select className="architecture-select" value={architecture} onChange={(event) => void switchArchitecture(event.target.value)}>
+						{/* The closed select shows the chosen option's own layout; React has no type for this element yet. */}
+						<button type="button">{React.createElement('selectedcontent')}</button>
+						<ArchitectureOptions />
 					</select>
-				</label>
-			</Group>
+				</label>}
+				{contribution(section.group)}
+			</Group>)}
 
-			{groups.includes('Assembler') && <Group {...place('Assembler')}>
-				{contribution('Assembler')}
+			<Group {...place('Common')}>
 				{multipleEntries && <Check
 					label="Assemble all open files"
 					hint="Assemble every open tab as one program; the active tab holds the entry point"
 					checked={settings.assembleAll}
 					onChange={set('assembleAll')}
 				/>}
-			</Group>}
-
-			<Group {...place('Simulator')}>
-				{contribution('Simulator')}
 				<label className="settings-row settings-field" title="Instructions the step-back history keeps">
 					<span>Backstep limit</span>
 					{/* A part-typed value such as an empty field fails the validator, so
@@ -229,7 +245,7 @@ function SettingsDialog({ onClose }: SettingsDialogProps) {
 						type="number"
 						min={1}
 						max={MAX_BACKSTEP_LIMIT}
-						title={`Instructions the history keeps, at about 370 bytes each. Up to ${MAX_BACKSTEP_LIMIT.toLocaleString()}.`}
+						title={`Instruction target for retained history, up to ${MAX_BACKSTEP_LIMIT.toLocaleString()}. Memory use depends on the CPU and recorded effects; the history memory budget also applies.`}
 						value={settings.backstepLimit}
 						onChange={(event) => {
 							const limit = Number(event.target.value)
@@ -239,9 +255,7 @@ function SettingsDialog({ onClose }: SettingsDialogProps) {
 				</label>
 			</Group>
 
-			{ownGroups.map((title) => <Group key={title} {...place(title)}>{contribution(title)}</Group>)}
-
-			<Group {...place('Display')}>
+			<Group {...place('Display')} scope="Common">
 				{/* Seeds only: the registers panel keeps per-register formats, where
 				    decimal and hex can both be on, and the memory panel keeps its own
 				    group size and row options. */}
@@ -316,7 +330,7 @@ function SettingsDialog({ onClose }: SettingsDialogProps) {
 				</label>
 			</Group>
 
-			<Group {...place('Editor')}>
+			<Group {...place('Editor')} scope="Common">
 				<Check
 					label="Show the address of each machine word"
 					hint="A gutter column between the line numbers and the code"
