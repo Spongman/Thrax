@@ -75,6 +75,7 @@ const RegistersPanel = () => {
 				registers={registers}
 				descriptors={targetVariant?.registers ?? NO_REGISTERS}
 				banks={targetVariant?.registerBanks}
+				radix={targetVariant?.displayRadix}
 				isAddress={targetProfile?.isMappedAddress}
 				editable={editable}
 				focused={focusedRegister}
@@ -89,18 +90,21 @@ const RegistersPanel = () => {
 }
 
 const MemoryPanel = () => {
-	const { callStack, deleteMemoryByte, focusedMemory, hasMachine, hovered, insertMemoryByte, isRunning, memory, pc, setMemoryByte, sourceIndex, hover, target, targetProfile } = useTHRAXStore()
+	const { callStack, deleteMemoryByte, focusedMemory, hasMachine, hovered, insertMemoryByte, isRunning, memory, pc, setMemoryByte, sourceIndex, hover, target, targetProfile, targetVariant } = useTHRAXStore()
 	const editable = !isRunning && hasMachine
 	// Mark the program counter only where the editor can highlight it too: once a
 	// program halts, the pc sits past the last instruction and belongs to neither.
 	const instructionAddresses = React.useMemo(() => visibleAddresses(sourceIndex), [sourceIndex])
-	const returnAddresses = React.useMemo(() => new Set(callStack.map((frame) => frame.returnAddress)), [callStack])
+	// Keyed on the addresses, not the array, so an unchanged stack keeps every memory row's props.
+	const returnKey = callStack.map((frame) => frame.returnAddress).join(',')
+	const returnAddresses = React.useMemo(() => new Set(returnKey ? returnKey.split(',').map(Number) : []), [returnKey])
 	return (
 		<div className="dock-panel dock-panel-flush">
 			{/* Another target is another address space: the view starts over at its first section. */}
 			<MemoryView
 				key={target?.definition.id}
 				memory={memory}
+				radix={targetVariant?.displayRadix}
 				sections={targetProfile?.memorySections ?? NO_SECTIONS}
 				disassembly={target?.services.disassembly}
 				pc={instructionAddresses.has(pc) ? pc : null}
@@ -113,6 +117,7 @@ const MemoryPanel = () => {
 				onEditByte={setMemoryByte}
 				onInsertByte={insertMemoryByte}
 				onDeleteByte={deleteMemoryByte}
+				characterSet={targetProfile?.characterSet}
 			/>
 		</div>
 	)
@@ -276,10 +281,10 @@ const NO_SECTIONS: readonly never[] = []
 
 const LAYOUT_KEY = 'thrax-web.dock-layout'
 /**
- * Bumped when a stored layout can no longer be read; older ones are discarded.
- * A layout holding tabs a release no longer opens by itself is one such.
+ * Version 4 moves Files out of older arrangements into its own left column.
+ * Version 3 layouts can be migrated without discarding the other panel groups.
  */
-const LAYOUT_VERSION = 3
+const LAYOUT_VERSION = 4
 
 /**
  * Files get the outer left edge. Other panels join the registers at the right
@@ -319,21 +324,21 @@ function initialPanels(anchor: string): AddPanelOptions[] {
 }
 
 /** A stored layout is only usable while every panel in it still has a component. */
-function readStoredLayout(): SerializedDockview | null {
+function readStoredLayout(): { version: number, layout: SerializedDockview } | null {
 	try {
 		const raw = window.localStorage.getItem(LAYOUT_KEY)
 		if (raw === null) return null
 		const stored: unknown = JSON.parse(raw)
 		if (typeof stored !== 'object' || stored === null) return null
 		const { version, layout } = stored as { version?: unknown, layout?: SerializedDockview }
-		if (version !== LAYOUT_VERSION || !layout?.grid || !layout.panels) return null
+		if ((version !== 3 && version !== LAYOUT_VERSION) || !layout?.grid || !layout.panels) return null
 		// A panel an architecture contributes keeps its place whichever target is
 		// in force, and says whether that target supplies it.
 		const contributed = contributedPanelIds()
 		const known = Object.values(layout.panels).every(({ contentComponent: id }) => id !== undefined && (id in components || contributed.has(id)))
 		if (!known) return null
 		for (const panel of Object.values(layout.panels)) ensureComponent(panel.contentComponent!)
-		return layout
+		return { version, layout }
 	} catch {
 		// Unreadable storage (private mode, bad JSON) just means the default layout.
 		return null
@@ -414,12 +419,18 @@ export function buildLayout(api: DockviewApi, removing: Set<string>) {
 	const stored = readStoredLayout()
 	if (stored) {
 		try {
-			api.fromJSON(stored)
+			api.fromJSON(stored.layout)
 		} catch {
 			api.clear()
 		}
 	}
 	const restored = api.panels.length > 0
+	const migrateFiles = restored && stored !== null && stored.version < LAYOUT_VERSION
+	if (migrateFiles) {
+		const files = api.getPanel(DOCK_LEADER.left)
+		// Reinsert this panel at the root edge, leaving its former neighbours in place.
+		if (files) api.removePanel(files)
+	}
 	const { activeDocumentId, documents } = useTHRAXStore.getState()
 	const anchor = syncFilePanels(api, documents, removing)
 
@@ -436,6 +447,7 @@ export function buildLayout(api: DockviewApi, removing: Set<string>) {
 	}
 	api.getPanel(filePanelId(activeDocumentId))?.api.setActive()
 	publishOpenPanels(api)
+	if (migrateFiles) saveLayout(api)
 }
 
 /**

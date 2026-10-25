@@ -1,8 +1,8 @@
 import React from 'react'
 import './MemoryView.css'
 import './ToggleGroup.css'
-import type { Disassembly, MemoryInspector, MemorySection } from '../architectures/contracts'
-import { formatHex, formatAddress, parseAddress } from '../core/format'
+import type { CharacterSet, Disassembly, MemoryInspector, MemorySection } from '../architectures/contracts'
+import { formatHex, formatAddress, formatOctal, parseAddress } from '../core/format'
 import { nextToggles } from './toggleGroup'
 import HexNumber, { HexAddress, dimmedDigits } from './HexNumber'
 import { afterWrite, applyNibble, asciiByte, beforeCaret, Column, hexDigit, moveCaret, type Caret, type CaretBounds } from './memoryCaret'
@@ -40,6 +40,10 @@ interface MemoryViewProps {
 	/** Takes the byte away again, moving the rest of the region back down. */
 	onDeleteByte?: (address: number, limit: number) => boolean
 	onHoverAddress: (address: number | null) => void
+	/** Radix values and addresses are first shown in; hexadecimal when absent. */
+	radix?: 8 | 16
+	/** How bytes read as text, such as EBCDIC; ASCII when absent. */
+	characterSet?: CharacterSet
 }
 
 /** Where a view with no target to ask lands: the whole address space. */
@@ -112,6 +116,9 @@ export function toIcon(byte: number): string {
 	return '▯'
 }
 
+/** The character code a byte stands for in the target's character set. */
+const characterOf = (byte: number, characterSet?: CharacterSet) => characterSet ? characterSet.decode(byte) : byte
+
 const toPrintable = (byte: number, icons: boolean) =>
 	isPrintable(byte) ? String.fromCharCode(byte) : icons ? toIcon(byte) : '.'
 
@@ -123,6 +130,12 @@ function describeByte(byte: number): string {
 }
 
 const toHex = (byte: number) => formatHex(byte, 2)
+
+/** Octal digits for a group of `bytes`, as DEC writes a word: 3, 6, 11 or 22 of them. */
+const octalDigits = (bytes: number) => Math.ceil(bytes * 8 / 3)
+/** An address in octal, at least the six digits of a 16-bit word. */
+const octalAddress = (address: number) => address.toString(8).padStart(6, '0')
+const isBoolean = (value: unknown) => typeof value === 'boolean'
 
 /** Little-endian value of a byte run; BigInt keeps 8-byte groups exact. */
 const groupValue = (bytes: number[]) => {
@@ -136,7 +149,7 @@ interface MemoryByte { address: number, value: number }
 interface MemoryGroup { start: number, bytes: MemoryByte[], zero: boolean, leadingZeros: number, value: number | null }
 interface MemoryRowData { address: number, groups: MemoryGroup[], bytes: MemoryByte[] }
 
-const MemoryRow = React.memo(function MemoryRow({ row, top, left, width, groupSize, showAscii, showIcons, hexDimming, hover, pc, returnAddresses, caret, pointed, flashed, changed }: {
+const MemoryRow = React.memo(function MemoryRow({ row, top, left, width, groupSize, showAscii, showIcons, hexDimming, hover, pc, returnAddresses, caret, pointed, flashed, changed, octal, characterSet }: {
 	row: MemoryRowData
 	top: number
 	left: number
@@ -156,13 +169,16 @@ const MemoryRow = React.memo(function MemoryRow({ row, top, left, width, groupSi
 	flashed: number | null
 	/** Words the last step moved, lit in the other colour. */
 	changed: ReadonlySet<string>
+	/** Each group reads as one octal number; its digits are not byte-aligned, so they take no caret. */
+	octal: boolean
+	characterSet?: CharacterSet
 }) {
 	const isHovered = (address: number) => hover !== null && address >= hover.start && address < hover.start + hover.size
 
 	return (
 		<div className="memory-row" style={{ top, left, width }}>
 			<span className={`memory-row-address${pointed !== null && pointed >= row.address && pointed < row.address + row.bytes.length ? ' address-hovered' : ''}`}>
-				<HexNumber text={formatAddress(row.address)} />
+				<HexNumber text={octal ? octalAddress(row.address) : formatAddress(row.address)} />
 			</span>
 			<span className="memory-row-groups">
 				{row.groups.map((group, groupIndex) => {
@@ -187,8 +203,9 @@ const MemoryRow = React.memo(function MemoryRow({ row, top, left, width, groupSi
 								: changed.has(formatAddress(group.start)) ? flashClass('change') : '',
 						].filter(Boolean).join(' ')}
 					>
+						{octal && <HexNumber text={groupValue(group.bytes.map((byte) => byte.value)).toString(8).padStart(octalDigits(group.bytes.length), '0')} mode={hexDimming} />}
 						{/* Little-endian: the highest address is the most significant digit pair. */}
-						{[...group.bytes].reverse().map((byte, byteIndex) => {
+						{!octal && [...group.bytes].reverse().map((byte, byteIndex) => {
 							const text = toHex(byte.value)
 							// The group is one number, so its leading zeros dim across byte
 							// boundaries; how many of them dim is the workspace's setting,
@@ -220,11 +237,11 @@ const MemoryRow = React.memo(function MemoryRow({ row, top, left, width, groupSi
 					{row.bytes.map((byte, byteIndex) => (
 						<span
 							key={byteIndex}
-							className={`memory-char ${isPrintable(byte.value) ? '' : showIcons ? 'icon' : 'unprintable'} ${isHovered(byte.address) ? 'hovered' : ''} ${caret !== null && caret.column === Column.ASCII && caret.address === byte.address ? 'memory-caret' : ''}`}
+							className={`memory-char ${isPrintable(characterOf(byte.value, characterSet)) ? '' : showIcons ? 'icon' : 'unprintable'} ${isHovered(byte.address) ? 'hovered' : ''} ${caret !== null && caret.column === Column.ASCII && caret.address === byte.address ? 'memory-caret' : ''}`}
 							data-address={byte.address}
 							data-size={1}
 						>
-							{toPrintable(byte.value, showIcons)}
+							{toPrintable(characterOf(byte.value, characterSet), showIcons)}
 						</span>
 					))}
 				</span>
@@ -233,10 +250,13 @@ const MemoryRow = React.memo(function MemoryRow({ row, top, left, width, groupSi
 	)
 })
 
-function MemoryView({ memory, sections: offered, disassembly, pc, returnAddresses, focusAddress, focusRequest = 0, editable = false, onEditByte, onInsertByte, onDeleteByte, onHoverAddress, hoveredAddress = null }: MemoryViewProps) {
+function MemoryView({ memory, sections: offered, disassembly, pc, returnAddresses, focusAddress, focusRequest = 0, editable = false, onEditByte, onInsertByte, onDeleteByte, onHoverAddress, hoveredAddress = null, radix = 16, characterSet }: MemoryViewProps) {
 	const sections = offered.length > 0 ? offered : ANYWHERE
 	const textSection = sections[0]
-	const [addressInput, setAddressInput] = React.useState(formatAddress(textSection.start))
+	// Remembered apart for octal and hexadecimal targets, so each starts in its own radix.
+	const [octal, setOctal] = useStoredState(`memory.octal.${radix}`, radix === 8, isBoolean)
+	const showAddress = (address: number) => octal ? octalAddress(address) : formatAddress(address)
+	const [addressInput, setAddressInput] = React.useState(showAddress(textSection.start))
 	const [sectionId, setSectionId] = useStoredState('memory.section', textSection.id, isText)
 	const [groupSize, setGroupSize] = useStoredState('memory.groupSize', 4, isOneOf(GROUP_SIZES))
 	const hexDimming = useTHRAXStore((state) => state.settings.hexDimming)
@@ -288,12 +308,12 @@ function MemoryView({ memory, sections: offered, disassembly, pc, returnAddresse
 	// As many groups as fit the row, counting the ASCII column. Rounding the row
 	// length down to a power of two keeps addresses aligned at the cost of width.
 	const bytesPerRow = React.useMemo(() => {
-		const perGroup = (groupSize * 2 + 1 + (showAscii ? groupSize : 0)) * charWidth
+		const perGroup = ((octal ? octalDigits(groupSize) : groupSize * 2) + 1 + (showAscii ? groupSize : 0)) * charWidth
 		const available = viewport.width - (ADDRESS_COLUMNS + (showAscii ? 2 : 0)) * charWidth - 16
 		const groups = Math.max(1, Math.floor(available / perGroup))
 		const bytes = groups * groupSize
 		return powerOfTwoRows ? Math.max(groupSize, 2 ** Math.floor(Math.log2(bytes))) : bytes
-	}, [charWidth, groupSize, powerOfTwoRows, showAscii, viewport.width])
+	}, [charWidth, groupSize, octal, powerOfTwoRows, showAscii, viewport.width])
 
 	const alignedWindowStart = Math.max(section.start, windowStart - (windowStart % bytesPerRow))
 	const windowBytes = Math.min(section.end - alignedWindowStart + 1, MAX_WINDOW_ROWS * bytesPerRow)
@@ -315,11 +335,11 @@ function MemoryView({ memory, sections: offered, disassembly, pc, returnAddresse
 		const span = MAX_WINDOW_ROWS * bytesPerRow
 		setAddressError(null)
 		setSectionId(target.id)
-		setAddressInput(formatAddress(address))
+		setAddressInput(octal ? octalAddress(address) : formatAddress(address))
 		setWindowStart(address - target.start < span ? target.start : Math.max(target.start, address - Math.floor(span / 2)))
 		setPendingReveal(address)
 		return true
-	}, [bytesPerRow])
+	}, [bytesPerRow, octal])
 
 	// A selected call stack frame, a symbol or a history row brings an address
 	// into view.
@@ -343,6 +363,7 @@ function MemoryView({ memory, sections: offered, disassembly, pc, returnAddresse
 		setPendingReveal(null)
 	}, [alignedWindowStart, bytesPerRow, pendingReveal, toolbarHeight, totalRows, viewport.height])
 
+	const previousRows = React.useRef<ReadonlyMap<number, MemoryRowData>>(new Map())
 	const rows = React.useMemo<MemoryRowData[]>(() => Array.from({ length: visibleRows }, (unused, index) => {
 		const rowAddress = alignedWindowStart + (firstRow + index) * bytesPerRow
 		const bytes = Array.from({ length: bytesPerRow }, (unusedByte, offset) => {
@@ -363,8 +384,12 @@ function MemoryView({ memory, sections: offered, disassembly, pc, returnAddresse
 				leadingZeros: significant.length === 0 ? digits.length - 1 : digits.length - significant.length,
 			}
 		})
-		return { address: rowAddress, groups, bytes }
+		const fresh = { address: rowAddress, groups, bytes }
+		// An unchanged row keeps its object, so its memoized view skips the render.
+		const before = previousRows.current.get(rowAddress)
+		return before && before.groups.length === groups.length && before.bytes.every((byte, offset) => byte.value === bytes[offset].value) ? before : fresh
 	}), [alignedWindowStart, bytesPerRow, firstRow, groupSize, memory, visibleRows])
+	React.useEffect(() => { previousRows.current = new Map(rows.map((row) => [row.address, row])) }, [rows])
 
 	// Only the rows on screen are diffed: a word nobody is looking at cannot
 	// flash, and the whole of memory is far more than a panel ever shows.
@@ -458,14 +483,15 @@ function MemoryView({ memory, sections: offered, disassembly, pc, returnAddresse
 		}
 
 		if (caret.column === Column.ASCII) {
-			const byte = asciiByte(event.key)
-			if (byte === null) return
+			const code = asciiByte(event.key), byte = code === null || !characterSet ? code : characterSet.encode(code)
+			if (byte === null || byte < 0) return
 			event.preventDefault()
 			if (writeByte(caret.address, byte, insertMode)) setCaret(afterWrite(caret, bounds))
 			return
 		}
 
-		const digit = hexDigit(event.key)
+		// Octal digits span byte boundaries, so only the ASCII column takes typing.
+		const digit = octal ? null : hexDigit(event.key)
 		if (digit === null) return
 		event.preventDefault()
 		// Insert mode makes a byte out of the first digit typed into it; the second
@@ -519,30 +545,31 @@ function MemoryView({ memory, sections: offered, disassembly, pc, returnAddresse
 		const range = hover.size > 1
 			? `${formatAddress(hover.start)} - ${formatAddress(hover.start + hover.size - 1)}`
 			: formatAddress(hover.start)
-		const text = bytes.map((byte) => toPrintable(byte, showIcons)).join('')
+		const text = bytes.map((byte) => toPrintable(characterOf(byte, characterSet), showIcons)).join('')
 		// A word in a code section decodes to an instruction; other widths and sections do not.
 		const inCode = sectionForAddress(sections, hover.start)?.code === true
 		const assembly = hover.size === memory.wordBytes && inCode ? disassembly?.at(memory, hover.start) ?? null : null
 		return {
 			range,
 			hex: `0x${[...bytes].reverse().map(toHex).join('')}`,
+			oct: formatOctal(value, hover.size * 8),
 			unsigned: value.toString(),
 			signed: signed === value ? null : signed.toString(),
-			ascii: hover.size > 1 ? `"${text}"` : describeByte(bytes[0]),
+			ascii: hover.size > 1 ? `"${text}"` : describeByte(characterOf(bytes[0], characterSet)),
 			assembly,
 		}
-	}, [disassembly, hover, memory, sections, showIcons])
+	}, [characterSet, disassembly, hover, memory, sections, showIcons])
 
 	const showSection = (target: MemorySection) => {
 		setAddressError(null)
 		setSectionId(target.id)
 		setWindowStart(target.start)
-		setAddressInput(formatAddress(target.start))
+		setAddressInput(showAddress(target.start))
 		if (scrollRef.current) scrollRef.current.scrollTop = 0
 	}
 
 	const goToAddress = () => {
-		const address = parseAddress(addressInput)
+		const address = octal && /^\s*[0-7]+\s*$/.test(addressInput) ? Number.parseInt(addressInput, 8) : parseAddress(addressInput)
 		if (address === null) {
 			setAddressError('Enter a valid address')
 			return
@@ -644,6 +671,18 @@ function MemoryView({ memory, sections: offered, disassembly, pc, returnAddresse
 								))}
 							</div>
 							<div className="toggle-group">
+								{([[false, '0x', 'Hexadecimal'], [true, '0o', 'Octal']] as const).map(([value, label, title]) => (
+									<button
+										key={label}
+										className={`toggle-button ${octal === value ? 'active' : ''}`}
+										title={title}
+										onClick={() => { setOctal(value); setAddressInput(value ? octalAddress(windowStart) : formatAddress(windowStart)) }}
+									>
+										{label}
+									</button>
+								))}
+							</div>
+							<div className="toggle-group">
 								<button
 									className={`toggle-button ${powerOfTwoRows ? 'active' : ''}`}
 									title="Wrap rows at a power of two bytes"
@@ -691,12 +730,14 @@ function MemoryView({ memory, sections: offered, disassembly, pc, returnAddresse
 								caret={caret !== null && caret.address >= row.address && caret.address < row.address + bytesPerRow ? caret : null}
 								showIcons={showIcons}
 								hexDimming={hexDimming}
-								pc={groupSize === 4 ? pc : null}
+								pc={groupSize === 4 && pc !== null && pc >= row.address && pc < row.address + bytesPerRow ? pc : null}
 								returnAddresses={returnAddresses}
 								hover={hover && hover.start >= row.address && hover.start < row.address + bytesPerRow ? hover : null}
 								pointed={hoveredAddress}
 								flashed={flashed !== null && flashed >= row.address && flashed < row.address + bytesPerRow ? flashed : null}
 								changed={changed}
+								octal={octal}
+								characterSet={characterSet}
 							/>
 						))}
 					</div>
@@ -712,6 +753,7 @@ function MemoryView({ memory, sections: offered, disassembly, pc, returnAddresse
 				>
 					<div className="memory-tooltip-range">{tooltip.range}</div>
 					<div><span>hex</span><HexNumber text={tooltip.hex} mode="off" /></div>
+					{octal && <div><span>oct</span>{tooltip.oct}</div>}
 					<div><span>dec</span>{tooltip.unsigned}</div>
 					{tooltip.signed && <div><span>signed</span>{tooltip.signed}</div>}
 					<div><span>ascii</span>{tooltip.ascii}</div>

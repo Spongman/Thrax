@@ -18,19 +18,18 @@ Object.defineProperty(globalThis, 'window', {
 
 const LAYOUT_KEY = 'thrax-web.dock-layout'
 /**
- * Written out rather than imported: a release that bumps the version throws
- * away every layout stored by the release before it, so this pins the version
- * a shipped layout carries and fails if it moves.
+ * Written out rather than imported to pin the shipped storage format. Older
+ * layouts need explicit migration coverage when the version changes.
  */
-const SHIPPED_LAYOUT_VERSION = 3
+const SHIPPED_LAYOUT_VERSION = 4
 
 /** A stored layout that has been pared back to the windows and one tool. */
 const STORED_PANELS = ['registers', 'callStack', 'files', 'symbols', 'memory', 'console', 'history', 'cache']
 
-function storeLayout(components: string[]) {
+function storeLayout(components: string[], version = SHIPPED_LAYOUT_VERSION) {
 	const panels = Object.fromEntries(components.map((component) => [component, { id: component, contentComponent: component }]))
 	const layout = { grid: { root: {}, width: 800, height: 600, orientation: 'HORIZONTAL' }, panels } as unknown as SerializedDockview
-	storage.set(LAYOUT_KEY, JSON.stringify({ version: SHIPPED_LAYOUT_VERSION, layout }))
+	storage.set(LAYOUT_KEY, JSON.stringify({ version, layout }))
 }
 
 /** Only the handful of methods buildLayout drives, over a plain list of panels. */
@@ -59,6 +58,10 @@ function fakeApi() {
 			restoredFrom = layout
 			for (const id of Object.keys(layout.panels)) panels.push(panel(id))
 		},
+		toJSON: () => ({
+			grid: restoredFrom?.grid,
+			panels: Object.fromEntries(panels.map(({ id }) => [id, { id, contentComponent: id.startsWith('file:') ? 'source' : id }])),
+		}),
 		clear: () => { cleared += 1; panels.length = 0 },
 	}
 	return {
@@ -153,6 +156,25 @@ describe('dock layout', () => {
 		// Every window it holds is already there, so nothing is added back: closing
 		// a panel is how it is turned off, and it must stay closed.
 		expect(dock.added.filter((options) => options.component !== 'source')).toEqual([])
+	})
+
+	it('moves Files to the outer left once for legacy layouts, preserving the other windows', () => {
+		storeLayout(STORED_PANELS, 3)
+		const dock = fakeApi()
+		buildLayout(dock.api, new Set())
+
+		expect(dock.restored()).not.toBeNull()
+		expect(dock.cleared()).toBe(0)
+		for (const id of STORED_PANELS) expect(dock.ids()).toContain(id)
+		const added = dock.added.filter((options) => options.component !== 'source')
+		expect(added.map((options) => options.id)).toEqual(['files'])
+		expect(added[0].position).toEqual({ direction: 'left' })
+		expect(added[0].initialWidth).toBe(220)
+		expect(JSON.parse(storage.get(LAYOUT_KEY)!).version).toBe(SHIPPED_LAYOUT_VERSION)
+
+		const reloaded = fakeApi()
+		buildLayout(reloaded.api, new Set())
+		expect(reloaded.added.filter((options) => options.component !== 'source')).toEqual([])
 	})
 
 	it('adds back a window a stored arrangement predates', () => {

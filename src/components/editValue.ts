@@ -10,7 +10,7 @@
 import { doubleToBits, singleToBits } from '../core/ieee754'
 
 /** How a cell is being shown, which is how what is typed into it is read. */
-export type EditFormat = '0n' | '0x' | 'f' | 'd'
+export type EditFormat = '0n' | '0o' | '0x' | 'f' | 'd'
 
 /** The 32-bit word a cell now holds, or null when the text is not a value. */
 export function parseEditedValue(text: string, format: EditFormat): number | null {
@@ -30,10 +30,11 @@ export function parseEditedValue(text: string, format: EditFormat): number | nul
 	const hexadecimal = /^0[xX][0-9a-fA-F]+$/.test(body)
 	if (!hexadecimal && format === '0x' && !/^[0-9a-fA-F]+$/.test(body)) return null
 	if (!hexadecimal && format === '0n' && !/^[0-9]+$/.test(body)) return null
+	if (!hexadecimal && format === '0o' && !/^[0-7]+$/.test(body)) return null
 
 	const magnitude = hexadecimal ? Number.parseInt(body.slice(2), 16)
 		: format === '0x' ? Number.parseInt(body, 16)
-			: Number.parseInt(body, 10)
+			: Number.parseInt(body, format === '0o' ? 8 : 10)
 	if (!Number.isFinite(magnitude)) return null
 	return ((negative ? -magnitude : magnitude) >>> 0)
 }
@@ -42,13 +43,13 @@ export function parseEditedValue(text: string, format: EditFormat): number | nul
  * The bits a register wider than a word now holds, or null when the text is not
  * an integer.  A negative value is its two's complement in `bits`.
  */
-export function parseEditedWide(text: string, format: '0n' | '0x', bits: number): bigint | null {
+export function parseEditedWide(text: string, format: '0n' | '0o' | '0x', bits: number): bigint | null {
 	const match = /^(-?)(?:0[xX]([0-9a-fA-F]+)|([0-9a-fA-F]+))$/.exec(text.trim())
 	if (!match) return null
 	const digits = match[2] ?? match[3]
 	const hexadecimal = match[2] !== undefined || format === '0x'
-	if (!hexadecimal && !/^[0-9]+$/.test(digits)) return null
-	const magnitude = BigInt(hexadecimal ? `0x${digits}` : digits)
+	if (!hexadecimal && !(format === '0o' ? /^[0-7]+$/ : /^[0-9]+$/).test(digits)) return null
+	const magnitude = BigInt(hexadecimal ? `0x${digits}` : format === '0o' ? `0o${digits}` : digits)
 	return BigInt.asUintN(bits, match[1] ? -magnitude : magnitude)
 }
 

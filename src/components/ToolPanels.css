@@ -119,6 +119,14 @@
 	font-style: italic;
 }
 
+.pipeline-model-description {
+	display: grid;
+	gap: 4px;
+	margin-bottom: 10px;
+	color: var(--text-secondary);
+	font-size: 12px;
+}
+
 /* Standing in for a list, it needs the room the list would have had. */
 .panel-group > .panel-group-flush > .tool-empty {
 	padding: 8px 12px;
