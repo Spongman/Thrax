@@ -159,9 +159,14 @@ UASM compatibility:
 - `.pcheckoff`, `.tcheckoff` and `.verify` only talk to the course's checkoff server, and are skipped
 - Beta source files use the `uasm` editor language with completion of the library macros, go-to-definition into `beta.uasm`, and data tips for registers, symbols and macros; new files are `.uasm`, and **Download HexText** writes memory from address 0 as words
 
-### MOS 6502 and WDC 65C02
-The CPU model setting selects the original NMOS 6502 (default) or WDC W65C02S.
-Both share the same CPU, assembler, debugger, memory/device model and history.
+### MOS 6502, WDC 65C02 and 65C816
+
+The CPU model setting selects the original NMOS 6502 (default), WDC W65C02S or
+WDC W65C816S. All use the shared debugger, editor and tools.
+
+#### MOS 6502 and WDC 65C02
+
+The 6502 and 65C02 share their CPU, assembler, memory/device model and history.
 
 An NMOS 6502 on a bare board: the 151 documented opcodes plus all 105 undocumented encodings, in all 13 addressing
 modes, with exact flags, NMOS decimal mode (Z from the binary sum, N and V from
@@ -196,6 +201,21 @@ the previous flags. NMOS mode rejects CMOS-only instructions. Wait/stop and
 interrupt transitions are reversible; the existing memory and history limits apply.
 This remains a CPU teaching machine using THRAX's I/O page, rather than a WDC board.
 See [the model notes](src/architectures/mos6502/W65C02S.md) for exact behavior and limits.
+
+#### WDC 65C816
+
+The 65C816 variant has 16 MiB of memory, banked program/data addressing and
+native/emulation modes. REP/SEP and the live M/X flags control accumulator and
+index widths; native instructions include decimal arithmetic, banked calls,
+stack-relative addressing and block moves. The PC is a physical 24-bit address,
+with instruction fetch wrapping within its program bank.
+
+Assembly uses explicit `.b`/`.w` immediate widths where needed and direct-page,
+absolute and long-address forms. Installed BRK/COP vectors take native interrupt
+frames; without a guest COP handler, COP signatures select the THRAX console
+monitor. External interrupts, devices and cycle timing are absent. See the
+[65C816 notes](src/architectures/mos6502/w65816/README.md) for bank selection,
+width rules and monitor calls.
 
 ### Zilog Z80
 A Z80 on a bare board: every documented instruction with the CB, ED, DD/FD and
@@ -419,7 +439,7 @@ RV64-only and floating-point compressed encodings fault; standard HINTs are harm
 
 ### Motorola 68k (68000, 68010 and 68020)
 
-The new `m68k` family selects an MC68000, MC68010 or MC68020 integer teaching
+The `m68k` family selects an MC68000, MC68010 or MC68020 integer teaching
 profile. It has D0-D7, A0-A7 (SP), PC and condition codes, with 1 MiB of big-endian
 RAM, text at `0x1000`, data at `0x10000` and a descending stack near the RAM limit.
 Supported operations include moves, integer arithmetic/logic, branches and calls,
@@ -441,37 +461,188 @@ These targets use the shared register, memory, call-stack, history and
 debugger windows, with typed history buffers and the common history limits.
 They do not supply a cycle-accurate pipeline model or an X-Ray panel.
 
-### Additional integer teaching CPUs
+### Motorola 6800 (6800, 6809 and 68HC11)
 
-These additional backends use one configurable assembler frontend, runtime, debugger,
-typed column history store, editor integration and common tool adapter. Native
-modules supply instruction encodings and semantics, registers, address translation,
-reset state and documentation. They support the same standard example menu,
-including recursive Ackermann, interactive input, bitmap and Mandelbrot programs.
+The Motorola 6800 family defaults to the original 6800, with selectable 6809 and
+68HC11 variants. Each has 64 KiB of big-endian RAM and its own native encodings,
+registers, addressing modes and stack behavior. The 6809 adds D, Y, U and DP,
+long branches and extended indexed addressing; the 68HC11 adds D, Y, integer
+multiply/divide and memory bit operations. These are distinct instruction sets,
+so changing variants requires reassembly.
 
-| CPU | Memory model | Native scope and limitations |
-| --- | --- | --- |
-| [Motorola 6800](src/architectures/m6800/README.md) | 64 KiB, big endian | Selectable 6800, 6809 and 68HC11 native encodings/registers/addressing; excludes native hardware interrupt and peripheral delivery |
-| [Intel 8051](src/architectures/i8051/README.md) | Separate 64 KiB code and XDATA, 128-byte IRAM and SFR window | Documented MCS-51 instructions, banked registers, bit addressing, MOVC/MOVX; excludes timers, serial and port devices |
-| [PowerPC](src/architectures/powerpc/README.md) | 1 MiB, big endian | 32-bit integer arithmetic, memory, condition fields and branches; excludes floating point, vectors, privileged/MMU and atomic operations |
-| [DEC Alpha](src/architectures/alpha/README.md) | 1 MiB, little endian | Exact 64-bit integer registers and memory, integer branches and BWX; excludes floating point, locked memory, privileged PALcode and MMU |
-| [Intel x86](src/architectures/i8086/README.md) | 1 MiB with 20-bit segment translation and native segment-boundary rules | 8086/8088 and 80186/80188, optional 8087 extended-precision arithmetic; excludes PC devices and bus/prefetch timing |
-| [WDC 65C816](src/architectures/mos6502/w65816/README.md) | 16 MiB with program/data banks | Native/emulation modes, live M/X widths, decimal operations and banked calls; excludes external hardware and cycle timing |
-| [TMS9900](src/architectures/tms9900/README.md) | 64 KiB, big endian, RAM-backed workspaces | Integer instructions, native addressing and workspace context switches; excludes CRU devices/instructions, X execution and external interrupts |
-| [SPARC V8](src/architectures/sparc/README.md) | 1 MiB, big endian, eight overlapping register windows | Integer arithmetic, Y multiply/divide, delayed/annulled branches, calls and SAVE/RESTORE; excludes floating point, privileged traps/MMU, automatic window spilling and transfers inside delay slots |
-| [SuperH](src/architectures/sh/README.md) | 1 MiB, big endian, SH-1/SH-2 | Integer arithmetic, memory/special registers, native delay slots, stepwise divide and exact multiply/MAC; excludes SH-2A/SH-2E extensions, native exceptions/devices and cycle timing |
-| [DEC VAX](src/architectures/vax/README.md) | 1 MiB, little endian, kernel mode, physical addressing | All general addressing modes, integer/field/string/control instructions, CALLS/CALLG/RET frames and DEC F/D/G/H floating point rounded as the VAX does; excludes decimal strings, EDITPC/CRC/MATCHC/MOVTC, POLY/EMOD, queues, memory management and exception vectors |
-| [DEC PDP-11](src/architectures/pdp11/README.md) | 64 KiB, little endian, no MMU, I/O page at 160000 (octal) | All eight addressing modes, the 11/20 base set, 11/40 additions with EIS, optional KE11-F FIS or FP11 F/D floating point rounded as DEC does, traps through vectors, a console DL11, octal display; excludes the MMU, user/supervisor modes, interrupts and other devices |
-| [IBM System/360](src/architectures/s360/README.md) | 1 MiB of the 24-bit space, big endian, EBCDIC | Standard instruction set with BC-mode PSW, USING base resolution, decimal (packed, ED/EDMK) and hexadecimal floating point; System/370 MVCL/CLCL/ICM/STCM/CLM/SRP and extended float; excludes privileged/I/O instructions, interruption handlers, storage protection and DAT |
+Assembly accepts Motorola-style operands, labels, expressions and includes.
+A THRAX monitor uses `SWI` for console I/O; hardware interrupt/vector delivery,
+peripherals and cycle timing are not modeled. All three variants supply the
+standard example topics. See the [6800-family notes](src/architectures/m6800/README.md)
+for instruction coverage, addressing and monitor conventions.
 
-These are functional instruction simulators. They do not model complete boards,
-operating systems or cycle-accurate pipelines. Each supplies an explicitly
-documented THRAX monitor through a native trap/call instruction for example I/O.
-The shared statistics, profile, cache, branch history and memory-reference tools
-consume native execution events. A hardware pipeline model and MIPS X-Ray are
-unavailable on these families. Cache results are an educational tool simulation.
-See the family notes for exact instruction and monitor restrictions and the
-[performance measurements](docs/new-cpu-benchmarks.md) for history and observer costs.
+### Intel 8051
+
+The 8051 implements documented MCS-51 encodings, banked registers, accumulator/PSW
+arithmetic, calls and returns, bit addressing, and MOVC/MOVX. Its memory spaces
+remain distinct: 64 KiB of code, 64 KiB of external XDATA, 128 bytes of internal
+RAM and the SFR window. Register banks alias internal RAM, and the shared memory
+inspector exposes each space at a separate address range.
+
+A THRAX console monitor is available through `LCALL 0xff00`. Timers, serial and
+parallel-port devices, external interrupts, cycle timing and the 8052's extended
+internal RAM are not implemented. See the
+[8051 notes](src/architectures/i8051/README.md) for memory mappings and monitor calls.
+
+### PowerPC
+
+The PowerPC target has 32-bit integer registers, condition-register fields,
+LR/CTR/XER and 1 MiB of big-endian RAM. It implements integer arithmetic,
+rotate/mask operations, branches and calls, and native memory addressing forms.
+The FPU is always present, with 32 double-precision registers and FPSCR,
+single/double arithmetic, fused operations, comparisons and conversions.
+Arithmetic uses exact intermediates and the selected rounding mode.
+
+Assembly uses PowerPC register names and conventional aliases such as `li`,
+`lis`, `mr` and `nop`. The target excludes 64-bit PowerPC, vectors, atomic
+reservations, privileged execution, MMU, devices and cycle timing. See the
+[PowerPC notes](src/architectures/powerpc/README.md) for supported FP operations,
+exception behavior and other numerical limits.
+
+### DEC Alpha
+
+Alpha provides exact 64-bit integer registers and 1 MiB of little-endian RAM,
+with native arithmetic, conditional moves, branches, byte manipulation and BWX
+byte/word memory operations. Register `$31` remains zero; both numeric and ABI
+register names are accepted. The always-enabled FPU implements IEEE S/T formats,
+FPCR, rounding and trap qualifiers, comparisons, conversions and FIX operations.
+
+Assembly uses a GNU-like source subset and conventional aliases. Locked memory,
+privileged PALcode, MMU, native exception delivery and device models are absent;
+VAX-format floating-point instructions are not implemented. See the
+[Alpha notes](src/architectures/alpha/README.md) for instruction coverage and
+floating-point completion rules.
+
+### Intel x86 (8086, 8088, 80186 and 80188)
+
+The x86 family defaults to 8086 without a numeric coprocessor. It offers 8088,
+80186 and 80188 variants, native 16-bit registers and segment addressing over
+1 MiB of memory. Intel-order assembly supports segment overrides, near/far
+calls and returns, string operations and model-specific instructions. The
+80186/80188 add immediate shifts and PUSH, immediate IMUL, PUSHA/POPA,
+ENTER/LEAVE and BOUND.
+
+8086/8088 can use an optional 8087; 80186/80188 additionally offer the 80187,
+with the 8087 connection labeled as using an 82188. Coprocessors add an eight-entry
+80-bit register stack, control/status state and floating-point examples.
+The matching Mandelbrot port follows the selected coprocessor. A THRAX monitor
+uses `INT 0x80`; limited DOS character-output and exit calls are also accepted.
+PC devices, external interrupts and bus/prefetch timing are not modeled. See the
+[x86 notes](src/architectures/i8086/README.md) for segment-boundary behavior,
+coprocessor instructions and numerical limits.
+
+### TI TMS9900
+
+The TMS9900 is a 16-bit, big-endian CPU with 64 KiB of memory. Its registers
+are actual RAM words addressed through WP, so memory and register edits refer
+to the same state. Native support includes word/byte arithmetic, addressing,
+shifts, branches, unsigned MPY/DIV and workspace context switching through
+BLWP, XOP and RTWP.
+
+Assembly accepts TI operands, `>1234` hexadecimal notation and shared data
+and include directives. An uninstalled XOP 15 vector selects the THRAX console
+monitor; installed vectors retain native dispatch. CRU instructions/devices,
+X execution, external interrupts and cycle timing are absent. See the
+[TMS9900 notes](src/architectures/tms9900/README.md) for workspace, vector and
+assembler details.
+
+### SPARC V8
+
+SPARC V8 provides 32-bit integer execution, eight overlapping register windows
+and 1 MiB of big-endian RAM. Native delayed/annulled branches, calls,
+SAVE/RESTORE, Y multiply/divide and memory operations are implemented. The
+always-enabled FPU supplies 32 single registers, paired doubles and FSR,
+with single/double arithmetic, comparisons, conversions and floating branches.
+Arithmetic follows the selected FSR rounding mode.
+
+Assembly includes conventional synthetic instructions and `%hi`/`%lo` expressions.
+A THRAX monitor uses `ta 0x10`. Quad-precision execution, V9, ASI addressing,
+privileged trap handling, automatic register-window spilling, devices and
+transfers inside another transfer's delay slot are not implemented. See the
+[SPARC notes](src/architectures/sparc/README.md) for window management,
+floating-point exceptions and delay-slot restrictions.
+
+### SuperH (SH-1 and SH-2)
+
+The SuperH family defaults to SH-2 and also offers SH-1. Both have 32-bit
+registers, 16-bit instructions and 1 MiB of big-endian RAM. They implement
+integer arithmetic, shifts, native delayed control flow, special-register
+transfers, stepwise division and multiply/accumulate. SH-2 adds long products,
+MAC.L and its additional branch forms; SH-1 rejects those encodings.
+
+Assembly supports native operands, PC-relative literal loads and shared source
+directives. Multiply and MAC use exact intermediates, including native saturation.
+SH-2A/SH-2E extensions and floating point, native exception/interrupt delivery,
+devices and cycle timing are not supplied. See the
+[SuperH notes](src/architectures/sh/README.md) for variant differences and the
+THRAX monitor ABI.
+
+### DEC VAX (VAX-11/780 and MicroVAX II)
+
+VAX defaults to the VAX-11/780, with MicroVAX II variants with or without the
+78132 FPU. It has 32-bit registers and 1 MiB of little-endian physical memory,
+all general addressing modes, integer/bit-field/string operations and native
+CALLS/CALLG/RET frames. Floating-point support uses DEC F/D/G/H formats and
+rounding; MicroVAX II excludes H and octaword operations, and its FPU-less
+variant additionally rejects F/D/G instructions.
+
+The assembler accepts VAX MACRO syntax, native floating constants and data
+directives. `CHMK` invokes the THRAX console monitor. Decimal strings, queue
+operations and several complex instructions are unimplemented, as are memory
+management, native exception vectors and interrupts. See the
+[VAX notes](src/architectures/vax/README.md) for instruction coverage, model
+gating and assembler syntax.
+
+### DEC PDP-11
+
+PDP-11 defaults to the 11/40, with 11/20, 11/45, 11/70 and LSI-11/23 models.
+The CPU has a 64 KiB little-endian physical address space, all eight addressing
+modes and model-specific instruction availability. The 11/40 adds EIS and
+related operations; compatible models offer KE11-F FIS or FP11 floating point.
+The debugger defaults to octal, and floating-point views use native DEC formats.
+
+Assembly follows MACRO-11 conventions, including octal numbers, local labels
+and floating data directives. Native traps dispatch through guest vectors;
+an empty EMT vector enables the THRAX console monitor, and a console DL11
+supports output. MMU, user/supervisor modes, external interrupts and other
+devices are not modeled. See the [PDP-11 notes](src/architectures/pdp11/README.md)
+for model/FPU combinations, trap behavior and assembler limits.
+
+### IBM System/360 and System/370
+
+The IBM family defaults to System/360 Model 50/65, with Model 30 and System/370
+variants. It models 1 MiB of the 24-bit, big-endian address space, general
+registers, a BC-mode PSW and EBCDIC text. Model 30 offers optional decimal and
+floating-point features; Model 50/65 includes both. System/370 adds long-string
+and other instructions, extended hexadecimal floating point and relaxed data
+alignment.
+
+The assembler uses IBM source layout, USING-based address resolution, literals,
+sections and native decimal/hexadecimal floating constants. OS/360-style linkage
+and a small set of SVC monitor calls support the examples. Privileged and I/O
+instructions, interruption handlers, storage protection and DAT are not
+implemented. See the [System/360 and System/370 notes](src/architectures/s360/README.md)
+for feature availability, assembler syntax and program-interruption behavior.
+
+### Shared debugger and tools
+
+All CPU families use the common register, memory, call-stack, history, console,
+symbol and example views. Compatible variants reuse example sources; native
+ports supply the differences in instruction set, calling conventions and I/O.
+Statistics, profile, cache, branch-history and memory-reference tools consume
+native execution events through shared adapters. History retains native typed
+columns under the common entry limit and memory budget.
+
+Pipeline availability and timing assumptions are documented in the
+[pipeline model notes](docs/pipeline-models.md); MIPS supplies the X-Ray panel.
+The [performance measurements](docs/new-cpu-benchmarks.md) describe history and
+observer costs. Each family's detailed notes state its instruction coverage,
+monitor ABI, device support and timing limits.
 
 ### CPU family defaults
 
@@ -528,16 +699,6 @@ active tab or filename. Missing ports leave the current source in place.
 Destination bitmap settings and required windows are applied through the same
 shared load controller. Native workspace saves retain links for unchanged
 examples; ordinary imported files are never identified by matching text alone.
-
-The x86 CPU selector and math-coprocessor selector are independent. Enabling the
-8087 exposes its register bank and a floating-point example, without replacing
-integer or fixed-point ports. Requirements appear in the shared example menu.
-80186/80188 reuse the 8086 catalog with a native immediate-IMUL Factorial port.
-The generic mixed-width register adapter presents exact 80-bit values over
-explicit u32 history columns. With no coprocessor selected, x86 retains its
-14-word register schema; the 8087 configuration stores 46 words. The one-million
-entry history target and 256 MiB typed-buffer budget still apply. See the
-[x86 scope and numerical limits](src/architectures/i8086/README.md).
 
 ### Files, Folders and Links
 The workspace autosaves to the browser as you type, so a reload picks up where you
