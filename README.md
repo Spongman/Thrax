@@ -663,11 +663,11 @@ support for an ISA does not imply a complete board or every optional extension.
 | Motorola 68k | MC68000 | MC68010, MC68020 |
 | Motorola 6800 family | 6800 | 6809, 68HC11 |
 | Intel MCS-51 | 8051 | — |
-| PowerPC | 32-bit integer PowerPC | — |
-| DEC Alpha | Alpha integer core with BWX | — |
-| Intel x86 | 8086, no numeric coprocessor | 8088, 80186, 80188; independent optional 8087 |
+| PowerPC | 32-bit PowerPC with FPU | — |
+| DEC Alpha | Alpha with BWX, FIX and IEEE S/T floating point | — |
+| Intel x86 | 8086, no numeric coprocessor | 8088, 80186, 80188; optional 8087, or 80187 with 80186/80188 |
 | TI | TMS9900 | — |
-| SPARC | SPARC V8 integer core | — |
+| SPARC | SPARC V8 with single/double FPU | — |
 | SuperH | SH-2 | SH-1 |
 | DEC VAX | VAX-11/780 | MicroVAX II with or without the 78132 FPU |
 | DEC PDP-11 | PDP-11/40 | PDP-11/20; 11/40 with KE11-F FIS; 11/45 and 11/70 or LSI-11/23, each with or without FP11 |
