@@ -18,6 +18,7 @@ import { manifest as tms9900Manifest } from './tms9900/manifest'
 import { manifest as sparcManifest } from './sparc/manifest'
 import { manifest as shManifest } from './sh/manifest'
 import { manifest as pdp11Manifest } from './pdp11/manifest'
+import { manifest as vaxManifest } from './vax/manifest'
 import type { TargetSettings } from '../core/settings'
 
 export type TargetSettingsSelector = (definition: ArchitectureDefinition<unknown>) => TargetSettings
@@ -65,6 +66,7 @@ const loaders: Record<string, Loader<ArchitectureServices>> = {
 	sparc: () => import('./sparc'),
 	sh: () => import('./sh'),
 	pdp11: () => import('./pdp11'),
+	vax: () => import('./vax'),
 }
 
 const manifests: Readonly<Record<string, ArchitectureManifest>> = {
@@ -85,6 +87,7 @@ const manifests: Readonly<Record<string, ArchitectureManifest>> = {
 	sparc: sparcManifest,
 	sh: shManifest,
 	pdp11: pdp11Manifest,
+	vax: vaxManifest,
 }
 
 /** Ids of every architecture the catalog can load. */

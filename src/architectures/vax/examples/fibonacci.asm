@@ -1,0 +1,15 @@
+; Fibonacci
+; Compute F(10); prints 55.
+
+PRINT_INTEGER = 1
+
+	.TEXT
+START:	CLRL	R0			; F(0)
+	MOVL	#1, R1			; F(1)
+	MOVL	#10, R2
+10$:	ADDL3	R0, R1, R3
+	MOVL	R1, R0
+	MOVL	R3, R1
+	SOBGTR	R2, 10$
+	CHMK	#PRINT_INTEGER
+	HALT
