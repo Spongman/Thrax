@@ -12,6 +12,7 @@ import { manifest as z80Manifest } from './z80/manifest'
 import { manifest as m6800Manifest } from './m6800/manifest'
 import { manifest as i8051Manifest } from './i8051/manifest'
 import { manifest as alphaManifest } from './alpha/manifest'
+import { manifest as tms9900Manifest } from './tms9900/manifest'
 import type { TargetSettings } from '../core/settings'
 
 export type TargetSettingsSelector = (definition: ArchitectureDefinition<unknown>) => TargetSettings
@@ -53,6 +54,7 @@ const loaders: Record<string, Loader<ArchitectureServices>> = {
 	m6800: () => import('./m6800'),
 	i8051: () => import('./i8051'),
 	alpha: () => import('./alpha'),
+	tms9900: () => import('./tms9900'),
 }
 
 const manifests: Readonly<Record<string, ArchitectureManifest>> = {
@@ -67,6 +69,7 @@ const manifests: Readonly<Record<string, ArchitectureManifest>> = {
 	m6800: m6800Manifest,
 	i8051: i8051Manifest,
 	alpha: alphaManifest,
+	tms9900: tms9900Manifest,
 }
 
 /** Ids of every architecture the catalog can load. */
