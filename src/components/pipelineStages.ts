@@ -79,7 +79,8 @@ export function hazardsOf(rows: readonly PipelineRow[], at: number): Hazard[] {
 		})
 	}
 	if (row.flushed > 0) {
-		hazards.push({ kind: 'control', cycles: row.flushed, register: null, producer: rows[at - 1] ?? null })
+		const producer = row.flushedBy === undefined ? rows[at - 1] : rows.find(candidate => candidate.index === row.flushedBy)
+		hazards.push({ kind: 'control', cycles: row.flushed, register: null, producer: producer ?? null })
 	}
 	return hazards
 }
@@ -97,7 +98,7 @@ export const registerName = (register: number, names: readonly string[]) => name
 
 /** One line of the hazard report. */
 export function describeHazard(hazard: Hazard, names: readonly string[]): string {
-	if (hazard.kind === 'control') return 'Control: the branch or jump before it redirected the front end'
+	if (hazard.kind === 'control') return 'Control: an earlier branch or jump redirected the front end'
 	if (hazard.kind === 'structural') return 'Resource: an earlier instruction still occupies the next stage'
 	const register = hazard.register === null ? 'an earlier result' : registerName(hazard.register, names)
 	return hazard.kind === 'load-use'

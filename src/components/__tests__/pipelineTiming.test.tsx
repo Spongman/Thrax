@@ -42,3 +42,11 @@ it('bounds timeline rendering while retaining the full duration of a very long w
 	expect(markup).toContain('Later cycles')
 	expect(markup).toContain('Cycle 100002 (latest)')
 })
+
+it('explains absent timing without showing a previous CPU model or controls', () => {
+	const model = new PipelineModel()
+	model.onConfigure({ delayedBranching: false })
+	const markup = renderToStaticMarkup(<PipelineView pipeline={model.snapshot()} settings={DEFAULT_PIPELINE_SETTINGS} onChange={() => {}} />)
+	expect(markup).toContain('No pipeline timing model is supplied for this CPU model.')
+	expect(markup).not.toContain('<select')
+})

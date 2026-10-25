@@ -169,7 +169,7 @@ function HazardReport({ rows, names }: { rows: PipelineRow[]; names: readonly st
 }
 
 function PipelineView({ pipeline, settings, onChange }: Props) {
-	if (!pipeline.available) return <div className="dock-panel-unavailable">Not available for this architecture.</div>
+	if (!pipeline.available) return <div className="dock-panel-unavailable">No pipeline timing model is supplied for this CPU model.</div>
 	return <PipelineTool pipeline={pipeline} settings={settings} onChange={onChange} />
 }
 
@@ -197,6 +197,10 @@ function PipelineTool({ pipeline, settings, onChange }: Props) {
 
 	return (
 		<div className="tool">
+			{model?.name && <div className="pipeline-model-description">
+				<strong>{model.name}</strong>
+				{model.description && <span>{model.description}</span>}
+			</div>}
 			<div className="tool-settings">
 				{model && (
 					<>
@@ -266,7 +270,7 @@ function PipelineTool({ pipeline, settings, onChange }: Props) {
 						</div>
 						<div className="tool-metric">
 							<span className="tool-metric-value">{controlFlushes.toLocaleString()}</span>
-							<span className="tool-metric-label">Branch flushes</span>
+							<span className="tool-metric-label">Control refill cycles</span>
 						</div>
 						{predictions > 0 && (
 							<div className="tool-metric">
