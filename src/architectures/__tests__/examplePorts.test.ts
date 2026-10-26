@@ -28,61 +28,69 @@ function finish(machine: Machine, inputSupplied = false) {
 
 const answers: Record<string, number[]> = { sum: [8], factorial: [120], fibonacci: [55], loop: [1, 2, 3, 4, 5], bitwise: [8, 14, 6] }
 
-describe.each(knownArchitectures())('%s example ports', (id) => {
-	it('draws every Mandelbrot pixel from the fixed point reference', async () => {
-		const { definition } = await activateArchitecture(id)
-		for (const { settings, label } of variants(definition)) {
-			const variant = variantOf(definition, settings)
-			const services = definition.createServices()
-			try {
-				const example = variant.examples.mandelbrot
-				const context = `${id}/${label}/mandelbrot`
-				expect(example.tools, context).toContain('bitmap')
-				await services.prepare?.(settings)
-				const program = services.assemble({ files: [{ name: 'main.asm', code: example.code }], entries: ['main.asm'] }, settings)
-				expect(program.diagnostics.filter((d) => d.severity === 'error'), context).toEqual([])
-				const machine = services.createMachine(program, settings, { speed: null, historyLimit: 100 })
-				try {
-					for (let steps = 0; !machine.halted && steps < 10_000_000; steps++) machine.step()
-					expect(machine.halted, context).toBe(true)
-					const memory = machine.inspectMemory()
-					const base = services.profile(settings).dataBase!
-					const actual: (number | undefined)[] = [], expected: number[] = []
-					for (let row = 0; row < 32; row++) for (let col = 0; col < 32; col++) {
-						const highPrecision = id === 'armv8' && ['aarch64', 'aarch32'].includes(String(settings.executionState))
-						const scale = highPrecision ? 65536 : 256
-						const cx = -2 * scale + col * (highPrecision ? 6144 : 20)
-						const cy = (highPrecision ? -98304 : -320) + row * (highPrecision ? 6144 : 20)
-						let x = 0, y = 0, iteration = 0
-						for (; iteration < 16; iteration++) {
-							if (id === 's360' && (settings.cpuModel !== '360-30' || settings.floatingPoint !== false)) {
-								// Long hexadecimal floating point keeps at least 53 bits, like a double.
-								const xx = x * x, yy = y * y
-								if (xx + yy > 4) break
-								y = 2 * x * y - 1.25 + row * 2.5 / 32
-								x = xx - yy - 2 + col * 2.5 / 32
-							// The x86 coprocessor and Alpha ports are the MIPS binary32 program.
-							} else if (id === 'mips' || id === 'alpha' || id === 'powerpc' || id === 'sparc' || id === 'vax' && settings.fpu !== 'none' || id === 'pdp11' && settings.floatingPoint !== 'none' || (id === 'i8086' || id === 'm68k') && settings.coprocessor !== 'none' || id === 'riscv' && settings.float !== 'none' || highPrecision && settings.floatingPoint !== false) {
-								const xx = Math.fround(x * x), yy = Math.fround(y * y)
-								if (Math.fround(xx + yy) > 4) break
-								y = Math.fround(Math.fround(Math.fround(x * y) * 2) - 1.25 + row * 2.5 / 32)
-								x = Math.fround(Math.fround(xx - yy) - 2 + col * 2.5 / 32)
-							} else {
-								const xx = Math.trunc(x * x / scale), yy = Math.trunc(y * y / scale)
-								if (highPrecision ? xx + yy > 4 * scale : xx + yy >= 4 * scale) break
-								y = (highPrecision ? Math.floor(x * y / (scale / 2)) : 2 * Math.trunc(x * y / scale)) + cy
-								x = xx - yy + cx
-							}
-						}
-						expected.push(EXPECTED_MANDELBROT_PALETTE[iteration])
-						actual.push(pixelColor(memory, base + (row * 32 + col) * pixelBytes(services.profile(settings).bitmap), example.bitmap ?? services.profile(settings).bitmap, example.bitmapPalette))
-					}
-					expect(actual, context).toEqual(expected)
-				} finally { machine.dispose() }
-			} finally { services.dispose() }
-		}
-	}, 30_000)
+// Register each native variant separately: a family must not spend one timeout
+// budget running several multi-million-instruction renders in sequence.
+const mandelbrotCases = []
+for (const id of knownArchitectures()) {
+	const { definition } = await activateArchitecture(id)
+	for (const { settings, label } of variants(definition)) mandelbrotCases.push({ id, settings, label })
+}
 
+describe.each(mandelbrotCases)('$id/$label Mandelbrot port', ({ id, settings, label }) => {
+	it('draws every Mandelbrot pixel from its numerical reference', async () => {
+		const { definition } = await activateArchitecture(id)
+		const variant = variantOf(definition, settings)
+		const services = definition.createServices()
+		try {
+			const example = variant.examples.mandelbrot
+			const context = `${id}/${label}/mandelbrot`
+			expect(example.tools, context).toContain('bitmap')
+			await services.prepare?.(settings)
+			const program = services.assemble({ files: [{ name: 'main.asm', code: example.code }], entries: ['main.asm'] }, settings)
+			expect(program.diagnostics.filter((d) => d.severity === 'error'), context).toEqual([])
+			const machine = services.createMachine(program, settings, { speed: null, historyLimit: 100 })
+			try {
+				for (let steps = 0; !machine.halted && steps < 10_000_000; steps++) machine.step()
+				expect(machine.halted, context).toBe(true)
+				const memory = machine.inspectMemory()
+				const base = services.profile(settings).dataBase!
+				const actual: (number | undefined)[] = [], expected: number[] = []
+				for (let row = 0; row < 32; row++) for (let col = 0; col < 32; col++) {
+					const highPrecision = id === 'armv8' && ['aarch64', 'aarch32'].includes(String(settings.executionState))
+					const scale = highPrecision ? 65536 : 256
+					const cx = -2 * scale + col * (highPrecision ? 6144 : 20)
+					const cy = (highPrecision ? -98304 : -320) + row * (highPrecision ? 6144 : 20)
+					let x = 0, y = 0, iteration = 0
+					for (; iteration < 16; iteration++) {
+						if (id === 's360' && (settings.cpuModel !== '360-30' || settings.floatingPoint !== false)) {
+							// Long hexadecimal floating point keeps at least 53 bits, like a double.
+							const xx = x * x, yy = y * y
+							if (xx + yy > 4) break
+							y = 2 * x * y - 1.25 + row * 2.5 / 32
+							x = xx - yy - 2 + col * 2.5 / 32
+						// The x86 coprocessor and Alpha ports are the MIPS binary32 program.
+						} else if (id === 'mips' || id === 'alpha' || id === 'powerpc' || id === 'sparc' || id === 'vax' && settings.fpu !== 'none' || id === 'pdp11' && settings.floatingPoint !== 'none' || (id === 'i8086' || id === 'm68k') && settings.coprocessor !== 'none' || id === 'riscv' && settings.float !== 'none' || highPrecision && settings.floatingPoint !== false) {
+							const xx = Math.fround(x * x), yy = Math.fround(y * y)
+							if (Math.fround(xx + yy) > 4) break
+							y = Math.fround(Math.fround(Math.fround(x * y) * 2) - 1.25 + row * 2.5 / 32)
+							x = Math.fround(Math.fround(xx - yy) - 2 + col * 2.5 / 32)
+						} else {
+							const xx = Math.trunc(x * x / scale), yy = Math.trunc(y * y / scale)
+							if (highPrecision ? xx + yy > 4 * scale : xx + yy >= 4 * scale) break
+							y = (highPrecision ? Math.floor(x * y / (scale / 2)) : 2 * Math.trunc(x * y / scale)) + cy
+							x = xx - yy + cx
+						}
+					}
+					expected.push(EXPECTED_MANDELBROT_PALETTE[iteration])
+					actual.push(pixelColor(memory, base + (row * 32 + col) * pixelBytes(services.profile(settings).bitmap), example.bitmap ?? services.profile(settings).bitmap, example.bitmapPalette))
+				}
+				expect(actual, context).toEqual(expected)
+			} finally { machine.dispose() }
+		} finally { services.dispose() }
+	}, 30_000)
+})
+
+describe.each(knownArchitectures())('%s example ports', (id) => {
 	if (['avr', 'riscv', 'm68k', 'armv8'].includes(id)) it('computes Ackermann with nested calls and restores the call stack', async () => {
 		const { definition } = await activateArchitecture(id)
 		for (const { settings, label } of variants(definition)) {
