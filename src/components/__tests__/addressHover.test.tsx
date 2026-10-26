@@ -1,3 +1,4 @@
+import { m68kProfile, REGISTERS as M68K_REGISTERS } from '../../architectures/m68k/profile'
 import { historyFormatter } from '../../architectures/mips/history/format'
 import { WordMemory } from '../../architectures/mips/machine'
 import { mipsProfile } from '../../architectures/mips/profile'
@@ -81,6 +82,35 @@ describe('the address under the pointer', () => {
 		expect(markup.match(/address-hovered/g)).toHaveLength(1)
 	})
 
+	it('prefers a named symbol over other labels at the same address', () => {
+		const markup = renderToStaticMarkup(
+			<SymbolTableView symbols={{ globals: new Map([['first', ADDRESS], ['alias', ADDRESS]]), locals: new Map() }}
+				hoveredAddress={ADDRESS} hoveredSymbol="first" />
+		)
+		expect(markup.match(/address-hovered/g)).toHaveLength(1)
+		const row = /<tr class="address-hovered">([\s\S]*?)<\/tr>/.exec(markup)![1]
+		expect(row).toContain('first')
+		expect(row).not.toContain('alias')
+	})
+
+	it('uses the address to distinguish identical local names in different files', () => {
+		const markup = renderToStaticMarkup(
+			<SymbolTableView symbols={{ globals: new Map(), locals: new Map([
+				['first.asm', new Map([['loop', ADDRESS]])],
+				['second.asm', new Map([['loop', ADDRESS + 4]])],
+			]) }} hoveredAddress={ADDRESS} hoveredSymbol="loop" />
+		)
+		expect(markup.match(/address-hovered/g)).toHaveLength(1)
+	})
+
+	it('still finds every symbol at an address when no symbol is named', () => {
+		const markup = renderToStaticMarkup(
+			<SymbolTableView symbols={{ globals: new Map([['first', ADDRESS], ['alias', ADDRESS]]), locals: new Map() }}
+				hoveredAddress={ADDRESS} />
+		)
+		expect(markup.match(/address-hovered/g)).toHaveLength(2)
+	})
+
 	it('leaves the symbols alone when it names none of them', () => {
 		const markup = renderToStaticMarkup(<SymbolTableView symbols={symbols()} hoveredAddress={0x7fffeffc} />)
 		expect(markup).not.toContain('address-hovered')
@@ -118,6 +148,24 @@ describe('the register under the pointer', () => {
 		)
 		expect(markup.match(/register-hovered/g)?.length).toBe(1)
 		expect(/register-hovered[^>]*>[\s\S]{0,80}\$t0/.test(markup)).toBe(true)
+	})
+
+	it.each([0, 0x1000])('keeps a named register hover distinct from other registers holding %i', value => {
+		const markup = renderToStaticMarkup(
+			<RegisterView registers={{ ...m68kProfile.resetRegisters, D0: value, D1: value, A0: value }} descriptors={M68K_REGISTERS}
+				isAddress={m68kProfile.isMappedAddress} hoveredAddress={value} hoveredRegister="D0" />
+		)
+		expect(markup.match(/register-hovered/g)).toHaveLength(1)
+		expect(/register-hovered[^>]*>[\s\S]{0,80}D0/.test(markup)).toBe(true)
+		expect(markup).not.toContain('address-hovered')
+	})
+
+	it('still highlights registers holding valid address zero when no register is named', () => {
+		const markup = renderToStaticMarkup(
+			<RegisterView registers={m68kProfile.resetRegisters} descriptors={M68K_REGISTERS}
+				isAddress={m68kProfile.isMappedAddress} hoveredAddress={0} />
+		)
+		expect(markup.match(/address-hovered/g)!.length).toBeGreaterThan(1)
 	})
 
 	it('lights nothing when the register is on a tab this one is not showing', () => {

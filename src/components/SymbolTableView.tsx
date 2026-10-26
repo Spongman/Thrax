@@ -188,6 +188,9 @@ function SymbolTableView({ symbols, onSelectAddress, hoveredAddress = null, hove
 						<tbody>
 							{section.rows.map((row) => {
 								const source = sourceOf?.(row) ?? null
+								const highlighted = hoveredSymbol !== null
+									? row.name === hoveredSymbol && (hoveredAddress === null || row.address === hoveredAddress)
+									: row.address === hoveredAddress
 								// Both halves of a row go to the same two places, so they say so
 								// in the same words; a name with no line still has an address.
 								const goTitle = `Show ${formatAddress(row.address)} in memory${source ? ` and ${source.file}:${source.line} in the editor` : ''}`
@@ -202,7 +205,7 @@ function SymbolTableView({ symbols, onSelectAddress, hoveredAddress = null, hove
 										key={`${section.file ?? ''}:${row.name}`}
 										// The row is what the eye is looking for when an address is
 										// hovered elsewhere: it says which name stands for it.
-										className={row.address === hoveredAddress || row.name === hoveredSymbol ? 'address-hovered' : undefined}
+										className={highlighted ? 'address-hovered' : undefined}
 									>
 										{columns.address && (
 											<td className="symbol-address">

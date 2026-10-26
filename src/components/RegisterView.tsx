@@ -259,12 +259,13 @@ function RegisterPanel({ group, entries, flags, onToggle, selected, onSelect, on
 								// Navigation wins where both apply: the click that put the eye
 								// here is the more recent thing, and one colour reads better.
 								entry.id === flashed ? flashClass('navigation') : changed?.has(entry.id) ? flashClass('change') : '',
+								// A named register hover takes precedence over equal values.
 								// A register holding the hovered address is where that address
 								// appears in this window, so it lights like the word does.
 								// Unsigned on both sides: a register holds a signed word, and the
 								// address a panel points at is unsigned, so anything at or above
 								// 0x80000000 would never match itself.
-								pointed !== null && pointed !== undefined && address === pointed && isAddress(address) ? 'address-hovered' : '',
+								pointedRegister == null && pointed !== null && pointed !== undefined && address === pointed && isAddress(address) ? 'address-hovered' : '',
 								// Named from another window: the history points at a register
 								// by name, since the value it shows is the one from back then.
 								entry.id === pointedRegister ? 'register-hovered' : '',
